@@ -2981,3 +2981,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.74 user=34.72 sys=0.78 maxrss=983008`。
+
+## 2026-07-01：return int signextend256 cast coverage
+
+问题：
+
+前面已经覆盖了 `SIGNEXTEND` 的 byte index `0` 和 `1`。这次补 byte index `31`，也就是 `uint256 -> int256` 的上界覆盖，确认 `evmSignExtendType()` 对最大合法索引不会越界或算错位宽。当前输出已经正确，这次只固化测试。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_int_signextend256_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_int_signextend256_01.sol:1) 新增源码证据，源码第 5 行函数 `signextend256()` 返回 `int256(value)`。
+- [test/evm/solidity-source/ir/return_int_signextend256_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_int_signextend256_01.ll:1) 新增冻结 IR，核心是第 11 行 `evm_signextend(31, arg0)` 后单 word return。
+- [test/evm/solidity-source/expected/return_int_signextend256_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_int_signextend256_01.sol:1) 固化输出，函数体包含 `return int256(arg0);`，返回类型是 `int256 ret0`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:87) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_int_signextend256_01.ll -o /tmp/return_int_signextend256_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_int_signextend256_01.ll -o /tmp/return_int_signextend256_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-signextend256-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_int_signextend256_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function signextend256(uint256 arg0) public returns (int256 ret0) {
+        // block_0:
+        return int256(arg0);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 8.49 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.47 user=34.34 sys=0.67 maxrss=983916`。
