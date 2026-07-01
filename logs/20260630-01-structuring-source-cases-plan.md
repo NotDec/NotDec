@@ -579,6 +579,40 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-07-01 实现记录：新增 switch shared return tail 对照 case
+
+这轮新增 `switch_shared_return_tail`，覆盖非 loop switch 多个 case 赋值后共享 `sink(y); return y;` 的形状。这个 case 当前直接通过，输出没有 goto：
+
+```c
+switch (x) {
+  case 1: break;
+  case 2: y = 22; break;
+  default: y = -x; break;
+}
+sink(y);
+return y;
+```
+
+它说明普通 switch shared return tail 已能恢复；`switch_early_return` 里剩余的 goto 更集中在“terminal case 和共享尾部混在同一个 switch”这一类。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/cases/015_switch_shared_return_tail.c:3`：新增 switch 共享 return tail 对照 case。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:176`：接入 `switch_shared_return_tail`，要求 `goto<=0`、至少一个 `switch`。
+
+验证：
+
+```bash
+rm -rf /tmp/notdec-structuring-source-cases-shared-return-tail
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-shared-return-tail --keep-work-dir
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。按用户要求，本轮没有跑 fortune 时间 smoke。
+
 # 2026-06-30 实现记录：新增 switch early return 小 case
 
 这轮新增非 loop 的 `switch_early_return`，覆盖 switch 某个 case 直接 return、其它 case 共享尾部 `sink(y); return y;` 的形状。当前输出有两个明确坏点：
