@@ -1054,3 +1054,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.43 user=34.44 sys=0.79 maxrss=983096`。
+
+## 2026-07-01：return uint shift lhs and
+
+问题：
+
+`return_uint_shl_lhs_and_01` 的源码语义是 `return (value & mask) << shift;`。Solidity 中 shift 优先级高于按位与，左侧按位与必须保留括号，否则 `arg0 & arg1 << arg2` 会变成 `arg0 & (arg1 << arg2)`。当前 backend 已能打印正确括号，本次只固化这个行为。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_shl_lhs_and_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_shl_lhs_and_01.sol:1) 新增源码证据，源码第 6 行包含 `return (value & mask) << shift;`。
+- [test/evm/solidity-source/ir/return_uint_shl_lhs_and_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_shl_lhs_and_01.ll:9) 新增冻结 IR，`public_shllhsand_uint256_uint256_uint256__0x2a()` 先生成 `and`，再调用 `evm_shl`。
+- [test/evm/solidity-source/expected/return_uint_shl_lhs_and_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_shl_lhs_and_01.sol:1) 固化输出，函数体包含 `return (arg0 & arg1) << arg2;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:152) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_shl_lhs_and_01.ll -o /tmp/return_uint_shl_lhs_and_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_shl_lhs_and_01.ll -o /tmp/return_uint_shl_lhs_and_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-shl-lhs-and-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_shl_lhs_and_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function shllhsand(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return (arg0 & arg1) << arg2;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 3.10 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.34 user=34.61 sys=0.74 maxrss=985156`。
