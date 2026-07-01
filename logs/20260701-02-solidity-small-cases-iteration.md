@@ -3309,3 +3309,57 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.54 user=33.66 sys=0.75 maxrss=982648`。
+
+## 2026-07-01：apehex USDC rate provider constants runtime case
+
+问题：
+
+apehex 候选里 `USDCRateProvider` 是一个很小的 runtime bytecode 真实源码样例，源码语义是两个 public constant getter：`kUSDPerToken = 1 ether` 和 `tokenPerkUSD = 1_000_000`。当前输出已经能稳定打印两个常量返回值和 fallback revert，这次只固化这个真实样例。
+
+改动：
+
+- [test/evm/solidity-source/cases/apehex_usdc_rate_provider_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/apehex_usdc_rate_provider_01.sol:1) 固化 apehex 源码证据，来自 `hex/ethereum/cleaned/0064.parquet` 第 936 行，runtime 150 bytes。
+- [test/evm/solidity-source/bytecode/apehex_usdc_rate_provider_01.hex](/sn640/NotDec/test/evm/solidity-source/bytecode/apehex_usdc_rate_provider_01.hex:1) 固化 runtime bytecode。
+- [test/evm/solidity-source/ir/apehex_usdc_rate_provider_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/apehex_usdc_rate_provider_01.ll:1) 固化 evm2llvm 生成的 LLVM IR。
+- [test/evm/solidity-source/expected/apehex_usdc_rate_provider_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/apehex_usdc_rate_provider_01.sol:1) 固化当前输出，包含 `return 1000000000000000000;` 和 `return 1000000;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:463) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py /tmp/notdec-apehex-usdc-rate/runtime.hex -o /tmp/notdec-apehex-usdc-rate/usdc_rate.ll --gigahorse-dir /sn640/gigahorse-toolchain --evm2llvm external/NotDec-evm2llvm/build/bin/evm2llvm --work-dir /tmp/notdec-evm2llvm-usdc-rate
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/apehex_usdc_rate_provider_01.ll -o /tmp/apehex_usdc_rate_provider_01.bc
+./build/bin/notdec /tmp/notdec-apehex-usdc-rate/usdc_rate.ll -o /tmp/notdec-apehex-usdc-rate/usdc_rate.before.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-usdc-rate-provider-smoke.sol --tr-level=2
+```
+
+结果：
+
+`apehex_usdc_rate_provider_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function public_0x33891fb7() public returns (uint256 ret0) {
+        // block_0:
+        return 1000000000000000000;
+    }
+
+    function public_0x62321e8e() public returns (uint256 ret0) {
+        // block_0:
+        return 1000000;
+    }
+
+    function fallback() public {
+        // block_0:
+        revert(); // empty
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 10.07 秒；`notdec.evm.solidity_rewrite` 通过，用时 99.93 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.53 user=33.62 sys=0.71 maxrss=983160`。
