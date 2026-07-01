@@ -1266,3 +1266,62 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 ```
 
 结果：全部通过，CTest 5 个测试用时 4.64s。按用户要求，这轮不跑 fortune 时间 smoke。
+
+# 2026-07-01 实现记录：内联 switch fallthrough case target
+
+这轮继续收掉 `switch_continue_latch` 剩余问题。坏形状是 `default:` 里只有
+`continue;`，但这个 continue 的目标正是该 default 原始 CFG target；该 target
+是只有一个前驱的 fallthrough block，里面有 `sink(total)`，再落到 switch 后面的
+共享 latch。直接渲染成 C 的 `continue` 会跳过这段 fallthrough 语句。
+
+本轮采用窄规则：只在 switch case/default 的结构体是单个 targeted continue，
+且 continue 目标等于这个 label 的原始 CFG target，并且目标 block 是单前驱
+fallthrough 且有语句时，把目标 block 的语句内联到该 case，末尾补一个 switch
+`break`。这样保留 switch 后共享 latch 的执行顺序，同时避免扩大普通 continue 的
+渲染规则。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:54`：
+  `SwitchBodyLabel` 增加 `Target`，保存 case/default label chain 的原始 CFG target。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:800`：
+  新增 `singleContinueTarget()`，只识别单个 continue 或只包一层 sequence 的 continue。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:816`：
+  新增 `renderSwitchFallthroughCaseTarget()`，只内联单前驱 fallthrough block，并在末尾
+  追加 `break`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:836`：
+  新增 `renderSwitchCaseBody()`，把上述规则限制在 switch case/default body 渲染阶段。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:1341`：
+  `AppendSwitchLabel()` 记录 `{Label, Body, Target}`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:1361`：
+  switch case/default 改用 `renderSwitchCaseBody()`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:132`：
+  `switch_continue_latch` 去掉 xfail，保留 `goto=0`、`while=1` 和函数体 `sink(` oracle。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-switch-inline-final2
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-switch-inline-final2 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+git -C external/NotDec-llvm2c diff --check
+git diff --check
+```
+
+结果：全部通过，CTest 5 个测试用时约 4.69s。按用户最新要求，这轮没有跑 fortune
+时间 smoke，后续这条 source-cases 线也不再测 fortune 时间。
+
+`switch_continue_latch` 当前输出为 `goto=0`、`while=1`、`switch=1`，`default:`
+里能看到函数体 `sink(...)`，并且不再出现 `default: { continue; }`。剩余 xfail
+只剩 `nested_loop_break_continue`，它更像 DemotePHI critical edge / nested loop
+region split 的小 case，需要继续拆更小测试。
+
+评分：
+
+- 实现效果：8/10。修掉一个明确 xfail，并把缺失的函数体 `sink` 恢复出来。
+- 复杂度：4/10。只在 switch case body 渲染时生效，条件较窄，没有改全局 continue。
+- 维护成本：4/10。规则依赖 CFG target 和单前驱 fallthrough，后续如果结构树层直接生成
+  正确 case body，可以删除这段 renderer 兜底。
