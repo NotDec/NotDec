@@ -2798,3 +2798,50 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.80 user=34.85 sys=0.72 maxrss=982328`。
+
+## 2026-07-01：return int signed modulo args
+
+问题：
+
+`return_int_smod_args_01` 的源码语义是 `return a % b;`，参数和返回值都是 `int256`。修复前 `BodyBuilder` 不认识 `evm_smod`，函数体退成 `return remainder;`；返回类型也还是默认 `uint256 ret0`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:408) 在 `evmBinaryOperatorText()` 中把 `evm_smod` 打印成 `%`。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:51) 将上一轮的 signed return 判断改成 `isSignedArithmeticWord()`，同时识别 `evm_sdiv` 和 `evm_smod`。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:113) 将 `returnsSingleSignedDivisionWord()` 改成 `returnsSingleSignedArithmeticWord()`，仍然只处理同一 basic block 里单 word ABI return。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:269) 在 `Reader::readReturns()` 中复用 signed arithmetic 判断，把单 word `evm_smod` 返回类型打印成 `int256`。
+- [test/evm/solidity-source/cases/return_int_smod_args_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_int_smod_args_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_int_smod_args_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_int_smod_args_01.ll:1) 新增冻结 IR，核心是 `evm_smod(arg0, arg1)` 后单 word return。
+- [test/evm/solidity-source/expected/return_int_smod_args_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_int_smod_args_01.sol:1) 固化输出，函数体包含 `return arg0 % arg1;`，返回类型是 `int256 ret0`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:63) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_int_smod_args_01.ll -o /tmp/return_int_smod_args_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_int_smod_args_01.ll -o /tmp/return_int_smod_args_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-smod-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_int_smod_args_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function smod(int256 arg0, int256 arg1) public returns (int256 ret0) {
+        // block_0:
+        return arg0 % arg1;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 7.96 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.65 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.78 user=34.75 sys=0.76 maxrss=955824`。
