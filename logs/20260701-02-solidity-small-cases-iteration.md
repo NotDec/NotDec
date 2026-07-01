@@ -264,3 +264,48 @@ contract Decompiled {
 性能：
 
 只新增 source case 和 expected，没有改代码，未跑性能 smoke。
+
+## 2026-07-01：return uint division
+
+问题：
+
+`return_uint_div_args_01` 的源码语义是 `return a / b;`。EVM IR 里 unsigned division 是 `evm_div(arg0, arg1)` helper。修复前单 word return 规则能找到返回值，但 `formatReturnValue()` 不认识 `evm_div`，只能打印 `return quotient;`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:330) 新增 `evmBinaryOperatorText()`，先把 `evm_div` 映射成 Solidity `/`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:370) 扩展 `formatReturnValue()`，返回值是两参数 EVM helper call 时按二元表达式打印。
+- [test/evm/solidity-source/cases/return_uint_div_args_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_div_args_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_div_args_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_div_args_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_div_args_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_div_args_01.sol:1) 固化输出，函数体包含 `return arg0 / arg1;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:44) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_div_args_01.ll -o /tmp/return_uint_div_args_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_div_args_01.ll -o /tmp/return_uint_div_args_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-div-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_div_args_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function div(uint256 arg0, uint256 arg1) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 / arg1;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 1.02 秒；`notdec.evm.solidity_rewrite` 通过，用时 101.14 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.80 user=34.64 sys=0.77 maxrss=986840`。
