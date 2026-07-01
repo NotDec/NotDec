@@ -3104,3 +3104,63 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.89 user=33.95 sys=0.74 maxrss=981260`。
+
+## 2026-07-01：apehex indexed event topic runtime case
+
+问题：
+
+apehex 候选里 `SimpleEmitter.emitTestEvent()` 是一个很小的 runtime bytecode 真实源码样例，源码语义是 `emit TestEvent(msg.sender)`。修复前 Solidity 输出已经能识别 `LOG2` 的 topic0 并声明一个 fallback event，但 event 声明没有参数，emit 语句也没有把 indexed topic 参数打印出来。
+
+改动：
+
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/AST/Nodes.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/AST/Nodes.h:18) 给 `Parameter` 增加 `Indexed` 标记，用于 event 参数打印 `indexed`。
+- [external/NotDec-llvm2c/lib/Solidity/Printer.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Printer.cpp:97) 在 `Printer::printParameters()` 里输出 `indexed` 参数修饰符。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:309) 扩展 `evmEnvBuiltinName()`，把 `evm_caller` 打印成 `msg.sender`。
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h:36) 和 [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:960) 新增 `BodyBuilder::getEventTopicArguments()`，把 `evm_logN` 的 topic0 之后参数作为 indexed event 参数打印。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:1008) 更新 `formatEventStatement()`，输出 `emit Event(...args...)`。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:40) 新增 `eventTopicParameters()`，按 topic 参数生成 event 声明；`evm_caller` 暂按 `address indexed`，其他 topic 保守按 `uint256 indexed`。
+- [test/evm/solidity-source/cases/apehex_simple_emitter_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/apehex_simple_emitter_01.sol:1) 固化 apehex 源码证据，来自 `hex/ethereum/cleaned/0064.parquet` 第 891 行，runtime 152 bytes。
+- [test/evm/solidity-source/bytecode/apehex_simple_emitter_01.hex](/sn640/NotDec/test/evm/solidity-source/bytecode/apehex_simple_emitter_01.hex:1) 固化 runtime bytecode。
+- [test/evm/solidity-source/ir/apehex_simple_emitter_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/apehex_simple_emitter_01.ll:1) 固化 evm2llvm 生成的 LLVM IR。
+- [test/evm/solidity-source/expected/apehex_simple_emitter_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/apehex_simple_emitter_01.sol:1) 固化当前可接受输出，event 声明包含 `address indexed arg0`，emit 语句包含 `msg.sender`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:435) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+python3 scripts/apehex-solidity-source-candidates.py --limit 120 --output /tmp/apehex-solidity-candidates-next.csv --export-dir /tmp/apehex-solidity-candidates-next
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py /tmp/notdec-apehex-simple-emitter/runtime.hex -o /tmp/notdec-apehex-simple-emitter/simple_emitter.ll --gigahorse-dir /sn640/gigahorse-toolchain --evm2llvm external/NotDec-evm2llvm/build/bin/evm2llvm --work-dir /tmp/notdec-evm2llvm-simple-emitter
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/apehex_simple_emitter_01.ll -o /tmp/apehex_simple_emitter_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec /tmp/notdec-apehex-simple-emitter/simple_emitter.ll -o /tmp/notdec-apehex-simple-emitter/simple_emitter.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-simple-emitter-smoke.sol --tr-level=2
+```
+
+结果：
+
+`apehex_simple_emitter_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    event Event_0xAB77F9000C19702A713E62164A239E3764DDE2BA5265C7551F9A49E0D304530D(address indexed arg0);
+
+    function public_0x3fd958b7() public {
+        // block_0:
+        emit Event_0xAB77F9000C19702A713E62164A239E3764DDE2BA5265C7551F9A49E0D304530D(msg.sender); // TODO: recover event signature
+        // TODO: recover remaining body
+    }
+
+    function fallback() public {
+        // block_0:
+        revert(); // empty
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 9.00 秒；`notdec.evm.solidity_rewrite` 通过，用时 99.54 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.79 user=33.91 sys=0.70 maxrss=981968`。
