@@ -309,3 +309,47 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.80 user=34.64 sys=0.77 maxrss=986840`。
+
+## 2026-07-01：return uint modulo
+
+问题：
+
+`return_uint_mod_args_01` 的源码语义是 `return a % b;`。EVM IR 里 unsigned modulo 是 `evm_mod(arg0, arg1)` helper。修复前 `formatReturnValue()` 不认识 `evm_mod`，只能打印 `return remainder;`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:330) 扩展 `evmBinaryOperatorText()`，把 `evm_mod` 映射成 Solidity `%`。
+- [test/evm/solidity-source/cases/return_uint_mod_args_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_mod_args_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_mod_args_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_mod_args_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_mod_args_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_mod_args_01.sol:1) 固化输出，函数体包含 `return arg0 % arg1;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:50) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_mod_args_01.ll -o /tmp/return_uint_mod_args_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_mod_args_01.ll -o /tmp/return_uint_mod_args_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-mod-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_mod_args_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function mod(uint256 arg0, uint256 arg1) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 % arg1;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 1.13 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.92 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.90 user=34.96 sys=0.72 maxrss=984356`。
