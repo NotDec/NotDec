@@ -613,6 +613,39 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。按用户要求，本轮没有跑 fortune 时间 smoke。
 
+# 2026-07-01 实现记录：修 mixed terminal switch case
+
+这轮修掉 `switch_early_return` 剩余的 goto。问题形状是 switch 里一部分 case 直接进入 terminal return，一部分 case 进入共享 follow。之前 `reduceSwitchOnce()` 只接受“所有非 follow case 都流向同一个 follow”，不接受 terminal case 混在里面，于是 case 2/default 会 goto 到 case 1 里的共享尾部 label。
+
+这次只放宽 switch reducer 的成员检查：当某个 switch target 是 `Return` / `Unreachable` terminal block 时，允许它作为 case body 加入 switch；其它非 terminal target 仍必须有唯一后继且后继等于 follow。这样不会改变 loop/switch latch 的复杂语义。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:569`：`reduceSwitchOnce()` 计算 switch target 的 tail block。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:571`：新增 `TargetIsTerminal` 判断，只把 `Return` / `Unreachable` 当作 terminal case。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:577`：非 terminal case 仍要求 `succ == follow`，terminal case 不再触发 invalid。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:163`：去掉 `switch_early_return` 的 xfail，固定为正常通过 case。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+python3 -m py_compile external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py
+rm -rf /tmp/notdec-structuring-source-cases-mixed-terminal-switch-final
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-mixed-terminal-switch-final --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`switch_early_return` 当前 `goto=0`，输出为 switch case 0 直接 return，其它 case break 到共享 `sink/return`。按用户要求，本轮没有跑 fortune 时间 smoke。
+
+评分：
+
+- 实现效果：8/10。修掉一个 xfail，并把 mixed terminal switch 固定为正常通过。
+- 复杂度：3/10。只放宽 switch reducer 的成员判断，仍保留非 terminal follow 约束。
+- 维护成本：3/10。规则只针对 terminal block，后续 shared tail 复制或更复杂 PHI 还需单独处理。
+
 # 2026-06-30 实现记录：新增 switch early return 小 case
 
 这轮新增非 loop 的 `switch_early_return`，覆盖 switch 某个 case 直接 return、其它 case 共享尾部 `sink(y); return y;` 的形状。当前输出有两个明确坏点：
