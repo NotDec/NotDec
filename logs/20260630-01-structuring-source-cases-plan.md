@@ -993,3 +993,52 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 ```
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
+
+# 2026-07-01 实现记录：折叠 guarded goto over return
+
+这轮继续看 `nested_loop_break_only`。它的坏形状很明确：
+
+```c
+if (outer > 0) {
+    goto structured_block_2;
+}
+return 0;
+while (1) {
+  structured_block_2:
+    ...
+}
+```
+
+这里 goto 只是跳过一个 return，目标 label 在后面的 loop body 里。这个可以局部折成 `if (outer <= 0) return 0;`，不需要改 SAILR region 归约。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:198`：顶层函数体渲染后也执行 guarded goto fold。这里不跑顶层 unreachable cleanup，避免误删仍可由 goto 进入、但 label 藏在 loop 内的语句。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:836`：新增 `isRenderedReturn()`，识别 return、末尾 return 的 compound、then/else 都 return 的 if。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:854`：新增 `singleGotoStmt()`，只接受裸 goto 或只包含一个 goto 的 compound。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:865`：新增 `stmtContainsLabel()`，递归确认下一条语句里确实包含 goto 的目标 label。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:885`：新增 `foldGuardedGotoOverReturn()`，把 `if (cond) goto L; return; stmt-with-L` 改成 `if (!cond) return; stmt-with-L`。
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:930`：内层 compound 也执行同一个 fold，再执行原有 unreachable cleanup。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2556`：把 `FoldedPrefix` 的复制提前到 `Tree.addNode()` 前，补上之前漏提交的 vector 扩容后引用失效修复。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:175`：`nested_loop_break_only` 去掉 xfail，继续要求 `goto<=0`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-guarded-goto3
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-guarded-goto3 --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过，CTest 5 个测试用时 4.46s。按用户要求，这轮不再跑 fortune 时间 smoke。
+
+当前 `nested_loop_break_only` 输出从 `goto=1` 降到 `goto=0`。仍有一个重复的 `if (outer <= 0) return 0;`，但它不影响 goto oracle；去重需要更可靠的条件表达式等价判断，先不把这个小冗余和本轮 bug 修复混在一起。
+
+评分：
+
+- 实现效果：8/10。明确减少一个 xfail case 的 goto，并把 oracle 收紧为通过。
+- 复杂度：4/10。是 renderer 末端局部 fold，没有改 region 归约；新增 helper 都是窄匹配。
+- 维护成本：4/10。后续更好的方案是在结构树层消除这种 guard/terminal/label 形状，顺便处理重复 guard；现在先用小 case 锁住当前 bug。
