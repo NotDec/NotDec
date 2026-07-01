@@ -87,3 +87,49 @@
 结果：
 
 后续同类改动日志追加到本文件。已有历史不搬迁，保留在 `logs/20260630-01-evm-solidity-source-suite.md`。
+
+## 2026-07-01：return uint literal
+
+问题：
+
+`return_uint_literal_01` 的源码语义是 `return 7;`。修复前 `Reader` 能根据 `evm_return(..., 32)` 打印 `returns (uint256 ret0)`，但 `BodyBuilder` 不收集 `evm_return`，函数体只剩 `// block_0:`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:280) 新增常量整数、`inttoptr` 常量和返回值格式化 helper。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:312) 新增 `formatSingleWordReturn()`，只处理同一 basic block 内 `store i256 X` 到常量 offset，随后 `evm_return(..., offset, 32)` 的单 word 返回。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:367) 在 `collectStatements()` 中把匹配到的 `evm_return` 收集成 `return X;`。
+- [test/evm/solidity-source/cases/return_uint_literal_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_literal_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_literal_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_literal_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_literal_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_literal_01.sol:1) 固化输出，函数体现在包含 `return 7;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:20) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_literal_01.ll -o /tmp/return_uint_literal_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_literal_01.ll -o /tmp/return_uint_literal_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-return-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_literal_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function answer() public returns (uint256 ret0) {
+        // block_0:
+        return 7;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 0.54 秒；`notdec.evm.solidity_rewrite` 通过，用时 101.10 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.50 user=34.66 sys=0.73 maxrss=981444`。
