@@ -353,3 +353,48 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.90 user=34.96 sys=0.72 maxrss=984356`。
+
+## 2026-07-01：return uint left shift
+
+问题：
+
+`return_uint_shl_args_01` 的源码语义是 `return value << shift;`。EVM helper 是 `evm_shl(shift, value)`，参数顺序和 Solidity 表达式相反。修复前 `formatReturnValue()` 不认识 `evm_shl`，只能打印 `return shifted;`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:340) 新增 `evmShiftOperatorText()`，先把 `evm_shl` 映射成 Solidity `<<`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:383) 扩展 `formatReturnValue()`，打印 shift helper 时把 helper 参数反过来，输出 `value << shift`。
+- [test/evm/solidity-source/cases/return_uint_shl_args_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_shl_args_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_shl_args_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_shl_args_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_shl_args_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_shl_args_01.sol:1) 固化输出，函数体包含 `return arg0 << arg1;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:56) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_shl_args_01.ll -o /tmp/return_uint_shl_args_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_shl_args_01.ll -o /tmp/return_uint_shl_args_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-shl-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_shl_args_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function shl(uint256 arg0, uint256 arg1) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 << arg1;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 1.25 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.52 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.70 user=34.83 sys=0.81 maxrss=956376`。
