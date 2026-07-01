@@ -3418,3 +3418,46 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.67 user=33.88 sys=0.78 maxrss=983452`。
+
+## 2026-07-01：apehex gasleft runtime case
+
+问题：
+
+apehex 候选里 `BALANCE.Lgrgetckw()` 是一个小的 runtime bytecode 真实源码样例，目标语义是 `gasleft()` 返回当前剩余 gas。当前 Solidity backend 已经能把这个函数识别成单 word return，但表达式还打印成底层 helper `evm.gas`。这次只补 `GAS` 环境内建表达式的打印，并固化真实样例。样例里还有 `kill()` 的 `selfdestruct(tx.origin)` 分支，目前仍有未恢复 body，本次不扩大到 selfdestruct/control-flow 修复。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:316) 在 `evmEnvBuiltinName` 里新增 `evm_gas -> gasleft()`。
+- [test/evm/solidity-source/cases/apehex_gasleft_return_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/apehex_gasleft_return_01.sol:1) 固化 apehex 源码证据，来自 `hex/ethereum/cleaned/0022.parquet` 第 1223 行，runtime 242 bytes。
+- [test/evm/solidity-source/bytecode/apehex_gasleft_return_01.hex](/sn640/NotDec/test/evm/solidity-source/bytecode/apehex_gasleft_return_01.hex:1) 固化 runtime bytecode。
+- [test/evm/solidity-source/ir/apehex_gasleft_return_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/apehex_gasleft_return_01.ll:1) 固化 evm2llvm 生成的 LLVM IR。
+- [test/evm/solidity-source/expected/apehex_gasleft_return_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/apehex_gasleft_return_01.sol:1) 固化当前输出，`Lgrgetckw()` 对应 selector 返回 `gasleft()`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:478) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py /tmp/apehex-solidity-candidates-round6/0258_20289347_a4b364b056_f1ebfad57ae7/runtime.hex -o /tmp/notdec-apehex_gasleft_return_01/apehex_gasleft_return_01.ll --gigahorse-dir /sn640/gigahorse-toolchain --evm2llvm external/NotDec-evm2llvm/build/bin/evm2llvm --work-dir /tmp/notdec-evm2llvm-apehex_gasleft_return_01
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/apehex_gasleft_return_01.ll -o /tmp/apehex_gasleft_return_01.bc
+./build/bin/notdec /tmp/notdec-apehex_gasleft_return_01/apehex_gasleft_return_01.ll -o /tmp/notdec-apehex_gasleft_return_01/apehex_gasleft_return_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-gasleft-smoke.sol --tr-level=2
+```
+
+结果：
+
+`apehex_gasleft_return_01` 当前输出里的目标函数：
+
+```solidity
+function public_0xd8b30904() public returns (uint256 ret0) {
+    // block_0:
+    return gasleft();
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 10.71 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.26 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.37 user=33.64 sys=0.75 maxrss=985128`。
