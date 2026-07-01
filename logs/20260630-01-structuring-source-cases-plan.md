@@ -579,6 +579,39 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-07-01 实现记录：清理 if 双分支跳转后的死语句
+
+这轮继续处理 `nested_loop_break_continue` 的渲染层坏形状。输出里有：
+
+```c
+if (cmp222) {
+  break;
+} else {
+  continue;
+}
+dead_statements...
+```
+
+这种 if 的两个分支都会无条件离开当前 compound，后面的普通语句不可达。上一轮只识别单个 `continue` / `break` / `goto` / `return`，没有把这种 if 当作无条件跳转。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/notdec-llvm2c/StructuredGoto.cpp:813`：`isRenderedTransfer()` 增加递归判断，支持 compound 末尾跳转和 then/else 都跳转的 `IfStmt`。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:82`：`nested_loop_break_continue` 的 xfail 收紧为只允许 `expected goto<=0`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-if-transfer-final
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-if-transfer-final --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`nested_loop_break_continue` 当前从 `goto=2` 降到 `goto=1`，`if break/continue` 后死代码 pattern 不再触发。剩余 goto 是外层/内层 loop 区域拆分问题。按用户最新要求，本轮没有跑 fortune 时间 smoke。
+
 # 2026-07-01 实现记录：清理 rendered compound 死语句
 
 这轮处理 `switch_continue_latch` 里的一个明确坏形状：渲染结果中 `continue;` 后面还跟着普通语句，例如 `sink(...)`、赋值和 goto。结构树里已有的 cleanup 没覆盖到最终 C AST 语句列表，所以在 `renderCompound()` 生成 compound 前做一次保守过滤。
