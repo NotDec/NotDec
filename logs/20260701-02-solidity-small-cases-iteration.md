@@ -3260,3 +3260,52 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=29.41 user=33.72 sys=0.61 maxrss=983128`。
+
+## 2026-07-01：apehex maxWeight constant return runtime case
+
+问题：
+
+apehex 候选里 `LiquidityWeightFacet.maxWeight()` 是一个很小的 runtime bytecode 真实源码样例，源码语义是返回常量 `1e18`。当前输出已经能识别函数名、单 word return 和 fallback revert，这次只固化这个真实样例。
+
+改动：
+
+- [test/evm/solidity-source/cases/apehex_max_weight_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/apehex_max_weight_01.sol:1) 固化 apehex 源码证据，来自 `hex/ethereum/cleaned/0006.parquet` 第 348 行，runtime 146 bytes。
+- [test/evm/solidity-source/bytecode/apehex_max_weight_01.hex](/sn640/NotDec/test/evm/solidity-source/bytecode/apehex_max_weight_01.hex:1) 固化 runtime bytecode。
+- [test/evm/solidity-source/ir/apehex_max_weight_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/apehex_max_weight_01.ll:1) 固化 evm2llvm 生成的 LLVM IR。
+- [test/evm/solidity-source/expected/apehex_max_weight_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/apehex_max_weight_01.sol:1) 固化当前输出，包含 `return 1000000000000000000;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:457) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+python3 external/NotDec-evm2llvm/scripts/notdec-evm2llvm.py /tmp/notdec-apehex-maxweight/runtime.hex -o /tmp/notdec-apehex-maxweight/maxweight.ll --gigahorse-dir /sn640/gigahorse-toolchain --evm2llvm external/NotDec-evm2llvm/build/bin/evm2llvm --work-dir /tmp/notdec-evm2llvm-maxweight
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/apehex_max_weight_01.ll -o /tmp/apehex_max_weight_01.bc
+./build/bin/notdec /tmp/notdec-apehex-maxweight/maxweight.ll -o /tmp/notdec-apehex-maxweight/maxweight.before.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-max-weight-smoke.sol --tr-level=2
+```
+
+结果：
+
+`apehex_max_weight_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function fallback() public {
+        // block_0:
+        revert(); // empty
+    }
+
+    function maxWeight() public returns (uint256 ret0) {
+        // block_0:
+        return 1000000000000000000;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 9.83 秒；`notdec.evm.solidity_rewrite` 通过，用时 99.46 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.54 user=33.66 sys=0.75 maxrss=982648`。
