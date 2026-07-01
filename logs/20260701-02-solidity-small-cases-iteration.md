@@ -1904,3 +1904,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.51 user=34.58 sys=0.72 maxrss=980968`。
+
+## 2026-07-01：return bool ge uint
+
+问题：
+
+`return_bool_ge_uint_01` 的源码语义是 `return left >= right;`。前面已经固化了 unsigned `<`、`>` 和 `<=`，这里补 unsigned `>=`，确认 `icmp uge` 经过 `zext i1` 后能打印成 bool 返回表达式。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_bool_ge_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_bool_ge_uint_01.sol:1) 新增源码证据，源码第 5 行函数 `isge()` 在第 6 行返回 `left >= right`。
+- [test/evm/solidity-source/ir/return_bool_ge_uint_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_bool_ge_uint_01.ll:8) 新增冻结 IR，`public_isge_uint256_uint256__0x2a()` 第 10 行生成 `icmp uge`，第 11 行 `zext i1` 成 ABI word。
+- [test/evm/solidity-source/expected/return_bool_ge_uint_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_bool_ge_uint_01.sol:1) 固化输出，函数返回类型为 `bool`，第 4 行是 `return arg0 >= arg1;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:273) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_bool_ge_uint_01.ll -o /tmp/return_bool_ge_uint_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_bool_ge_uint_01.ll -o /tmp/return_bool_ge_uint_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-bool-ge-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_bool_ge_uint_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function isge(uint256 arg0, uint256 arg1) public returns (bool ret0) {
+        // block_0:
+        return arg0 >= arg1;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 5.48 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.23 user=34.39 sys=0.68 maxrss=985384`。

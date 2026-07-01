@@ -268,6 +268,12 @@
       "source": "cases/return_bool_le_uint_01.sol",
       "input": "ir/return_bool_le_uint_01.ll",
       "expected": "expected/return_bool_le_uint_01.sol"
+    },
+    {
+      "name": "return_bool_ge_uint_01",
+      "source": "cases/return_bool_ge_uint_01.sol",
+      "input": "ir/return_bool_ge_uint_01.ll",
+      "expected": "expected/return_bool_ge_uint_01.sol"
     }
   ]
 }
