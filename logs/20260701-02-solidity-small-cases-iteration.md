@@ -1,0 +1,89 @@
+# Solidity 小例子迭代记录
+
+## 原始需求
+
+新建一个logs下的文件负责介绍当前不断增加小例子，改进迭代Solidity结果的过程。后续的改动日志也记录到里面
+
+## 目标
+
+这条线按小 Solidity 源码推进反编译结果。每次只选一个很小的源码或一个很小的语义点，先看当前输出，再修后端或前面 EVM rewrite，输出足够稳定后放进自动测试。
+
+目标不是一次性恢复完整 Solidity，而是让每个已经修好的点都有固定样例和 expected，后面改代码时能自动发现退化。
+
+## 测试位置
+
+- 源码证据：`test/evm/solidity-source/cases/*.sol`
+- 可选 bytecode：`test/evm/solidity-source/bytecode/*.hex`
+- 冻结 IR：`test/evm/solidity-source/ir/*.ll`
+- 固化输出：`test/evm/solidity-source/expected/*.sol`
+- manifest：`test/evm/solidity-source/manifest.json`
+- runner：`test/run_evm_solidity_source_suite.py`
+- CTest：`notdec.evm.solidity_source`
+
+已有 suite 搭建和前两条 case 的历史记录在 `logs/20260630-01-evm-solidity-source-suite.md`。从这个文件开始，后续同类改动都追加到这里。
+
+## 迭代流程
+
+1. 选一个小源码，最好只有一个主要语义点，比如 `return`、`require`、简单 storage getter。
+2. 固定输入，优先用已经验证过的冻结 `.ll`。不要让测试依赖临时 solc、Gigahorse 或外部数据目录。
+3. 跑当前 `notdec`，看 `.sol` 输出里最明显的问题。
+4. 小范围修代码。优先修 Solidity backend；只有输入语义确实缺失时，才改 EVM rewrite 或前面 pass。
+5. 输出达到当前可接受程度后，把源码、IR、expected 和 manifest 一起固化。
+6. 跑 `notdec.evm.solidity_source`。影响 Solidity/storage rewrite 时，再跑 `notdec.evm.solidity_rewrite` 和 EVM 性能 smoke。
+7. 在本文件追加实现记录，写清楚改了哪里、验证命令和结果。
+
+## 接受标准
+
+- expected 不能只是“当前烂输出截图”。必须比修复前更接近源码语义。
+- 不确定的语义保留注释或低层 fallback，不硬猜成源码。
+- 一个 case 只承担一个主要检查点，避免 expected 变成难维护的大文件。
+- 后端打印层只消费已有 metadata、helper、HType 和 structuring 输出，不在打印层重做复杂分析。
+- 每次改动后关注性能。只影响 EVM Solidity/storage 链路时，默认用：
+
+```bash
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-smoke.sol --tr-level=2
+```
+
+## 记录格式
+
+后续每次追加一个小节，格式保持简单：
+
+````markdown
+## YYYY-MM-DD：一句话说明
+
+问题：
+
+改动：
+
+- `path:line` 说明改了哪个函数或文件。
+
+验证：
+
+```bash
+命令
+```
+
+结果：
+
+性能：
+````
+
+如果只是新增 expected 或文档，不需要写性能。涉及子模块时，先提交子模块，再提交顶层指针和本日志。
+
+## 2026-07-01：建立本记录
+
+问题：
+
+前面已经建立了 Solidity source suite，并开始按 `empty_runtime`、`revert_error_string_01` 这种小例子修输出，但后续实现记录还散在原始 suite 日志里。
+
+改动：
+
+- `logs/20260701-02-solidity-small-cases-iteration.md:1` 新建本文件，作为后续 Solidity 小例子迭代的主记录。
+
+验证：
+
+文档改动，未跑测试。
+
+结果：
+
+后续同类改动日志追加到本文件。已有历史不搬迁，保留在 `logs/20260630-01-evm-solidity-source-suite.md`。
