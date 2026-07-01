@@ -2892,3 +2892,51 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.48 user=34.43 sys=0.85 maxrss=984456`。
+
+## 2026-07-01：return int signextend8 cast
+
+问题：
+
+`return_int_signextend8_01` 的源码语义是 `return int8(value);`。EVM `SIGNEXTEND` 的第一个参数是字节索引，常量 `0` 表示把低 1 字节按符号位扩展。修复前 `BodyBuilder` 不认识 `evm_signextend`，函数体退成 `return extended;`；`Reader` 也只能把 `evm_sdiv/smod/sar` 这种 signed helper 返回识别成 `int256`，不能根据 `SIGNEXTEND` 的常量字节索引打印 `int8`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:447) 新增 `evmSignExtendType()`，只处理常量 byte index `0..31`，映射成 `int8..int256`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:628) 在 `formatReturnValue()` 中把 `evm_signextend(N, value)` 打印成 `intM(value)`。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:51) 新增 `signedReturnTypeForWord()`，让 signed helper 返回具体类型名；`evm_sdiv/smod/sar` 保持 `int256`，`evm_signextend` 根据常量 byte index 返回 `intM`。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:128) 新增 `singleSignedReturnType()`，沿用已有同一 basic block 内 `evm_return` 前 store 回溯规则。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:283) 在 `Reader::readReturns()` 中使用具体 signed 类型名，避免 `SIGNEXTEND` 一律退成 `int256` 或 `uint256`。
+- [test/evm/solidity-source/cases/return_int_signextend8_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_int_signextend8_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_int_signextend8_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_int_signextend8_01.ll:1) 新增冻结 IR，核心是 `evm_signextend(0, arg0)` 后单 word return。
+- [test/evm/solidity-source/expected/return_int_signextend8_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_int_signextend8_01.sol:1) 固化输出，函数体包含 `return int8(arg0);`，返回类型是 `int8 ret0`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:75) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_int_signextend8_01.ll -o /tmp/return_int_signextend8_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_int_signextend8_01.ll -o /tmp/return_int_signextend8_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-signextend8-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_int_signextend8_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function signextend8(uint8 arg0) public returns (int8 ret0) {
+        // block_0:
+        return int8(arg0);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 8.20 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.04 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.61 user=34.70 sys=0.78 maxrss=957764`。
