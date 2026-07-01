@@ -1013,3 +1013,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.22 user=34.43 sys=0.77 maxrss=984068`。
+
+## 2026-07-01：return uint shift rhs and
+
+问题：
+
+`return_uint_shl_rhs_and_01` 的源码语义是 `return value << (shift & mask);`。Solidity 中 shift 优先级高于按位与，如果输出成 `arg0 << arg1 & arg2`，语义会变成 `(arg0 << arg1) & arg2`。当前 backend 已能打印 RHS 括号，本次只固化这个行为。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_shl_rhs_and_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_shl_rhs_and_01.sol:1) 新增源码证据，源码第 6 行包含 `return value << (shift & mask);`。
+- [test/evm/solidity-source/ir/return_uint_shl_rhs_and_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_shl_rhs_and_01.ll:9) 新增冻结 IR，`public_shlrhsand_uint256_uint256_uint256__0x2a()` 先生成 `and`，再调用 `evm_shl`。
+- [test/evm/solidity-source/expected/return_uint_shl_rhs_and_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_shl_rhs_and_01.sol:1) 固化输出，函数体包含 `return arg0 << (arg1 & arg2);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:146) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_shl_rhs_and_01.ll -o /tmp/return_uint_shl_rhs_and_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_shl_rhs_and_01.ll -o /tmp/return_uint_shl_rhs_and_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-shl-rhs-and-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_shl_rhs_and_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function shlrhsand(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return arg0 << (arg1 & arg2);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 3.12 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.43 user=34.44 sys=0.79 maxrss=983096`。
