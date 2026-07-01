@@ -49,3 +49,23 @@ ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
 ```
 
 结果：全部通过，2 个 source case 总用时 0.44 秒。
+
+## 实现记录：终止语句后不再追加 TODO
+
+这次只修 `revert_error_string_01` 暴露出来的打印问题：函数体最后已经是确定终止语句时，不再额外打印 `// TODO: recover remaining body`。
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:96) 新增 `isTerminalStatement()`，目前只识别已经由 Solidity 后端打印出来的 `return`、`revert()` 和 `require(false, ...)`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:377) 调整 `BodyBuilder::readBody()`，没有 payload 时直接返回已有 fallback；最后一行不是确定终止语句时才追加 `// TODO: recover remaining body`。
+- [test/evm/solidity-source/expected/revert_error_string_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/revert_error_string_01.sol:1) 更新 expected，`fallback()` 保留 `revert(); // empty`，`run()` 保留 `require(false, "short");`，不再保留多余 TODO。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-todo-smoke.sol --tr-level=2
+./build/bin/notdec test/evm/solidity-source/ir/revert_error_string_01.ll -o /tmp/notdec-revert-error-string-01.sol --tr-level=2
+```
+
+结果：`notdec.evm.solidity_source` 通过，用时 0.46 秒；`notdec.evm.solidity_rewrite` 通过，用时 101.51 秒；EVM smoke 用时 `elapsed=30.15 user=34.27 sys=0.76 maxrss=982632`。直接生成的 `revert_error_string_01` 输出中，`revert()` 和 `require(false, "short")` 后面都不再有 body TODO。
