@@ -10,6 +10,12 @@
       "bytecode": "bytecode/empty_runtime.hex",
       "input": "ir/empty_runtime.ll",
       "expected": "expected/empty_runtime.sol"
+    },
+    {
+      "name": "revert_error_string_01",
+      "source": "cases/revert_error_string_01.sol",
+      "input": "ir/revert_error_string_01.ll",
+      "expected": "expected/revert_error_string_01.sol"
     }
   ]
 }

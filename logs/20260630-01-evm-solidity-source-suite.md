@@ -31,3 +31,21 @@ ctest --test-dir build -R 'notdec.evm.solidity_(source|rewrite)' --output-on-fai
 ## 性能和维护判断
 
 这次只新增测试 runner 和一个极小冻结 IR case，不改 pass pipeline、类型恢复或 backend 逻辑。默认 CTest 多一个 0.14 秒左右的测试，对现有链路性能没有影响。后续每修好一个小 Solidity 源码，再把源码、可选 bytecode、冻结 IR 和 expected 输出作为一条 case 加进来。
+
+## 实现记录：新增 revert string case
+
+按小用例继续补了一条更有语义的 Solidity source 回归：
+
+- [test/evm/solidity-source/cases/revert_error_string_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/revert_error_string_01.sol:1) 新增源码证据，核心语句是 `require(false, "short");`。
+- [test/evm/solidity-source/ir/revert_error_string_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/revert_error_string_01.ll:1) 复用已验证的冻结 EVM LLVM IR。
+- [test/evm/solidity-source/expected/revert_error_string_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/revert_error_string_01.sol:1) 固化当前后端输出。当前还保留 fallback 和 body TODO，但 `run()` 已能打印 `require(false, "short");`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:14) 把 `revert_error_string_01` 接入自动 suite。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/revert_error_string_01.ll -o /tmp/revert_error_string_01.bc
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+```
+
+结果：全部通过，2 个 source case 总用时 0.44 秒。
