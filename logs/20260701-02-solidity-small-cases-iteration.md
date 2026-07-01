@@ -577,3 +577,49 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.02 user=34.21 sys=0.68 maxrss=982272`。
+
+## 2026-07-01：return uint bitwise not
+
+问题：
+
+`return_uint_not_arg_01` 的源码语义是 `return ~value;`。冻结 IR 里 EVM `NOT` 是 `xor i256 %arg0, -1`。修复前 `formatReturnValue()` 会按普通 `^` 打印成 `return arg0 ^ 115792089237316195423570985008687907853269984665640564039457584007913129639935;`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:287) 新增 `isAllOnesConstant()`，识别 LLVM 常量里的全 1 位形。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:367) 新增 `bitwiseNotOperand()`，识别 `xor X, -1` 和 `xor -1, X`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:389) 扩展 `formatReturnValue()`，把该模式打印成 Solidity `~X`。
+- [test/evm/solidity-source/cases/return_uint_not_arg_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_not_arg_01.sol:1) 新增源码证据。
+- [test/evm/solidity-source/ir/return_uint_not_arg_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_not_arg_01.ll:1) 新增冻结 IR。
+- [test/evm/solidity-source/expected/return_uint_not_arg_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_not_arg_01.sol:1) 固化输出，函数体包含 `return ~arg0;`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:86) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_not_arg_01.ll -o /tmp/return_uint_not_arg_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_not_arg_01.ll -o /tmp/return_uint_not_arg_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-not-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_not_arg_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function bitnot(uint256 arg0) public returns (uint256 ret0) {
+        // block_0:
+        return ~arg0;
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 1.83 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.53 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.83 user=33.97 sys=0.65 maxrss=981888`。
