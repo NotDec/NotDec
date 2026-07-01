@@ -1218,3 +1218,48 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.00 user=34.15 sys=0.65 maxrss=982424`。
+
+## 2026-07-01：return uint addmod
+
+问题：
+
+`return_uint_addmod_args_01` 的源码语义是 `return addmod(left, right, modulus);`。冻结 IR 里 EVM `ADDMOD` 是三参数 helper `evm_addmod(arg0, arg1, arg2)`。修复前 `formatReturnValue()` 只处理二元 helper，当前输出退化成 `return result;`。
+
+改动：
+
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:377) 新增 `evmTernaryBuiltinName()`，先只把 `evm_addmod` 映射成 Solidity 内建函数 `addmod`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:452) 扩展 `formatReturnValue()`，三参数 call 命中 `evmTernaryBuiltinName()` 时打印成 `addmod(a, b, m)`。
+- [test/evm/solidity-source/cases/return_uint_addmod_args_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_addmod_args_01.sol:1) 新增源码证据，源码第 6 行包含 `return addmod(left, right, modulus);`。
+- [test/evm/solidity-source/ir/return_uint_addmod_args_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_addmod_args_01.ll:9) 新增冻结 IR，`public_addmodargs_uint256_uint256_uint256__0x2a()` 调用 `evm_addmod` 后返回。
+- [test/evm/solidity-source/expected/return_uint_addmod_args_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_addmod_args_01.sol:1) 固化输出，函数体包含 `return addmod(arg0, arg1, arg2);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:176) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_addmod_args_01.ll -o /tmp/return_uint_addmod_args_01.bc
+cmake --build ./build --target notdec -j4
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_addmod_args_01.ll -o /tmp/return_uint_addmod_args_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-addmod-smoke.sol --tr-level=2
+```
+
+结果：
+
+修复前 `return_uint_addmod_args_01` 输出 `return result;`。修复后输出：
+
+```solidity
+contract Decompiled {
+    function addmodargs(uint256 arg0, uint256 arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        return addmod(arg0, arg1, arg2);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 3.72 秒；`notdec.evm.solidity_rewrite` 通过，用时 101.15 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=31.15 user=35.22 sys=0.74 maxrss=985148`。
