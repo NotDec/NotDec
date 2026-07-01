@@ -1066,6 +1066,46 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过，CTest 5 个测试用时 4.64s。按用户要求，这轮不跑 fortune 时间 smoke。
 
+# 2026-07-01 实现记录：收紧 nested loop sink oracle
+
+这轮继续检查剩余 xfail，发现 `nested_loop_break_continue` 也有和
+`switch_continue_latch` 一样的 oracle 漏洞：manifest 里只要求 `contains:
+"sink("`，会被 `extern void sink(...)` 函数声明满足；但当前函数体里实际缺少
+`sink(total)` 调用。这个说明该 case 不只是 goto 没消掉，还可能丢了外层 latch
+之后的语句。
+
+改动：
+
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:85`：
+  `nested_loop_break_continue` 的 `xfail_exact` 新增缺少函数体 sink 的失败。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:90`：
+  新增 `regex_contains: "^\\s+sink\\("`，要求反编译函数体中出现缩进的
+  `sink(` 调用，避免声明误判。
+
+排查结论：
+
+- 对 `nested_loop_break_continue` 用 LLVM `reg2mem` 再跑后端时可以保留
+  `sink`，说明 `DemotePHIToStack2()` 把 PHI incoming store 插到 predecessor
+  terminator 前时，对 critical edge 的语义不够精确。
+- 尝试在 `DemotePhiPass::run()` 里拆带 PHI 目标的 critical edge，能暴露这个
+  问题，但会让多个已通过 source case 结构退化。本轮不提交这个实验改动，后续
+  需要用更小 IR/C case 单独规划 DemotePhi critical edge 修复。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-nested-sink-oracle
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-nested-sink-oracle --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+git -C external/NotDec-llvm2c diff --check
+```
+
+结果：全部通过，CTest 5 个测试用时 4.62s。按用户最新要求，这轮没有跑 fortune
+时间 smoke，后续这条 source-cases 线也不再测 fortune 时间。
+
 # 2026-07-01 实现记录：折叠 switch goto latch
 
 这轮继续处理 `switch_continue_latch`。当前坏形状是 `case 0` 先 `goto` 到 switch 后面的 label，label 后面其实是这个 case 自己的 latch，然后再 `continue`。这个形状可以用很窄的 renderer 后处理修掉：只在 switch 内唯一 goto 指向紧随 switch tail 里的 label，且这个 label 只有这一个 goto 入口时，把 label 后面的 tail 移回对应 case。
