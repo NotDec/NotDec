@@ -1095,3 +1095,44 @@ contract Decompiled {
 性能：
 
 EVM smoke 用时 `elapsed=30.34 user=34.61 sys=0.74 maxrss=985156`。
+
+## 2026-07-01：return uint bitwise not rhs add
+
+问题：
+
+`return_uint_not_rhs_add_01` 的源码语义是 `return ~(value + extra);`。EVM `NOT` 仍然是 `xor X, -1`，这里重点检查 `~` 的子表达式是加法时是否保留括号。当前 backend 已能打印 `~(arg0 + arg1)`，本次只固化这个行为。
+
+改动：
+
+- [test/evm/solidity-source/cases/return_uint_not_rhs_add_01.sol](/sn640/NotDec/test/evm/solidity-source/cases/return_uint_not_rhs_add_01.sol:1) 新增源码证据，源码第 6 行包含 `return ~(value + extra);`。
+- [test/evm/solidity-source/ir/return_uint_not_rhs_add_01.ll](/sn640/NotDec/test/evm/solidity-source/ir/return_uint_not_rhs_add_01.ll:8) 新增冻结 IR，`public_notrhsadd_uint256_uint256__0x2a()` 先生成 `add`，再用 `xor -1` 表达 `NOT`。
+- [test/evm/solidity-source/expected/return_uint_not_rhs_add_01.sol](/sn640/NotDec/test/evm/solidity-source/expected/return_uint_not_rhs_add_01.sol:1) 固化输出，函数体包含 `return ~(arg0 + arg1);`。
+- [test/evm/solidity-source/manifest.json](/sn640/NotDec/test/evm/solidity-source/manifest.json:158) 把新 case 接入 `notdec.evm.solidity_source`。
+
+验证：
+
+```bash
+./llvm-22.1.0.obj/bin/llvm-as test/evm/solidity-source/ir/return_uint_not_rhs_add_01.ll -o /tmp/return_uint_not_rhs_add_01.bc
+./build/bin/notdec test/evm/solidity-source/ir/return_uint_not_rhs_add_01.ll -o /tmp/return_uint_not_rhs_add_01.after.sol --tr-level=2
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-not-rhs-add-smoke.sol --tr-level=2
+```
+
+结果：
+
+`return_uint_not_rhs_add_01` 当前输出：
+
+```solidity
+contract Decompiled {
+    function notrhsadd(uint256 arg0, uint256 arg1) public returns (uint256 ret0) {
+        // block_0:
+        return ~(arg0 + arg1);
+    }
+}
+```
+
+`notdec.evm.solidity_source` 通过，用时 3.22 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.19 user=34.44 sys=0.56 maxrss=981916`。
