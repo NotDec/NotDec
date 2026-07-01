@@ -1325,3 +1325,55 @@ region split 的小 case，需要继续拆更小测试。
 - 复杂度：4/10。只在 switch case body 渲染时生效，条件较窄，没有改全局 continue。
 - 维护成本：4/10。规则依赖 CFG target 和单前驱 fallthrough，后续如果结构树层直接生成
   正确 case body，可以删除这段 renderer 兜底。
+
+# 2026-07-01 实现记录：禁止 non-switch loop region 反向选 head
+
+这轮继续处理最后一个 xfail：`nested_loop_break_continue`。调试发现 shared CFG 里
+`sink/outer--/branch` 块和外层 body header 形成父 loop，但内层 loop 先被 overlay
+折叠后，`reduceGraphNaturalLoopOnce()` 会在同一个 natural-loop region 里重新选择
+另一个 head，把父 loop 反向归约成 `head=sink latch=header follow=inner-body`。
+结果是 header 到 inner-body 的边被渲染成 `break`，真实 latch body 里的 `sink`
+被隐藏，最后残留一个回到 header 的 goto。
+
+修复方式很窄：如果当前已经在一个 `NaturalLoop` region 里，并且这个 region 不含
+switch terminator，就只允许按 region 自己的 `R.Head` 归约。含 switch 的 loop
+保留旧路径，因为前面几个 switch/latch case 依赖已有 switch 专门规则。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:2858`：
+  新增 `regionContainsSwitchTerminator()`，判断当前 region 是否含 switch block。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3617`：
+  `reduceGraphNaturalLoopOnce()` 预先记录当前 region 是否含 switch。
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3623`：
+  对 non-switch natural-loop region，跳过 `Head->Blocks.front() != R.Head` 的
+  反向 head 归约，避免隐藏父 loop latch body。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:81`：
+  `nested_loop_break_continue` 去掉 xfail，继续要求函数体 `sink(` 和 `goto=0`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-loop-head-final
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-loop-head-final --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+git -C external/NotDec-llvm2c diff --check
+git diff --check
+```
+
+结果：全部通过，CTest 5 个测试用时约 4.63s。按用户最新要求，这轮没有跑 fortune
+时间 smoke。
+
+`nested_loop_break_continue` 当前输出为 `goto=0`，函数体有缩进的 `sink(...)`。
+整个 source-cases suite 当前 17 个 case 都是 `goto=0`，没有剩余 xfail。
+
+评分：
+
+- 实现效果：9/10。收掉最后一个 xfail，并恢复此前被隐藏的 latch body。
+- 复杂度：4/10。只在 Phoenix natural-loop 归约里加一个 region-level guard，且保留
+  switch region 旧路径。
+- 维护成本：4/10。规则依赖 overlay 已先处理 child region 的流程；后续如果重做 region
+  识别，需要重新确认这个 guard 是否还必要。
