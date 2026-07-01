@@ -579,6 +579,30 @@ ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoeni
 
 结果：全部通过。本轮只改 oracle，没有改 SAILR 算法，所以不跑 fortune 性能 smoke。
 
+# 2026-07-01 实现记录：放宽 shared latch case arm 限制
+
+这轮继续收紧 `nested_loop_switch`。上一轮 shared-latch reducer 只接受无调用的 case arm，因此 `nested_loop_switch` 里 `case 1` 的 `sink(add)` arm 没被折叠，输出仍有两个跳到 case/latch label 的 goto。
+
+这里的调用没有被复制，只是随 arm body 一起放进 switch case，所以可以去掉 `CallCount == 0` 限制。放宽后 `nested_loop_switch` 输出为一个 `while (1)` 包一个 `switch`，case 0/case 1 都用普通 switch `break` 落到共享 latch，最后用 `continue` 回到循环头。
+
+改动：
+
+- `external/NotDec-llvm2c/lib/Structuring/PhoenixStructurer.cpp:3120`：`isSimpleLoopSwitchSharedLatchArm()` 去掉 arm block `CallCount == 0` 限制，仍保留单前驱、单后继到 latch、fallthrough 约束。
+- `external/NotDec-llvm2c/test/structuring/source-cases/manifest.json:64`：`nested_loop_switch` 收紧为 `goto<=0`、`while<=1`。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec-llvm2c-exe -j4
+rm -rf /tmp/notdec-structuring-source-cases-call-arm-final
+python3 external/NotDec-llvm2c/test/structuring/source-cases/run_source_structuring_suite.py \
+  --notdec-llvm2c ./build/external/NotDec-llvm2c/bin/notdec-llvm2c \
+  --work-dir /tmp/notdec-structuring-source-cases-call-arm-final --keep-work-dir
+ctest --test-dir build -R 'structuring-(source-cases|analysis)|structured-phoenix-available|legacy-phoenix-removed|shared-structurer-registry' --output-on-failure
+```
+
+结果：全部通过。`nested_loop_switch` 当前 `goto=0, while=1, switch=1`。按用户最新要求，本轮没有跑 fortune 时间 smoke。
+
 # 2026-07-01 实现记录：修 loop switch shared latch case
 
 这轮修掉 `loop_switch_shared_latch` 的 xfail。问题形状是 loop header 上的 switch 有多个 case 先进入无调用的小赋值块，再共享同一个 latch；之前 fallback 只能把 case 渲染成 `goto structured_block_X`，最后再落到 latch。
