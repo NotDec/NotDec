@@ -1,11 +1,12 @@
 #include "TypeRecovery/LowTy.h"
 #include "Utils/Utils.h"
-#include "notdec-llvm2c/Interface/Utils.h"
 #include <cassert>
 #include <iostream>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
 #include <string>
+#include <utility>
 
 namespace notdec::retypd {
 
@@ -162,6 +163,38 @@ bool PNTy::setPtrOrNum(PtrOrNum NewTy) {
   assert(Ty == Unknown);
   Ty = NewTy;
   return true;
+}
+
+PNTy::PNTy(PtrOrNum Ty, unsigned Size, std::string Elem)
+    : Size(Size), Ty(Ty), Elem(std::move(Elem)) {
+  if (isNotPN()) {
+    assert(!this->Elem.empty());
+    assert(this->Elem != "int");
+  }
+}
+
+PNTy::PNTy(llvm::Type *Ty, unsigned PointerSize)
+    : Size(::notdec::retypd::getSize(Ty, PointerSize)),
+      Ty(fromLLVMTy(Ty, PointerSize)) {
+  if (isNotPN()) {
+    Elem = llvmType2Elem(Ty);
+    assert(Elem != "int");
+  }
+}
+
+PNTy::PNTy(std::string Str, unsigned Size)
+    : Size(Size), Ty(str2PtrOrNum(Str)) {
+  if (isNotPN()) {
+    Elem = Str;
+    assert(Elem != "int");
+  }
+}
+
+PNTy::PNTy(std::string Serialized)
+    : PNTy(Serialized.substr(0, Serialized.find(" ")),
+           std::stoi(Serialized.substr(Serialized.find(" ") + 1))) {
+  assert(Serialized.find(" ") != std::string::npos);
+  assert(this->str() == Serialized);
 }
 
 bool PNTy::merge(PNTy Other, bool joinOrMeet) {

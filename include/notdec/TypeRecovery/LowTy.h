@@ -3,8 +3,12 @@
 
 #include <cassert>
 #include <iostream>
-#include <llvm/IR/Type.h>
 #include <string>
+
+namespace llvm {
+class LLVMContext;
+class Type;
+} // namespace llvm
 
 namespace notdec::retypd {
 
@@ -60,29 +64,10 @@ struct PNTy {
   bool hasConflict = false;
 
   PNTy() = default;
-  PNTy(llvm::Type *Ty, unsigned PointerSize)
-      : Size(::notdec::retypd::getSize(Ty, PointerSize)),
-        Ty(fromLLVMTy(Ty, PointerSize)) {
-    if (isNotPN()) {
-      Elem = llvmType2Elem(Ty);
-      assert(Elem != "int");
-    }
-  }
-
-  PNTy(std::string Str, unsigned Size)
-      : Size(Size), Ty(str2PtrOrNum(Str)) {
-    if (isNotPN()) {
-      Elem = Str;
-      assert(Elem != "int");
-    }
-  }
-
-  PNTy(std::string Serialized)
-      : PNTy(Serialized.substr(0, Serialized.find(" ")),
-                  std::stoi(Serialized.substr(Serialized.find(" ") + 1))) {
-    assert(Serialized.find(" ") != std::string::npos);
-    assert(this->str() == Serialized);
-  }
+  PNTy(PtrOrNum Ty, unsigned Size, std::string Elem = {});
+  PNTy(llvm::Type *Ty, unsigned PointerSize);
+  PNTy(std::string Str, unsigned Size);
+  PNTy(std::string Serialized);
 
   unsigned getSize() const { return Size; }
   std::string getElem() const { return Elem; }

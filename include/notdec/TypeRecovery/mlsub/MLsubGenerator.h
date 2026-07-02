@@ -123,11 +123,15 @@ struct ConstraintsGenerator {
   std::map<std::uint32_t, std::set<ExtValuePtr>> OriginalVariableSources;
   std::map<std::pair<llvm::CallBase *, unsigned>, SimpleType>
       AggregateCallReturnSlots;
+  // PNDiff only stores opaque handles.  The real ExtValuePtr objects stay here
+  // so LLVM and llvm2c details do not leak into the PNDiff module.
+  std::map<ExtValuePtr, std::unique_ptr<ExtValuePtr>> PNDiffValueHandles;
   bool EnablePNDiffTypeVariableClosureUnification = true;
   std::ostream *TraceStream = nullptr;
   PointerAnalysisMode PAMode = PointerAnalysisMode::Original;
 
   void addMergeNode(SimpleType From, SimpleType To);
+  void configurePNDiffCallbacks();
 
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
                           const ConstraintsGenerator &Summary);
@@ -139,11 +143,12 @@ struct ConstraintsGenerator {
                            nullptr,
                        int lvl = 0,
                        std::ostream *TraceStream = nullptr)
-      : PointerSize(pointer_size), Name(Name), PG(*this, Name, pointer_size),
+      : PointerSize(pointer_size), Name(Name), PG(Name, pointer_size),
         SCCs(SCCs), lvl(lvl), MemoryType(MemoryType),
         StorageType(StorageType), StorageFields(StorageFields),
         TraceStream(TraceStream) {
     PG.TraceStream = TraceStream;
+    configurePNDiffCallbacks();
     if (auto *Mode = std::getenv("NOTDEC_POINTER_ANALYSIS_MODE")) {
       if (std::strcmp(Mode, "shadow") == 0) {
         PAMode = PointerAnalysisMode::Shadow;
@@ -217,6 +222,14 @@ struct ConstraintsGenerator {
   void emitMergeTrace(llvm::StringRef Event, SimpleType From, SimpleType To,
                       llvm::ArrayRef<ExtValuePtr> MovedValues);
   void emitPointerAnalysisTrace(const std::string &Message);
+  PNIValue getPNIValue(const ExtValuePtr &Val);
+  const ExtValuePtr &getPNIExtValue(PNIValue Val) const;
+  PNTy getPNILatticeType(const ExtValuePtr &Val) const;
+  PNINode *getPNINodeOrNull(ExtValuePtr Val);
+  PNINode &getPNINode(ExtValuePtr Val);
+  PNINode &getOrInsertPNINode(ExtValuePtr Val);
+  PNINode &remapPNINode(ExtValuePtr Val, ExtValuePtr Target);
+  void unifyPNIValues(ExtValuePtr V1, ExtValuePtr V2);
 
   public:
   // Create Node of both variance
@@ -273,12 +286,12 @@ struct ConstraintsGenerator {
                         llvm::ICmpInst *I);
 
   void setPointer(ExtValuePtr Val) {
-    if (auto N = PG.getPNIVarOrNull(Val)) {
+    if (auto N = getPNINodeOrNull(Val)) {
       N->setPtr();
     }
   }
   void setNonPointer(ExtValuePtr Val) {
-    if (auto N = PG.getPNIVarOrNull(Val)) {
+    if (auto N = getPNINodeOrNull(Val)) {
       N->setNonPtrIfRelated();
     }
   }
@@ -326,7 +339,7 @@ struct ConstraintsGenerator {
   void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off) {
     auto BaseNode = getOrInsertNode(basePtr);
     auto ResultNode = getOrInsertNode(result);
-    PG.unifyVar(basePtr, result);
+    unifyPNIValues(basePtr, result);
     // Negative offsets can appear in pointer arithmetic, but they are not safe
     // to materialize as object fields. Keep the P/N relation and skip the field.
     if (PointerSize == 256 && Off.hasNegativeBaseOffset()) {

@@ -1,17 +1,11 @@
 #include "TypeRecovery/mlsub/PNDiff.h"
-#include "TypeRecovery/mlsub/MLsubGenerator.h"
-#include "Utils/Utils.h"
-#include "binarysub/Range.h"
-#include "notdec-llvm2c/Interface/ValueNamer.h"
+
+#include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <cstdint>
-#include <cstring>
 #include <cstdlib>
 #include <iostream>
-#include <llvm/IR/InstrTypes.h>
-#include <llvm/IR/Type.h>
-#include <llvm/Support/JSON.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -24,35 +18,8 @@ using retypd::fromIPChar;
 
 namespace {
 
-struct PNDiffPolicy {
-  int64_t nonPointerAbsLt = 900;
-  bool excludeZero = true;
-};
-
-std::string formatInstructionText(const llvm::Instruction *Inst) {
-  if (Inst == nullptr) {
-    return "<null-inst>";
-  }
-  std::string S;
-  llvm::raw_string_ostream OS(S);
-  Inst->print(OS);
-  return OS.str();
-}
-
-std::string formatExtValueForTrace(ExtValuePtr Val) {
-  return toStableString(Val);
-}
-
 std::string formatPNINodeForTrace(const PNINode &Node) {
   return Node.serialize();
-}
-
-OffsetRange getUnknownOffsetRange() {
-  return OffsetRange{.offset = 0, .access = {{1, 0}}};
-}
-
-bool isUnknownOffsetRange(const OffsetRange &Range) {
-  return Range == getUnknownOffsetRange();
 }
 
 char formatPtrOrNumChar(PtrOrNum Ty) {
@@ -72,16 +39,16 @@ char formatPtrOrNumChar(PtrOrNum Ty) {
 }
 
 std::string formatConstraintForTrace(PNIGraph &G, const char *Kind,
-                                     ExtValuePtr Left, ExtValuePtr Right,
-                                     ExtValuePtr Result,
-                                     const llvm::Instruction *Inst) {
+                                     PNIValue Left, PNIValue Right,
+                                     PNIValue Result,
+                                     PNIInstruction Inst) {
   std::ostringstream OS;
-  OS << "kind=" << Kind << " inst=\"" << formatInstructionText(Inst) << "\""
-     << " op0=" << formatExtValueForTrace(Left) << "["
+  OS << "kind=" << Kind << " inst=\"" << G.formatInstruction(Inst) << "\""
+     << " op0=" << G.formatValue(Left) << "["
      << formatPNINodeForTrace(G.getPNIVar(Left)) << "]"
-     << " op1=" << formatExtValueForTrace(Right) << "["
+     << " op1=" << G.formatValue(Right) << "["
      << formatPNINodeForTrace(G.getPNIVar(Right)) << "]"
-     << " result=" << formatExtValueForTrace(Result) << "["
+     << " result=" << G.formatValue(Result) << "["
      << formatPNINodeForTrace(G.getPNIVar(Result)) << "]";
   return OS.str();
 }
@@ -100,149 +67,27 @@ void traceConstraintEvent(PNIGraph &G, const std::string &Event,
   G.trace("[pndiff:" + Event + "] " + Detail);
 }
 
-std::optional<int64_t> getIntConstantValue(const ExtValuePtr &Val) {
-  auto GetSigned64 = [](const llvm::ConstantInt &CI) -> std::optional<int64_t> {
-    const llvm::APInt &Value = CI.getValue();
-    if (Value.getSignificantBits() > 64) {
-      return std::nullopt;
-    }
-    return Value.getSExtValue();
-  };
-  if (auto *V = std::get_if<llvm::Value *>(&Val)) {
-    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(*V)) {
-      return GetSigned64(*CI);
-    }
-    return std::nullopt;
-  }
-  if (auto *C = std::get_if<UConstant>(&Val)) {
-    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(C->Val)) {
-      return GetSigned64(*CI);
-    }
-  }
-  return std::nullopt;
-}
-
-PNDiffPolicy loadPNDiffPolicy() {
-  PNDiffPolicy Policy;
-  auto *OverridePath = std::getenv("NOTDEC_PNDIFF_POLICY_OVERRIDE");
-  if (OverridePath == nullptr || std::strlen(OverridePath) == 0) {
-    return Policy;
-  }
-
-  auto Parsed = llvm::json::parse(notdec::readFileToString(OverridePath));
-  if (!Parsed) {
-    llvm::errs() << "Error: failed to parse NOTDEC_PNDIFF_POLICY_OVERRIDE '"
-                 << OverridePath << "' as JSON.\n";
-    std::abort();
-  }
-
-  auto *Root = Parsed->getAsObject();
-  if (Root == nullptr) {
-    llvm::errs() << "Error: NOTDEC_PNDIFF_POLICY_OVERRIDE must be a JSON "
-                    "object.\n";
-    std::abort();
-  }
-
-  if (auto Version = Root->getInteger("version")) {
-    if (*Version != 1) {
-      llvm::errs() << "Error: unsupported PNDiff policy version " << *Version
-                   << ".\n";
-      std::abort();
-    }
-  }
-
-  if (auto *IntConstantPolicy = Root->getObject("int_constant_policy")) {
-    if (auto Threshold = IntConstantPolicy->getInteger("non_pointer_abs_lt")) {
-      Policy.nonPointerAbsLt = *Threshold;
-    }
-    if (auto ExcludeZero = IntConstantPolicy->getBoolean("exclude_zero")) {
-      Policy.excludeZero = *ExcludeZero;
-    }
-  }
-
-  return Policy;
-}
-
 } // namespace
 
-// remove and ignore all negative access.
-std::optional<OffsetRange> matchOffsetRangeNoNegativeAccess(llvm::Value *I) {
-  auto R = matchOffsetRange(I);
-  if (!R) {
-    return std::nullopt;
+std::string PNIGraph::formatValue(PNIValue Val) const {
+  if (FormatValue) {
+    return FormatValue(Val);
   }
-  R->access.erase(std::remove_if(R->access.begin(), R->access.end(),
-                                 [](ArrayOffset Val) { return Val.Size < 0; }),
-                  R->access.end());
-  return R;
+  std::ostringstream OS;
+  OS << Val;
+  return OS.str();
 }
 
-/// Visit Add/Mul/shl chain, add the results to OffsetRange.
-std::optional<OffsetRange> matchOffsetRange(llvm::Value *I) {
-  using namespace llvm;
-  assert(I->getType()->isIntegerTy());
-  if (auto *CI = dyn_cast<llvm::ConstantInt>(I)) {
-    auto Constant = getIntConstantValue(ExtValuePtr{CI});
-    if (!Constant) {
-      return std::nullopt;
-    }
-    return OffsetRange{.offset = *Constant};
+std::string PNIGraph::formatInstruction(PNIInstruction Inst) const {
+  if (FormatInstruction) {
+    return FormatInstruction(Inst);
   }
-  // Unknown or unsupported shape no longer pretends to be 1*x.
-  if (!isa<llvm::BinaryOperator>(I)) {
-    return std::nullopt;
-  } else {
-    auto Opcode = cast<BinaryOperator>(I)->getOpcode();
-    if (Opcode != Instruction::Add && Opcode != Instruction::Mul &&
-        Opcode != Instruction::Shl) {
-      return std::nullopt;
-    }
+  if (Inst == nullptr) {
+    return "<null-inst>";
   }
-  // is Add, Mul, Shl
-  auto *BinOp = cast<llvm::BinaryOperator>(I);
-  auto *Src1 = BinOp->getOperand(0);
-  auto *Src2 = BinOp->getOperand(1);
-  if (isa<ConstantInt>(Src1) && isa<ConstantInt>(Src2)) {
-    assert(false && "Constant at both sides. Run Optimization first!");
-  }
-  if (isa<ConstantInt>(Src1) && !isa<ConstantInt>(Src2) &&
-      BinOp->getOpcode() != llvm::Instruction::Shl) {
-    // because of InstCombine canonical form, this should not happen?
-    assert(false &&
-           "Constant cannot be at the left side. Run InstCombine first.");
-    std::swap(Src1, Src2);
-  }
-  // check if add or mul
-  if (BinOp->getOpcode() == llvm::Instruction::Add) {
-    auto Result = matchOffsetRange(Src1).value_or(getUnknownOffsetRange()) +
-                  matchOffsetRange(Src2).value_or(getUnknownOffsetRange());
-    if (isUnknownOffsetRange(Result)) {
-      return std::nullopt;
-    }
-    return Result;
-  } else if (BinOp->getOpcode() == llvm::Instruction::Mul) {
-    auto Result = matchOffsetRange(Src1).value_or(getUnknownOffsetRange()) *
-                  matchOffsetRange(Src2).value_or(getUnknownOffsetRange());
-    if (isUnknownOffsetRange(Result)) {
-      return std::nullopt;
-    }
-    return Result;
-  } else if (BinOp->getOpcode() == llvm::Instruction::Shl &&
-             llvm::isa<ConstantInt>(Src2)) {
-    auto Shift = getIntConstantValue(ExtValuePtr{Src2});
-    if (!Shift || *Shift < 0 || *Shift >= 63) {
-      return std::nullopt;
-    }
-    auto Result =
-        matchOffsetRange(Src1).value_or(getUnknownOffsetRange()) *
-        (int64_t{1} << *Shift);
-    if (isUnknownOffsetRange(Result)) {
-      return std::nullopt;
-    }
-    return Result;
-  } else {
-    return std::nullopt;
-  }
+  std::ostringstream OS;
+  OS << Inst;
+  return OS.str();
 }
 
 bool PNIGraph::solve() {
@@ -253,15 +98,14 @@ bool PNIGraph::solve() {
   while (!Worklist.empty()) {
     ConsNode *C = *Worklist.begin();
     Worklist.erase(C);
-    traceConstraintEvent(*this, "worklist-pop", formatConstraintForTrace(*this, *C));
+    traceConstraintEvent(*this, "worklist-pop",
+                         formatConstraintForTrace(*this, *C));
     auto Changed = C->solve();
     bool isFullySolved = C->isFullySolved();
-    // add according to changed.
     for (auto *N : Changed) {
       AnyChanged = true;
       markChanged(N, C);
     }
-    // remove the constraint if fully solved.
     if (isFullySolved) {
       eraseConstraint(C);
       C = nullptr;
@@ -274,9 +118,7 @@ bool PNIGraph::solve() {
 }
 
 bool PNIGraph::applyPNIPolicy() {
-  // TODO 默认的policy，仅在架构是webassembly的时候开启。
-  const PNDiffPolicy Policy = loadPNDiffPolicy();
-  if (Policy.nonPointerAbsLt <= 0) {
+  if (Policy.nonPointerAbsLt <= 0 || !GetIntConstant) {
     return false;
   }
 
@@ -287,7 +129,7 @@ bool PNIGraph::applyPNIPolicy() {
       continue;
     }
     for (const auto &Val : Ent.second) {
-      auto ConstantValue = getIntConstantValue(Val);
+      auto ConstantValue = GetIntConstant(Val);
       if (!ConstantValue) {
         continue;
       }
@@ -298,8 +140,8 @@ bool PNIGraph::applyPNIPolicy() {
         bool Changed = Node->setNonPtr();
         AnyChanged |= Changed;
         if (Changed) {
-          trace("[pndiff:policy:set-nonptr] node=" + formatPNINodeForTrace(*Node) +
-                " value=" + formatExtValueForTrace(Val) +
+          trace("[pndiff:policy:set-nonptr] node=" +
+                formatPNINodeForTrace(*Node) + " value=" + formatValue(Val) +
                 " constant=" + std::to_string(*ConstantValue));
         }
         break;
@@ -312,30 +154,23 @@ bool PNIGraph::applyPNIPolicy() {
 void PNIGraph::eraseConstraint(ConsNode *Cons) {
   traceConstraintEvent(*this, "constraint-solved",
                        formatConstraintForTrace(*this, *Cons));
-  // Reify solved ptradd-style information back into the mlsub graph. This
-  // keeps offset-derived pointer structure available to later type building.
-  if (Cons->isAdd()) {
+  if (Cons->isAdd() && MatchOffsetRange && OnPtrAdd) {
     auto [Left, Right, Result] = Cons->getNodes();
-    auto *BinOp = const_cast<llvm::BinaryOperator *>(Cons->getInst());
-    auto *LeftVal = BinOp->getOperand(0);
-    auto *RightVal = BinOp->getOperand(1);
     if (getPNIVar(Left).getPtrOrNum() == retypd::Number &&
         getPNIVar(Right).getPtrOrNum() == retypd::Pointer) {
-      auto Off = matchOffsetRangeNoNegativeAccess(LeftVal);
+      auto Off = MatchOffsetRange(Left);
       if (Off) {
-        trace("[pndiff:ptradd-reify] base=" + formatExtValueForTrace(Right) +
-              " result=" + formatExtValueForTrace(Result) +
-              " offset=" + Off->str());
-        Parent.setAsPtrAdd(Right, Result, *Off);
+        trace("[pndiff:ptradd-reify] base=" + formatValue(Right) +
+              " result=" + formatValue(Result) + " offset=" + Off->str());
+        OnPtrAdd(Right, Result, *Off);
       }
     } else if (getPNIVar(Left).getPtrOrNum() == retypd::Pointer &&
                getPNIVar(Right).getPtrOrNum() == retypd::Number) {
-      auto Off = matchOffsetRangeNoNegativeAccess(RightVal);
+      auto Off = MatchOffsetRange(Right);
       if (Off) {
-        trace("[pndiff:ptradd-reify] base=" + formatExtValueForTrace(Left) +
-              " result=" + formatExtValueForTrace(Result) +
-              " offset=" + Off->str());
-        Parent.setAsPtrAdd(Left, Result, *Off);
+        trace("[pndiff:ptradd-reify] base=" + formatValue(Left) +
+              " result=" + formatValue(Result) + " offset=" + Off->str());
+        OnPtrAdd(Left, Result, *Off);
       }
     }
   }
@@ -377,40 +212,37 @@ bool SubNodeCons::isFullySolved(PNIGraph &G) {
   return !Left->isUnknown() && !Right->isUnknown() && !Result->isUnknown();
 }
 
-llvm::SmallVector<PNINode *, 3> AddNodeCons::solve(PNIGraph &G) {
+PNChangedNodes AddNodeCons::solve(PNIGraph &G) {
   PNINode *Left = &G.getPNIVar(LeftNode);
   PNINode *Right = &G.getPNIVar(RightNode);
   PNINode *Result = &G.getPNIVar(ResultNode);
   assert(Left->isPNRelated());
   assert(Right->isPNRelated());
   assert(Result->isPNRelated());
-  llvm::SmallVector<PNINode *, 3> Changed;
+  PNChangedNodes Changed;
 
   // 1. solving using add rules.
   for (const char *Rule : Rules) {
     bool NotMatch = false;
     PNINode *Arr[3] = {Left, Right, Result};
-    // first scan lower case letters
     for (unsigned i = 0; i < 3; i++) {
       if (std::islower(Rule[i]) && Rule[i] != Arr[i]->getPNChar()) {
         NotMatch = true;
         break;
       }
     }
-    // if not match, continue.
     if (NotMatch) {
       continue;
     }
-    // this rule match, apply upper case letter constraints.
     traceConstraintEvent(
         G, "add:rule",
-        formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode, Inst) +
+        formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode,
+                                 Inst) +
             " rule=" + std::string(Rule, Rule + 3));
     for (unsigned i = 0; i < 3; i++) {
       if (std::isupper(Rule[i])) {
         PtrOrNum PTy = fromIPChar(Rule[i]);
         bool IsChanged = Arr[i]->setPtrOrNum(PTy);
-        // Update changed list accordingly.
         if (IsChanged) {
           Changed.push_back(Arr[i]);
         }
@@ -427,13 +259,12 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve(PNIGraph &G) {
   }
   assert(unknownCount >= 2);
 
-  // 2. check using alias relation
-  // Left alias right: Must be number
-  // this includes the Left == Right == Result case.
+  // 2. check using alias relation.
   if (Left == Right) {
     traceConstraintEvent(
         G, "add:alias",
-        formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode, Inst) +
+        formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode,
+                                 Inst) +
             " reason=left-equals-right");
     bool IsChanged = Left->setPtrOrNum(Number);
     if (IsChanged) {
@@ -447,36 +278,30 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve(PNIGraph &G) {
     if (IsChanged) {
       Changed.push_back(Result);
     }
-  }
-  // Left != Right.
-  else if (Left == Result) {
-    // If Left == Result, Right must be number
+  } else if (Left == Result) {
     traceConstraintEvent(
         G, "add:alias",
-        formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode, Inst) +
+        formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode,
+                                 Inst) +
             " reason=left-equals-result");
     bool IsChanged = Right->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Right);
     }
   } else if (Right == Result) {
-    // same as above
     traceConstraintEvent(
         G, "add:alias",
-        formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode, Inst) +
+        formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode,
+                                 Inst) +
             " reason=right-equals-result");
     bool IsChanged = Left->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Left);
     }
   } else {
-    // no alias at all. try to check merge rules.
     if (unknownCount < 3) {
       assert(unknownCount == 2);
-      // 1. Unknown + Number = SameUnknown
-      //    or Number + Unknown = SameUnknown
       if (Left->isNumber()) {
-        // Unify Right and Result
         traceConstraintEvent(
             G, "add:unify",
             formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode,
@@ -486,7 +311,6 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve(PNIGraph &G) {
         assert(Merged != nullptr);
         Changed.push_back(Merged);
       } else if (Right->isNumber()) {
-        // Unify Left and Result
         traceConstraintEvent(
             G, "add:unify",
             formatConstraintForTrace(G, "add", LeftNode, RightNode, ResultNode,
@@ -496,52 +320,46 @@ llvm::SmallVector<PNINode *, 3> AddNodeCons::solve(PNIGraph &G) {
         assert(Merged != nullptr);
         Changed.push_back(Merged);
       } else if (Result->isPointer()) {
-        // 2. Unknown + Unknown = Pointer
-        // degrade to Left != Right constraint? Not very useful
+        // Unknown + Unknown = Pointer. Nothing useful to add here.
       } else {
         assert(false && "Should not reach here");
       }
-    } else {
-      // all unknown, nothing we can do now.
     }
   }
   return Changed;
 }
 
-llvm::SmallVector<PNINode *, 3> SubNodeCons::solve(PNIGraph &G) {
+PNChangedNodes SubNodeCons::solve(PNIGraph &G) {
   PNINode *Left = &G.getPNIVar(LeftNode);
   PNINode *Right = &G.getPNIVar(RightNode);
   PNINode *Result = &G.getPNIVar(ResultNode);
   assert(Left->isPNRelated());
   assert(Right->isPNRelated());
   assert(Result->isPNRelated());
-  llvm::SmallVector<PNINode *, 3> Changed;
+  PNChangedNodes Changed;
 
-  // 1. solving using add rules.
+  // 1. solving using sub rules.
   for (const char *Rule : Rules) {
     bool NotMatch = false;
     PNINode *Arr[3] = {Left, Right, Result};
-    // first scan lower case letters
     for (unsigned i = 0; i < 3; i++) {
       if (std::islower(Rule[i]) && Rule[i] != Arr[i]->getPNChar()) {
         NotMatch = true;
         break;
       }
     }
-    // if not match, continue.
     if (NotMatch) {
       continue;
     }
-    // this rule match, apply upper case letter constraints.
     traceConstraintEvent(
         G, "sub:rule",
-        formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode, Inst) +
+        formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode,
+                                 Inst) +
             " rule=" + std::string(Rule, Rule + 3));
     for (unsigned i = 0; i < 3; i++) {
       if (std::isupper(Rule[i])) {
         PtrOrNum ToUnify = fromIPChar(Rule[i]);
         bool IsChanged = Arr[i]->setPtrOrNum(ToUnify);
-        // Update changed list accordingly.
         if (IsChanged) {
           Changed.push_back(Arr[i]);
         }
@@ -558,13 +376,11 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve(PNIGraph &G) {
   }
   assert(unknownCount >= 2);
 
-  // 2. check using alias relation
-  // Right alias Result: Must be number
-  // this includes the Left == Right == Result case.
   if (Result == Right) {
     traceConstraintEvent(
         G, "sub:alias",
-        formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode, Inst) +
+        formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode,
+                                 Inst) +
             " reason=result-equals-right");
     bool IsChanged = Left->setPtrOrNum(Number);
     if (IsChanged) {
@@ -579,35 +395,30 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve(PNIGraph &G) {
       Changed.push_back(Result);
     }
   } else if (Left == Right) {
-    // If Left == Right, Result must be number
-    // Must be unknown because there are at least 2 unknowns.
     assert(Left->isUnknown());
     traceConstraintEvent(
         G, "sub:alias",
-        formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode, Inst) +
+        formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode,
+                                 Inst) +
             " reason=left-equals-right");
     bool IsChanged = Result->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Result);
     }
   } else if (Left == Result) {
-    // same as above
     traceConstraintEvent(
         G, "sub:alias",
-        formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode, Inst) +
+        formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode,
+                                 Inst) +
             " reason=left-equals-result");
     bool IsChanged = Right->setPtrOrNum(Number);
     if (IsChanged) {
       Changed.push_back(Right);
     }
   } else {
-    // no alias at all. try to check merge rules.
     if (unknownCount < 3) {
       assert(unknownCount == 2);
-      // 1. Unknown - Number = SameUnknown
-      //    or Unknown - SameUnknown = Number
       if (Right->isNumber()) {
-        // Unify Left and Result
         traceConstraintEvent(
             G, "sub:unify",
             formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode,
@@ -617,7 +428,6 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve(PNIGraph &G) {
         assert(Merged != nullptr);
         Changed.push_back(Merged);
       } else if (Result->isNumber()) {
-        // Unify Left and Right
         traceConstraintEvent(
             G, "sub:unify",
             formatConstraintForTrace(G, "sub", LeftNode, RightNode, ResultNode,
@@ -627,13 +437,10 @@ llvm::SmallVector<PNINode *, 3> SubNodeCons::solve(PNIGraph &G) {
         assert(Merged != nullptr);
         Changed.push_back(Merged);
       } else if (Left->isPointer()) {
-        // 2. Pointer - Unknown = Unknown
-        // degrade to Result != Right constraint? Not very useful
+        // Pointer - Unknown = Unknown. Nothing useful to add here.
       } else {
         assert(false && "Should not reach here");
       }
-    } else {
-      // all unknown, nothing we can do now.
     }
   }
   return Changed;
@@ -651,35 +458,18 @@ void PNIGraph::trace(const std::string &message) {
   TraceStream->flush();
 }
 
-// overload with check
 PNINode::iteratorTy PNINode::eraseFromParent() {
-  // Check links before destruction. Should be replaced beforehand.
   assert(Parent.PNIMap.count(this) == 0);
   Parent.trace("[pndiff:node-erase] node=" + formatPNINodeForTrace(*this));
-  if (TraceIds.count(getId())) {
-    llvm::errs() << "TraceID=" << getId() << " PNINode=" << str()
-                 << ": PNINode::eraseFromParent: Erasing node\n";
-  }
   return Parent.PNINodes.erase(getIterator());
 }
 
-// Notify Node that it becomes a pointer.
 void PNIGraph::onUpdatePNType(PNINode *N) {
-  if (PNIMap.count(N) > 0) {
-    for (auto Node : PNIMap.rev().at(N)) {
-      Parent.onUpdatePNType(Node);
-    }
+  if (!OnUpdatePNType || PNIMap.count(N) == 0) {
+    return;
   }
-}
-
-llvm::Type *PNINode::mergeLowTy(llvm::Type *T, llvm::Type *O) {
-  if (T == nullptr) {
-    return O;
-  } else if (O == nullptr) {
-    return T;
-  } else {
-    assert(T == O);
-    return T;
+  for (auto Node : PNIMap.rev().at(N)) {
+    OnUpdatePNType(Node);
   }
 }
 
@@ -695,8 +485,8 @@ PNINode *PNINode::unify(PNINode &other) {
   return Node;
 }
 
-void PNIGraph::addAddCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
-                          llvm::BinaryOperator *Inst) {
+void PNIGraph::addAddCons(PNIValue Left, PNIValue Right, PNIValue Result,
+                          PNIInstruction Inst) {
   assert(getPNIVar(Left).isPNRelated());
   assert(getPNIVar(Right).isPNRelated());
   assert(getPNIVar(Result).isPNRelated());
@@ -711,8 +501,8 @@ void PNIGraph::addAddCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Resul
                        formatConstraintForTrace(*this, Node));
 }
 
-void PNIGraph::addSubCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
-                          llvm::BinaryOperator *Inst) {
+void PNIGraph::addSubCons(PNIValue Left, PNIValue Right, PNIValue Result,
+                          PNIInstruction Inst) {
   assert(getPNIVar(Left).isPNRelated());
   assert(getPNIVar(Right).isPNRelated());
   assert(getPNIVar(Result).isPNRelated());
@@ -728,8 +518,6 @@ void PNIGraph::addSubCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Resul
 }
 
 void PNIGraph::markChanged(PNINode *N, ConsNode *Except) {
-  // worklist algorithm.
-  // When a var changed, add all constraints that use this var.
   std::size_t Scheduled = 0;
   for (auto N2 : PNIMap.rev().at(N)) {
     if (NodeToCons.count(N2)) {
@@ -758,16 +546,10 @@ void PNIGraph::mergePNVarTo(PNINode *Var, PNINode *Target) {
   }
   trace("[pndiff:merge-node] from=" + formatPNINodeForTrace(*Var) +
         " to=" + formatPNINodeForTrace(*Target));
-  // maintain PNIMap
   PNIMap.merge(Var, Target);
   Var->eraseFromParent();
-  // Target is Changed, add related cons to worklist
   markChanged(Target);
 }
-
-// void PNINode::addUser(ExtValuePtr Node) {
-//   Parent.PNIMap.insert(Node, this);
-// }
 
 bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   auto OldTy = Ty.getPtrOrNum();
@@ -781,22 +563,18 @@ bool PNINode::setPtrOrNum(PtrOrNum NewTy) {
   return Updated;
 }
 
-// When LowTy is pointer-sized int, we initialize Ty as Unknown.
-PNINode::PNINode(PNIGraph &SSG, llvm::Type *LowTy)
-    : Parent(SSG), Id(ValueNamer::getId()), Ty(LowTy, SSG.PointerSize) {
+PNINode::PNINode(PNIGraph &SSG, PNTy LowTy)
+    : Parent(SSG), Id(SSG.allocateNodeId()), Ty(std::move(LowTy)) {
   Parent.trace("[pndiff:node-create] node=" + formatPNINodeForTrace(*this));
-  if (TraceIds.count(Id)) {
-    std::cerr << "PNINode::PNINode(" << Id << "): " << str() << "\n";
-  }
 }
 
 PNINode::PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode)
-    : Parent(SSG), Id(ValueNamer::getId()), Ty(OtherGraphNode.Ty) {
+    : Parent(SSG), Id(SSG.allocateNodeId()), Ty(OtherGraphNode.Ty) {
   Parent.trace("[pndiff:node-clone] node=" + formatPNINodeForTrace(*this));
 }
 
 PNINode::PNINode(PNIGraph &SSG, std::string SerializedTy)
-    : Parent(SSG), Id(ValueNamer::getId()),
+    : Parent(SSG), Id(SSG.allocateNodeId()),
       Ty(SerializedTy.substr(0, SerializedTy.find(" ")), ({
            auto Pos = SerializedTy.find(" ");
            unsigned long Size;

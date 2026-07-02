@@ -3,24 +3,21 @@
 
 #include <array>
 #include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <functional>
 #include <iosfwd>
+#include <iostream>
 #include <list>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <variant>
-
-#include <llvm/IR/DerivedTypes.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/InstrTypes.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Type.h>
-#include <llvm/Support/raw_ostream.h>
+#include <vector>
 
 #include "Utils/DSUMap.h"
 #include "binarysub/Range.h"
-#include "notdec-llvm2c/Interface/ExtValuePtr.h"
 #include "notdec/TypeRecovery/LowTy.h"
 
 namespace notdec::mlsub {
@@ -33,19 +30,27 @@ using retypd::Pointer;
 using retypd::PtrOrNum;
 using retypd::Unknown;
 
-// Forward Declaration
+// PNDiff must not know the source IR object layout.  NotDec owns the real
+// source objects and interns them into these opaque handles.
+using PNIValue = void *;
+using PNIInstruction = void *;
+
+struct PNDiffPolicyConfig {
+  std::int64_t nonPointerAbsLt = 900;
+  bool excludeZero = true;
+};
+
+struct PNINode;
 struct PNIGraph;
+using PNChangedNodes = std::vector<PNINode *>;
 
-std::optional<OffsetRange> matchOffsetRangeNoNegativeAccess(llvm::Value *I);
-std::optional<OffsetRange> matchOffsetRange(llvm::Value *I);
-
-// PNINode stores low level LLVM type. If the LowTy is pointer or
-// pointer-sized int, we use PtrOrNum to further distinguish.
+// PNINode stores low level pointer/number state. If the source value is pointer
+// or pointer-sized int, we use PtrOrNum to further distinguish it.
 struct PNINode {
   PNIGraph &Parent;
 
   friend struct PNIGraph;
-  PNINode(PNIGraph &SSG, llvm::Type *LowTy);
+  PNINode(PNIGraph &SSG, PNTy LowTy);
   // clone constructor for PNIGraph::cloneFrom
   PNINode(PNIGraph &SSG, const PNINode &OtherGraphNode);
   PNINode(PNIGraph &SSG, std::string SerializedTy);
@@ -57,7 +62,7 @@ protected:
 public:
   using iteratorTy = std::list<PNINode>::iterator;
   iteratorTy getIterator() {
-    size_t iterOffset = (size_t)&(*((iteratorTy) nullptr));
+    size_t iterOffset = (size_t)&(*((iteratorTy)nullptr));
     iteratorTy iter;
     *(intptr_t *)&iter = (intptr_t)this - iterOffset;
     return iter;
@@ -82,7 +87,6 @@ public:
   bool isConflict() const { return Ty.isConflict(); }
   void setConflict() { Ty.setConflict(); }
   std::string getLowTy() const { return Ty.str(); }
-  // bool updateLowTy(llvm::Type *T);
 
   bool isNumber() const { return getPtrOrNum() == Number; }
   bool isPointer() const { return getPtrOrNum() == Pointer; }
@@ -93,8 +97,6 @@ public:
   char getPNChar() const { return Ty.getPNChar(); }
   /// merge two PNVar into one. Return the unified PNVar.
   PNINode *unify(PNINode &other);
-  static llvm::Type *mergeLowTy(llvm::Type *T, llvm::Type *O);
-  // void addUser(ExtValuePtr Node);
 
   PNTy &getLatticeTy() { return Ty; }
   const PNTy &getLatticeTy() const { return Ty; }
@@ -108,26 +110,25 @@ public:
 };
 
 struct AddNodeCons {
-  ExtValuePtr LeftNode = nullptr;
-  ExtValuePtr RightNode = nullptr;
-  ExtValuePtr ResultNode = nullptr;
-  llvm::BinaryOperator *Inst;
+  PNIValue LeftNode = nullptr;
+  PNIValue RightNode = nullptr;
+  PNIValue ResultNode = nullptr;
+  PNIInstruction Inst = nullptr;
 
   static const char Rules[][3];
-  // return a list of changed nodes and whether the constraint is fully
-  // solved.
-  llvm::SmallVector<PNINode *, 3> solve(PNIGraph &G);
+  // return a list of changed nodes and whether the constraint is fully solved.
+  PNChangedNodes solve(PNIGraph &G);
   bool isFullySolved(PNIGraph &G);
 };
 
 struct SubNodeCons {
-  ExtValuePtr LeftNode = nullptr;
-  ExtValuePtr RightNode = nullptr;
-  ExtValuePtr ResultNode = nullptr;
-  llvm::BinaryOperator *Inst;
+  PNIValue LeftNode = nullptr;
+  PNIValue RightNode = nullptr;
+  PNIValue ResultNode = nullptr;
+  PNIInstruction Inst = nullptr;
 
   static const char Rules[][3];
-  llvm::SmallVector<PNINode *, 3> solve(PNIGraph &G);
+  PNChangedNodes solve(PNIGraph &G);
   bool isFullySolved(PNIGraph &G);
 };
 
@@ -137,8 +138,7 @@ struct ConsNode {
   PNIGraph &Parent;
   ConsNode(PNIGraph &SSG, NodeCons C) : Parent(SSG), C(C) {}
   NodeCons C;
-  llvm::SmallVector<PNINode *, 3> solve() {
-    // call solve according to the variant
+  PNChangedNodes solve() {
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
       return Add->solve(Parent);
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
@@ -154,11 +154,11 @@ struct ConsNode {
     }
     assert(false && "PNIConsNode::isFullySolved: unhandled variant");
   }
-  std::array<ExtValuePtr, 3> getNodes() const {
+  std::array<PNIValue, 3> getNodes() const {
     auto ret = const_cast<ConsNode *>(this)->getNodes();
     return {ret[0], ret[1], ret[2]};
   }
-  std::array<ExtValuePtr, 3> getNodes() {
+  std::array<PNIValue, 3> getNodes() {
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
       return {Add->LeftNode, Add->RightNode, Add->ResultNode};
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
@@ -168,7 +168,7 @@ struct ConsNode {
   }
   bool isAdd() const { return std::holds_alternative<AddNodeCons>(C); }
   bool isSub() const { return std::holds_alternative<SubNodeCons>(C); }
-  const llvm::BinaryOperator *getInst() const {
+  PNIInstruction getInst() const {
     if (auto *Add = std::get_if<AddNodeCons>(&C)) {
       return Add->Inst;
     } else if (auto *Sub = std::get_if<SubNodeCons>(&C)) {
@@ -179,7 +179,7 @@ struct ConsNode {
 
   using iteratorTy = std::list<ConsNode>::iterator;
   iteratorTy getIterator() {
-    size_t iterOffset = (size_t)&(*((iteratorTy) nullptr));
+    size_t iterOffset = (size_t)&(*((iteratorTy)nullptr));
     iteratorTy iter;
     *(intptr_t *)&iter = (intptr_t)this - iterOffset;
     return iter;
@@ -187,49 +187,53 @@ struct ConsNode {
   iteratorTy eraseFromParent();
 };
 
-struct ConstraintsGenerator;
-
 struct PNIGraph {
-  ConstraintsGenerator &Parent;
-  llvm::FunctionType *FuncTy = nullptr;
   std::string Name;
   std::set<ConsNode *> Worklist;
   long PointerSize = 0;
+
+  std::function<std::optional<int64_t>(PNIValue)> GetIntConstant;
+  std::function<std::optional<OffsetRange>(PNIValue)> MatchOffsetRange;
+  std::function<std::string(PNIValue)> FormatValue;
+  std::function<std::string(PNIInstruction)> FormatInstruction;
+  std::function<void(PNIValue)> OnUpdatePNType;
+  std::function<void(PNIValue, PNIValue, OffsetRange)> OnPtrAdd;
+  std::function<unsigned long()> AllocateNodeId;
+  PNDiffPolicyConfig Policy;
 
   // list for ConstraintNode
   using ConstraintsType = std::list<ConsNode>;
   ConstraintsType Constraints;
 
-  std::map<ExtValuePtr, std::set<ConsNode *>> NodeToCons;
+  std::map<PNIValue, std::set<ConsNode *>> NodeToCons;
 
   // list for PNINode
   using PNINodesType = std::list<PNINode>;
   PNINodesType PNINodes;
 
-  DSUMap<ExtValuePtr, PNINode *> PNIMap;
-  // std::map<PNINode *, std::set<ExtValuePtr>> PNIToNode;
+  DSUMap<PNIValue, PNINode *> PNIMap;
 
-  PNINode &createPNINode(ExtValuePtr Val) {
-    auto N = createPNINode(getType(Val));
+  PNINode &createPNINode(PNIValue Val, const PNTy &Ty) {
+    auto N = createPNINode(Ty);
     auto It = PNIMap.insert(Val, N);
     if (!It.second) {
-      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "createPNINode: Value already mapped to "
-                   << It.first->second->str() << ", but now set to "
-                   << toString(Val) << "\n";
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "createPNINode: Value already mapped to "
+                << It.first->second->str() << ", but now set to "
+                << formatValue(Val) << "\n";
       std::abort();
     }
     return *N;
   }
 
-  PNINode *getPNIVarOrNull(ExtValuePtr N) {
+  PNINode *getPNIVarOrNull(PNIValue N) {
     auto It = PNIMap.find(N);
     if (It == PNIMap.end()) {
       return nullptr;
     }
     return It->second;
   }
-  PNINode &getPNIVar(ExtValuePtr N) {
+  PNINode &getPNIVar(PNIValue N) {
     auto Ret = getPNIVarOrNull(N);
     assert(Ret != nullptr);
     return *Ret;
@@ -240,14 +244,14 @@ struct PNIGraph {
     return &It;
   }
 
-  PNINode &getOrInsertPNINode(ExtValuePtr Val) {
+  PNINode &getOrInsertPNINode(PNIValue Val, const PNTy &Ty) {
     auto N = getPNIVarOrNull(Val);
     if (N != nullptr) {
       return *N;
     }
-    return createPNINode(Val);
+    return createPNINode(Val, Ty);
   }
-  PNINode &remapPNIVar(ExtValuePtr Val, ExtValuePtr Target) {
+  PNINode &remapPNIVar(PNIValue Val, PNIValue Target) {
     auto *TargetNode = getPNIVarOrNull(Target);
     assert(TargetNode != nullptr);
     auto *ValNode = getPNIVarOrNull(Val);
@@ -259,10 +263,10 @@ struct PNIGraph {
     }
     auto It = PNIMap.insert(Val, TargetNode);
     if (!It.second) {
-      llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                   << "remapPNIVar: Value already mapped to "
-                   << It.first->second->str() << ", but now set to "
-                   << toString(Val) << "\n";
+      std::cerr << __FILE__ << ":" << __LINE__ << ": "
+                << "remapPNIVar: Value already mapped to "
+                << It.first->second->str() << ", but now set to "
+                << formatValue(Val) << "\n";
       std::abort();
     }
     return *TargetNode;
@@ -273,19 +277,19 @@ struct PNIGraph {
     Worklist.clear();
   }
 
-  void unifyVar(ExtValuePtr V1, ExtValuePtr V2) {
+  void unifyVar(PNIValue V1, PNIValue V2) {
     getPNIVar(V1).unify(getPNIVar(V2));
   }
 
-  PNIGraph(ConstraintsGenerator &Parent, std::string Name, long PointerSize)
-      : Parent(Parent), Name(Name), PointerSize(PointerSize) {}
+  PNIGraph(std::string Name, long PointerSize)
+      : Name(std::move(Name)), PointerSize(PointerSize) {}
 
   bool applyPNIPolicy();
-  void addAddCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
-                  llvm::BinaryOperator *Inst);
+  void addAddCons(PNIValue Left, PNIValue Right, PNIValue Result,
+                  PNIInstruction Inst);
 
-  void addSubCons(ExtValuePtr Left, ExtValuePtr Right, ExtValuePtr Result,
-                  llvm::BinaryOperator *Inst);
+  void addSubCons(PNIValue Left, PNIValue Right, PNIValue Result,
+                  PNIInstruction Inst);
 
   PNINode *mergePNINodes(PNINode *To, PNINode *From) {
     if (To == From) {
@@ -300,10 +304,18 @@ struct PNIGraph {
   void onUpdatePNType(PNINode *N);
   bool traceEnabled() const { return TraceStream != nullptr; }
   void trace(const std::string &message);
+  std::string formatValue(PNIValue Val) const;
+  std::string formatInstruction(PNIInstruction Inst) const;
+  unsigned long allocateNodeId() {
+    if (AllocateNodeId) {
+      return AllocateNodeId();
+    }
+    return NextNodeId++;
+  }
 
 protected:
-  PNINode *createPNINode(llvm::Type *LowTy) {
-    auto &It = PNINodes.emplace_back(*this, LowTy);
+  PNINode *createPNINode(const PNTy &Ty) {
+    auto &It = PNINodes.emplace_back(*this, Ty);
     return &It;
   }
   void markChanged(PNINode *N, ConsNode *Except = nullptr);
@@ -311,6 +323,9 @@ protected:
 
 public:
   std::ostream *TraceStream = nullptr;
+
+private:
+  unsigned long NextNodeId = 1;
 };
 
 } // namespace notdec::mlsub

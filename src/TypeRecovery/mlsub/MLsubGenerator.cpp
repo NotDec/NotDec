@@ -31,6 +31,7 @@
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/SHA256.h>
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -73,6 +74,126 @@ constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
 bool envFlagEnabled(llvm::StringRef Name) {
   auto *Value = std::getenv(Name.data());
   return Value != nullptr && llvm::StringRef(Value) == "1";
+}
+
+llvm::Value *getPNDiffLLVMValue(const ExtValuePtr &Val) {
+  if (auto *V = std::get_if<llvm::Value *>(&Val)) {
+    return *V;
+  }
+  if (auto *C = std::get_if<UConstant>(&Val)) {
+    return C->Val;
+  }
+  return nullptr;
+}
+
+std::optional<int64_t> getPNDiffIntConstantValue(const ExtValuePtr &Val) {
+  auto *Value = getPNDiffLLVMValue(Val);
+  auto *CI = llvm::dyn_cast_or_null<llvm::ConstantInt>(Value);
+  if (CI == nullptr || CI->getValue().getSignificantBits() > 64) {
+    return std::nullopt;
+  }
+  return CI->getValue().getSExtValue();
+}
+
+OffsetRange getUnknownPNDiffOffsetRange() {
+  return OffsetRange{.offset = 0, .access = {{1, 0}}};
+}
+
+bool isUnknownPNDiffOffsetRange(const OffsetRange &Range) {
+  return Range == getUnknownPNDiffOffsetRange();
+}
+
+std::optional<OffsetRange> matchPNDiffOffsetRange(llvm::Value *I) {
+  assert(I->getType()->isIntegerTy());
+  if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(I)) {
+    auto Constant = getPNDiffIntConstantValue(ExtValuePtr{CI});
+    if (!Constant) {
+      return std::nullopt;
+    }
+    return OffsetRange{.offset = *Constant};
+  }
+  if (!llvm::isa<llvm::BinaryOperator>(I)) {
+    return std::nullopt;
+  }
+
+  auto *BinOp = llvm::cast<llvm::BinaryOperator>(I);
+  auto Opcode = BinOp->getOpcode();
+  if (Opcode != llvm::Instruction::Add && Opcode != llvm::Instruction::Mul &&
+      Opcode != llvm::Instruction::Shl) {
+    return std::nullopt;
+  }
+
+  auto *Src1 = BinOp->getOperand(0);
+  auto *Src2 = BinOp->getOperand(1);
+  if (llvm::isa<llvm::ConstantInt>(Src1) && llvm::isa<llvm::ConstantInt>(Src2)) {
+    assert(false && "Constant at both sides. Run Optimization first!");
+  }
+  if (llvm::isa<llvm::ConstantInt>(Src1) && !llvm::isa<llvm::ConstantInt>(Src2) &&
+      Opcode != llvm::Instruction::Shl) {
+    assert(false &&
+           "Constant cannot be at the left side. Run InstCombine first.");
+    std::swap(Src1, Src2);
+  }
+
+  if (Opcode == llvm::Instruction::Add) {
+    auto Result =
+        matchPNDiffOffsetRange(Src1).value_or(getUnknownPNDiffOffsetRange()) +
+        matchPNDiffOffsetRange(Src2).value_or(getUnknownPNDiffOffsetRange());
+    if (isUnknownPNDiffOffsetRange(Result)) {
+      return std::nullopt;
+    }
+    return Result;
+  }
+  if (Opcode == llvm::Instruction::Mul) {
+    auto Result =
+        matchPNDiffOffsetRange(Src1).value_or(getUnknownPNDiffOffsetRange()) *
+        matchPNDiffOffsetRange(Src2).value_or(getUnknownPNDiffOffsetRange());
+    if (isUnknownPNDiffOffsetRange(Result)) {
+      return std::nullopt;
+    }
+    return Result;
+  }
+  if (Opcode == llvm::Instruction::Shl && llvm::isa<llvm::ConstantInt>(Src2)) {
+    auto Shift = getPNDiffIntConstantValue(ExtValuePtr{Src2});
+    if (!Shift || *Shift < 0 || *Shift >= 63) {
+      return std::nullopt;
+    }
+    auto Result =
+        matchPNDiffOffsetRange(Src1).value_or(getUnknownPNDiffOffsetRange()) *
+        (int64_t{1} << *Shift);
+    if (isUnknownPNDiffOffsetRange(Result)) {
+      return std::nullopt;
+    }
+    return Result;
+  }
+  return std::nullopt;
+}
+
+std::optional<OffsetRange> matchPNDiffOffsetRangeNoNegativeAccess(
+    const ExtValuePtr &Val) {
+  auto *Value = getPNDiffLLVMValue(Val);
+  if (Value == nullptr || !Value->getType()->isIntegerTy()) {
+    return std::nullopt;
+  }
+  auto R = matchPNDiffOffsetRange(Value);
+  if (!R) {
+    return std::nullopt;
+  }
+  R->access.erase(std::remove_if(R->access.begin(), R->access.end(),
+                                 [](ArrayOffset Val) { return Val.Size < 0; }),
+                  R->access.end());
+  return R;
+}
+
+std::string formatPNDiffInstruction(void *Inst) {
+  auto *I = static_cast<llvm::Instruction *>(Inst);
+  if (I == nullptr) {
+    return "<null-inst>";
+  }
+  std::string S;
+  llvm::raw_string_ostream OS(S);
+  I->print(OS);
+  return OS.str();
 }
 
 bool isFunctionPointerTable(const llvm::GlobalVariable &GV) {
@@ -147,6 +268,16 @@ std::optional<int64_t> getSigned64ConstantAddress(const llvm::ConstantInt &CI) {
 [[noreturn]] void failPolyPolicy(llvm::StringRef Path,
                                  llvm::StringRef Message) {
   llvm::errs() << "Error: invalid NOTDEC_POLY_FUNCS policy";
+  if (!Path.empty()) {
+    llvm::errs() << " at " << Path;
+  }
+  llvm::errs() << ": " << Message << "\n";
+  std::abort();
+}
+
+[[noreturn]] void failPNDiffPolicy(llvm::StringRef Path,
+                                   llvm::StringRef Message) {
+  llvm::errs() << "Error: invalid NOTDEC_PNDIFF_POLICY_OVERRIDE policy";
   if (!Path.empty()) {
     llvm::errs() << " at " << Path;
   }
@@ -243,6 +374,42 @@ PolyPolicyConfig loadPolyPolicyConfig() {
       }
       Config.LevelOverrides[Ent.first.str()] =
           static_cast<unsigned int>(*Level);
+    }
+  }
+
+  return Config;
+}
+
+PNDiffPolicyConfig loadPNDiffPolicyConfig() {
+  PNDiffPolicyConfig Config;
+  auto *PolicyFile = std::getenv("NOTDEC_PNDIFF_POLICY_OVERRIDE");
+  if (PolicyFile == nullptr || std::strlen(PolicyFile) == 0) {
+    return Config;
+  }
+
+  auto Parsed = llvm::json::parse(readFileToString(PolicyFile));
+  if (!Parsed) {
+    failPNDiffPolicy(PolicyFile, "JSON parse failed");
+  }
+
+  auto *Obj = Parsed->getAsObject();
+  if (Obj == nullptr) {
+    failPNDiffPolicy(PolicyFile, "expected top-level object");
+  }
+
+  if (auto Version = Obj->getInteger("version")) {
+    if (*Version != 1) {
+      failPNDiffPolicy(PolicyFile, "unsupported version");
+    }
+  }
+
+  if (auto *IntConstantPolicy = Obj->getObject("int_constant_policy")) {
+    if (auto Threshold =
+            IntConstantPolicy->getInteger("non_pointer_abs_lt")) {
+      Config.nonPointerAbsLt = *Threshold;
+    }
+    if (auto ExcludeZero = IntConstantPolicy->getBoolean("exclude_zero")) {
+      Config.excludeZero = *ExcludeZero;
     }
   }
 
@@ -464,7 +631,7 @@ bool applyNumberOverrideToCompatibleCastUsers(ConstraintsGenerator &G,
           !isPointerSizedNumberProjection(*Seed, *Inst, G.PointerSize)) {
         continue;
       }
-      auto *Node = G.PG.getPNIVarOrNull(Inst);
+      auto *Node = G.getPNINodeOrNull(Inst);
       if (Node == nullptr || !Node->isPNRelated()) {
         continue;
       }
@@ -1061,7 +1228,7 @@ void applyPNDiffOverrides(ConstraintsGenerator &G, llvm::Function &Func,
       continue;
     }
 
-    auto *Node = G.PG.getPNIVarOrNull(Target.Value);
+    auto *Node = G.getPNINodeOrNull(Target.Value);
     if (Node == nullptr) {
       failSignatureOverride(
           EntryPath,
@@ -1138,7 +1305,7 @@ void applyExtraConstraintPNDiffs(ConstraintsGenerator &G, llvm::Function &Func,
       continue;
     }
 
-    auto *Node = G.PG.getPNIVarOrNull(Target.Value);
+    auto *Node = G.getPNINodeOrNull(Target.Value);
     if (Node == nullptr) {
       failExtraConstraints(
           ActionPath,
@@ -1869,7 +2036,7 @@ std::string formatPNDiffStateInfo(const PNDiffStateInfo &Info) {
 
 std::optional<PNDiffStateInfo> getPNDiffStateInfo(ConstraintsGenerator &CG,
                                                   ExtValuePtr Val) {
-  auto *Node = CG.PG.getPNIVarOrNull(Val);
+  auto *Node = CG.getPNINodeOrNull(Val);
   if (Node == nullptr || !Node->isPNRelated()) {
     return std::nullopt;
   }
@@ -1950,18 +2117,11 @@ formatFunctionPNDiffComment(ConstraintsGenerator &CG, const llvm::Function &F) {
   return "pndiff: " + joinParts(Parts);
 }
 
-std::string formatInstructionText(const llvm::Instruction &Inst) {
-  std::string S;
-  llvm::raw_string_ostream OS(S);
-  Inst.print(OS);
-  return OS.str();
-}
-
 std::string formatConstraintStateSummary(ConstraintsGenerator &CG,
                                          const ConsNode &Cons) {
   auto Nodes = const_cast<ConsNode &>(Cons).getNodes();
-  auto formatStateOrUnknown = [&](ExtValuePtr Val) {
-    auto State = getPNDiffStateInfo(CG, Val);
+  auto formatStateOrUnknown = [&](PNIValue Val) {
+    auto State = getPNDiffStateInfo(CG, CG.getPNIExtValue(Val));
     if (!State) {
       return std::string("unknown");
     }
@@ -1976,8 +2136,8 @@ std::string formatConstraintStateSummary(ConstraintsGenerator &CG,
 
 bool constraintHasUnknownState(ConstraintsGenerator &CG, const ConsNode &Cons) {
   auto Nodes = const_cast<ConsNode &>(Cons).getNodes();
-  for (ExtValuePtr Val : Nodes) {
-    auto State = getPNDiffStateInfo(CG, Val);
+  for (PNIValue Val : Nodes) {
+    auto State = getPNDiffStateInfo(CG, CG.getPNIExtValue(Val));
     if (!State || State->State == "unknown") {
       return true;
     }
@@ -2020,10 +2180,10 @@ void writePNDiffWarnings(const std::string &Path, AllGraphs &AG,
       }
       auto Nodes = const_cast<ConsNode &>(Cons).getNodes();
       Out << "kind: " << (Cons.isAdd() ? "Add" : "Sub") << "\n";
-      Out << "inst: " << formatInstructionText(*Cons.getInst()) << "\n";
-      Out << "result: " << toStableString(Nodes[2]) << "\n";
-      Out << "op0: " << toStableString(Nodes[0]) << "\n";
-      Out << "op1: " << toStableString(Nodes[1]) << "\n";
+      Out << "inst: " << formatPNDiffInstruction(Cons.getInst()) << "\n";
+      Out << "result: " << toStableString(CG.getPNIExtValue(Nodes[2])) << "\n";
+      Out << "op0: " << toStableString(CG.getPNIExtValue(Nodes[0])) << "\n";
+      Out << "op1: " << toStableString(CG.getPNIExtValue(Nodes[1])) << "\n";
       Out << "state: " << formatConstraintStateSummary(CG, Cons) << "\n\n";
     }
   }
@@ -2397,6 +2557,69 @@ void ConstraintsGenerator::addMergeNode(SimpleType From, SimpleType To) {
   V2N.merge(From, To);
 }
 
+void ConstraintsGenerator::configurePNDiffCallbacks() {
+  PG.Policy = loadPNDiffPolicyConfig();
+  PG.AllocateNodeId = []() { return ValueNamer::getId(); };
+  PG.GetIntConstant = [this](PNIValue Val) {
+    return getPNDiffIntConstantValue(getPNIExtValue(Val));
+  };
+  PG.MatchOffsetRange = [this](PNIValue Val) {
+    return matchPNDiffOffsetRangeNoNegativeAccess(getPNIExtValue(Val));
+  };
+  PG.FormatValue = [this](PNIValue Val) {
+    return toStableString(getPNIExtValue(Val));
+  };
+  PG.FormatInstruction = [](PNIInstruction Inst) {
+    return formatPNDiffInstruction(Inst);
+  };
+  PG.OnUpdatePNType = [this](PNIValue Val) {
+    onUpdatePNType(getPNIExtValue(Val));
+  };
+  PG.OnPtrAdd = [this](PNIValue Base, PNIValue Result, OffsetRange Off) {
+    setAsPtrAdd(getPNIExtValue(Base), getPNIExtValue(Result), std::move(Off));
+  };
+}
+
+PNIValue ConstraintsGenerator::getPNIValue(const ExtValuePtr &Val) {
+  auto It = PNDiffValueHandles.find(Val);
+  if (It == PNDiffValueHandles.end()) {
+    auto Inserted = PNDiffValueHandles.emplace(Val, nullptr).first;
+    Inserted->second = std::make_unique<ExtValuePtr>(Inserted->first);
+    It = Inserted;
+  }
+  return static_cast<PNIValue>(It->second.get());
+}
+
+const ExtValuePtr &ConstraintsGenerator::getPNIExtValue(PNIValue Val) const {
+  assert(Val != nullptr);
+  return *static_cast<const ExtValuePtr *>(Val);
+}
+
+PNTy ConstraintsGenerator::getPNILatticeType(const ExtValuePtr &Val) const {
+  return PNTy(getType(Val), PointerSize);
+}
+
+PNINode *ConstraintsGenerator::getPNINodeOrNull(ExtValuePtr Val) {
+  return PG.getPNIVarOrNull(getPNIValue(Val));
+}
+
+PNINode &ConstraintsGenerator::getPNINode(ExtValuePtr Val) {
+  return PG.getPNIVar(getPNIValue(Val));
+}
+
+PNINode &ConstraintsGenerator::getOrInsertPNINode(ExtValuePtr Val) {
+  return PG.getOrInsertPNINode(getPNIValue(Val), getPNILatticeType(Val));
+}
+
+PNINode &ConstraintsGenerator::remapPNINode(ExtValuePtr Val,
+                                            ExtValuePtr Target) {
+  return PG.remapPNIVar(getPNIValue(Val), getPNIValue(Target));
+}
+
+void ConstraintsGenerator::unifyPNIValues(ExtValuePtr V1, ExtValuePtr V2) {
+  PG.unifyVar(getPNIValue(V1), getPNIValue(V2));
+}
+
 SimpleType ConstraintsGenerator::createNode(ExtValuePtr Val) {
   auto N = convertSimpleType(Val);
   auto It = V2N.insert(Val, N);
@@ -2411,7 +2634,7 @@ SimpleType ConstraintsGenerator::createNode(ExtValuePtr Val) {
     OriginalVariableSources[VS->id].insert(Val);
   }
   emitMappingTrace("create", Val, N);
-  PG.getOrInsertPNINode(Val);
+  getOrInsertPNINode(Val);
   if (std::get_if<ConstantAddr>(&Val)) {
     setPointer(Val);
     addAddressOf(Val, getRootMemoryObject(Val));
@@ -2430,7 +2653,7 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
   auto N = getNodeOrNull(Val);
   if (N == Ty) {
     emitRemapTrace("remap-alias", Val, Target, Ty);
-    PG.remapPNIVar(Val, Target);
+    remapPNINode(Val, Target);
     addPointerCopy(Val, Target);
     return N;
   }
@@ -2443,7 +2666,7 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
     std::abort();
   }
   emitRemapTrace("remap", Val, Target, Ty);
-  PG.remapPNIVar(Val, Target);
+  remapPNINode(Val, Target);
   addPointerCopy(Val, Target);
   return It.first->second;
 }
@@ -3757,7 +3980,7 @@ void ConstraintsGenerator::maybeUnifyPNDiffTypeVariablePair(
   PNINode *Leader = nullptr;
   auto unifyMappedValues = [&](const std::vector<ExtValuePtr> &Values) {
     for (const auto &Val : Values) {
-      auto *Node = PG.getPNIVarOrNull(Val);
+      auto *Node = getPNINodeOrNull(Val);
       if (Node == nullptr) {
         continue;
       }
@@ -4022,12 +4245,12 @@ void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
     auto *Src = I.getOperand(0);
     auto SrcVal = getExtValuePtr(Src, &I, 0);
     cg.getOrInsertNode(SrcVal);
-    if (cg.PG.getPNIVarOrNull(SrcVal) != nullptr) {
+    if (cg.getPNINodeOrNull(SrcVal) != nullptr) {
       // Materialize the cast result first so its LLVM low type participates in
       // the merge; otherwise inttoptr can lose the result-side pointer hint and
       // collapse to the source's unknown node.
-      cg.PG.getOrInsertPNINode(&I);
-      cg.PG.remapPNIVar(&I, SrcVal);
+      cg.getOrInsertPNINode(&I);
+      cg.remapPNINode(&I, SrcVal);
     }
     if (cg.getNodeOrNull(SrcVal) != nullptr) {
       cg.addRemapType(&I, SrcVal);
@@ -5778,31 +6001,29 @@ void ConstraintsGenerator::addCmpConstraint(const ExtValuePtr LHS,
   llvmValue2ExtVal(Right, I, 1);
   getOrInsertNode(Left);
   getOrInsertNode(Right);
-  PG.getPNIVar(Left).unify(PG.getPNIVar(Right));
+  getPNINode(Left).unify(getPNINode(Right));
 }
 
 void ConstraintsGenerator::addAddConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
                                             llvm::BinaryOperator *I) {
   llvmValue2ExtVal(LHS, I, 0);
   llvmValue2ExtVal(RHS, I, 1);
-  auto Left = &PG.getOrInsertPNINode(LHS);
-  auto Right = &PG.getOrInsertPNINode(RHS);
-  // auto Res = &
-  PG.getOrInsertPNINode(I);
+  auto Left = &getOrInsertPNINode(LHS);
+  auto Right = &getOrInsertPNINode(RHS);
+  getOrInsertPNINode(I);
   if (Left->isPNRelated() || Right->isPNRelated()) {
-    PG.addAddCons(LHS, RHS, I, I);
+    PG.addAddCons(getPNIValue(LHS), getPNIValue(RHS), getPNIValue(I), I);
   }
 }
 void ConstraintsGenerator::addSubConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
                                             llvm::BinaryOperator *I) {
   llvmValue2ExtVal(LHS, I, 0);
   llvmValue2ExtVal(RHS, I, 1);
-  auto Left = &PG.getOrInsertPNINode(LHS);
-  auto Right = &PG.getOrInsertPNINode(RHS);
-  // auto Res = &
-  PG.getOrInsertPNINode(I);
+  auto Left = &getOrInsertPNINode(LHS);
+  auto Right = &getOrInsertPNINode(RHS);
+  getOrInsertPNINode(I);
   if (Left->isPNRelated() || Right->isPNRelated()) {
-    PG.addSubCons(LHS, RHS, I, I);
+    PG.addSubCons(getPNIValue(LHS), getPNIValue(RHS), getPNIValue(I), I);
   }
 }
 
