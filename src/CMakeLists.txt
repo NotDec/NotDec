@@ -26,7 +26,6 @@ add_library(notdec-core STATIC
 	Passes/evm/solidity-patterns/SolidityRevertPass.cpp
 	Passes/evm/solidity-patterns/StorageAccessMatchers.cpp
 	TypeRecovery/LowTy.cpp
-	TypeRecovery/mlsub/PNDiff.cpp
 	TypeRecovery/mlsub/PAPath.cpp
 	TypeRecovery/mlsub/PointerAnalysis.cpp
 	# TypeRecovery/mlsub/MLsubGraph.cpp

@@ -1,7 +1,7 @@
 #include "TypeRecovery/LowTy.h"
-#include "Utils/Utils.h"
 #include <cassert>
 #include <iostream>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
@@ -32,43 +32,6 @@ unsigned getSize(llvm::Type *Ty, unsigned PointerSize) {
   assert(false && "TODO: unhandled type");
 }
 
-// #region PtrOrNum
-
-// Like a operator
-PtrOrNum unify(const PtrOrNum &Left, const PtrOrNum &Right) {
-  // this type enum is determined when creating the node by inspecting the LLVM
-  // Type
-  if (Left == NotPN) {
-    assert(Right == NotPN);
-  }
-  if (Right == NotPN) {
-    assert(Left == NotPN);
-  }
-
-  if (Left == Right) { // same inner type
-    return Left;
-  } else {
-    unsigned char Val = UniTyMergeMap[Left][Right];
-    assert(Val != 2);
-    if (Val != 0) {
-      return Left;
-    } else {
-      return Right;
-    }
-  }
-}
-
-PtrOrNum fromIPChar(char C) {
-  switch (C) {
-  case 'I':
-    return Number;
-  case 'P':
-    return Pointer;
-  default:
-    assert(false && "fromIPChar: unhandled char");
-  }
-}
-
 PtrOrNum fromLLVMTy(llvm::Type *LowTy, long PointerSize) {
   assert(PointerSize == 32 || PointerSize == 64 || PointerSize == 256);
   if (LowTy == nullptr) {
@@ -87,141 +50,8 @@ bool isPtrOrNum(llvm::Type *LowTy, long PointerSize) {
   return PN != Null && PN != NotPN;
 }
 
-PtrOrNum str2PtrOrNum(std::string Str) {
-  if (Str == "int" || Str == "num") {
-    return Number;
-  } else if (Str == "ptr") {
-    return Pointer;
-  } else if (Str == "null") {
-    return Null;
-  } else if (Str == "notPN") {
-    return NotPN;
-  } else if (Str == "unk") {
-    return Unknown;
-  } else {
-    return NotPN;
-  }
-}
-
-std::string toString(PtrOrNum Ty) {
-  switch (Ty) {
-  case Unknown:
-    return "unk";
-  case Number:
-    return "int";
-  case Pointer:
-    return "ptr";
-  case Null:
-    return "null";
-  case NotPN:
-    return "notPN";
-  default:
-    assert(false && "toString: Unknown type");
-  }
-}
-
-// #endregion PtrOrNum
-
-bool PNTy::setPtrOrNum(PtrOrNum NewTy) {
-  assert(NewTy != Null);
-  if (Ty == Null) {
-    Ty = NewTy;
-    return true;
-  }
-
-  if (Ty == NotPN) {
-    if (NewTy != NotPN) {
-      // std::cerr << "Warning: PNINode::setPtrOrNum: NotPN and PN merge\n";
-    }
-    return false;
-  } else if (NewTy == NotPN) {
-    // std::cerr << "Warning: PNINode::setPtrOrNum: NotPN and PN merge\n";
-    return false;
-  }
-
-  assert(isPNRelated() && NewTy != NotPN && NewTy != Null);
-  if (Ty == NewTy) {
-    return false;
-  }
-  if (NewTy == Unknown) {
-    return false;
-  } else if (Ty == Unknown) {
-    Ty = NewTy;
-    return true;
-  }
-  if ((Ty == Number && NewTy == Pointer) ||
-      (Ty == Pointer && NewTy == Number)) {
-    // std::cerr << "Warning: PNINode::setPtrOrNum: Pointer and NonPtr merge\n";
-    hasConflict = true;
-    if (Ty == Number && NewTy == Pointer) {
-      Ty = Pointer;
-      return true;
-    } else {
-      return false;
-    }
-  }
-  assert(Ty == Unknown);
-  Ty = NewTy;
-  return true;
-}
-
-PNTy::PNTy(PtrOrNum Ty, unsigned Size, std::string Elem)
-    : Size(Size), Ty(Ty), Elem(std::move(Elem)) {
-  if (isNotPN()) {
-    assert(!this->Elem.empty());
-    assert(this->Elem != "int");
-  }
-}
-
-PNTy::PNTy(llvm::Type *Ty, unsigned PointerSize)
-    : Size(::notdec::retypd::getSize(Ty, PointerSize)),
-      Ty(fromLLVMTy(Ty, PointerSize)) {
-  if (isNotPN()) {
-    Elem = llvmType2Elem(Ty);
-    assert(Elem != "int");
-  }
-}
-
-PNTy::PNTy(std::string Str, unsigned Size)
-    : Size(Size), Ty(str2PtrOrNum(Str)) {
-  if (isNotPN()) {
-    Elem = Str;
-    assert(Elem != "int");
-  }
-}
-
-PNTy::PNTy(std::string Serialized)
-    : PNTy(Serialized.substr(0, Serialized.find(" ")),
-           std::stoi(Serialized.substr(Serialized.find(" ") + 1))) {
-  assert(Serialized.find(" ") != std::string::npos);
-  assert(this->str() == Serialized);
-}
-
-bool PNTy::merge(PNTy Other, bool joinOrMeet) {
-  bool Updated = setPtrOrNum(Other.Ty);
-  if (isNotPN() && !Other.Elem.empty()) {
-    std::string NewElem;
-    if (joinOrMeet) {
-      NewElem = join(Other.Elem, Elem);
-    } else {
-      NewElem = meet(Other.Elem, Elem);
-    }
-    Updated |= NewElem != Elem;
-    Elem = NewElem;
-  }
-  return Updated;
-}
-
-// https://en.wikipedia.org/wiki/Join_and_meet
-
-static bool isFloat(std::string a) { return a == "float" || a == "double"; }
-static bool isInt1(std::string a) {
-  llvm::StringRef Ref(a);
-  return Ref.starts_with("int") || Ref.starts_with("sint") ||
-         Ref.starts_with("uint");
-}
-
-llvm::Type *ToLLVMType(llvm::LLVMContext &Ctx, std::string a, unsigned Size) {
+llvm::Type *Elem2LLVMType(llvm::LLVMContext &Ctx, std::string a,
+                          unsigned Size) {
   // if (a == "top") {
   //   return nullptr;
   // }
@@ -284,67 +114,14 @@ std::string llvmType2Elem(llvm::Type *T) {
   assert(false && "TODO: unhandled LLVM type");
 }
 
-std::string join(std::string a, std::string b) {
-  // std::cerr << "joining " << a << " with " << b << "\n";
-  if (a.empty()) {
-    return b;
+PNTy makePNTyFromLLVMType(llvm::Type *Ty, unsigned PointerSize) {
+  auto PN = fromLLVMTy(Ty, PointerSize);
+  std::string Elem;
+  if (PN == NotPN) {
+    Elem = llvmType2Elem(Ty);
+    assert(Elem != "int");
   }
-  if (b.empty()) {
-    return a;
-  }
-  if (a == b) {
-    return a;
-  }
-  if (a == "top") {
-    return a;
-  }
-  if (b == "top") {
-    return b;
-  }
-
-  std::cerr << "unable to handle join: " << a << " with " << b << "\n";
-  std::abort();
-  return a;
-}
-
-std::string meet(std::string a, std::string b) {
-  if (a.empty()) {
-    return b;
-  }
-  if (b.empty()) {
-    return a;
-  }
-  if (a == b) {
-    return a;
-  }
-  if (a == "top") {
-    return b;
-  }
-  if (b == "top") {
-    return a;
-  }
-
-  // conflict, return top
-  if (isFloat(a) && isInt1(b)) {
-    return "top";
-  }
-  if (isInt1(a) && isFloat(b)) {
-    return "top";
-  }
-
-  // prefer specific int
-  if (isInt1(a) && isInt1(b)) {
-    if (a == "int") {
-      return b;
-    }
-    if (b == "int") {
-      return a;
-    }
-  }
-
-  std::cerr << "Error: unable to handle meet: " << a << " with " << b << "\n";
-  // std::abort();
-  return a;
+  return PNTy(PN, getSize(Ty, PointerSize), std::move(Elem));
 }
 
 } // namespace notdec::retypd

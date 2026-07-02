@@ -14,6 +14,7 @@
 #include "notdec/TypeRecovery/mlsub/HTypeNormalize.h"
 #include "notdec/TypeRecovery/mlsub/Metadata.h"
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
+#include "notdec/TypeRecovery/LowTy.h"
 #include "notdec/Utils/AllSCCIterator.h"
 #include "notdec/Utils/SingleNodeSCCIterator.h"
 #include "notdec/Utils/Utils.h"
@@ -2596,7 +2597,7 @@ const ExtValuePtr &ConstraintsGenerator::getPNIExtValue(PNIValue Val) const {
 }
 
 PNTy ConstraintsGenerator::getPNILatticeType(const ExtValuePtr &Val) const {
-  return PNTy(getType(Val), PointerSize);
+  return retypd::makePNTyFromLLVMType(getType(Val), PointerSize);
 }
 
 PNINode *ConstraintsGenerator::getPNINodeOrNull(ExtValuePtr Val) {

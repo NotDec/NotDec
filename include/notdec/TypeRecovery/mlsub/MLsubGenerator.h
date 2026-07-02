@@ -38,8 +38,8 @@
 #include <clang/Tooling/Tooling.h>
 
 #include "TypeRecovery/mlsub/MLsubGraph.h"
-#include "TypeRecovery/mlsub/PNDiff.h"
 #include "TypeRecovery/mlsub/PointerAnalysis.h"
+#include "binarysub/PNDiff.h"
 #include "binarysub/binarysub-core.h"
 #include "notdec-llvm2c/Interface.h"
 #include "notdec-llvm2c/Interface/ExtValuePtr.h"
