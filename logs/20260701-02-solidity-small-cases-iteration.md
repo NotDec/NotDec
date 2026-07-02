@@ -3509,3 +3509,47 @@ EVM smoke 用时 `elapsed=29.49 user=33.54 sys=0.75 maxrss=982024`。
 - 实现效果：8/10。字符串 body 已迁到 typed AST / Printer，现有 golden 保持稳定。
 - 理解成本：6/10。节点数量明显增加，但按 Solidity grammar 分组，后续改语义会比散落字符串更直接。
 - 维护成本：6/10。短期仍有 `UnknownExpr` 过渡层；下一步应逐步把 `formatReturnValue()` 拆成结构化 expression builder。
+
+## 2026-07-02：Solidity expression builder 收紧
+
+问题：
+
+上一轮 AST / Printer 重构后，函数体已经是 typed statement，但返回值、event 参数等表达式仍通过 `formatReturnValue()` 拼字符串，再包进 `UnknownExpr`。这会让 AST 里混入不可分析的源码片段，dephication copy 也只能做文本替换。
+
+改动：
+
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/AST/Nodes.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/AST/Nodes.h:93) 删除 `UnknownExpr`，`ExpressionNode` 只保留明确的 Solidity 表达式节点和 TODO condition。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:219) 新增 `rewriteStatement()`，dephication copy 递归改写 return / emit / require / if / loop / block 等 typed statement 里的表达式。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:295) 新增轻量 debug renderer，只给 TODO condition / switch 注释生成可读文本，不再依赖 `UnknownExpr`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:634) 把 `evm_basefee`、`evm_blobbasefee`、`evm_gas`、`evm_caller` 从字符串 builtin 改成 AST 表达式。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:856) 用 `valueExpr()` 替换 `formatReturnValue()`，常量、比较、bool and/or、算术/位运算、EVM div/mod/exp/shift/addmod/mulmod/signextend 都直接构造 `ExprPtr`。
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h:43) 和 [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:1218) 把 event topic 参数改成 `std::vector<ExprPtr>`。
+- [external/NotDec-llvm2c/lib/Solidity/Printer.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Printer.cpp:721) 删除 `UnknownExpr` 打印分支。
+
+保守点：
+
+- CFG 条件仍保留为 `TodoConditionExpr{llvmValueName(...)}`，没有直接打印完整表达式；这避免 selector / owner guard 这类复杂条件把低层表达式提前暴露到 expected 里。后续要单独做条件语义恢复。
+- `CommentStatement` 仍只用于 block label 和 TODO 注释。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-ast-tighten-smoke.sol --tr-level=2
+```
+
+结果：
+
+`notdec.evm.solidity_source` 通过，用时 10.81 秒；`notdec.evm.solidity_rewrite` 通过，用时 100.82 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=30.60 user=34.60 sys=0.79 maxrss=985436`。
+
+复杂度评分：
+
+- 实现效果：8/10。`UnknownExpr` 和 `formatReturnValue()` 已去掉，返回值和 event 参数进入 typed expression AST。
+- 理解成本：6/10。递归 rewrite 代码变长，但逻辑集中在 `BodyBuilder.cpp`，比字符串替换更可控。
+- 维护成本：5/10。表达式扩展点变成 `valueExpr()`，后续小语义点可以直接补 AST node；CFG 条件恢复还需要单独推进。
