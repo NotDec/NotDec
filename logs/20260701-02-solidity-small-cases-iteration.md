@@ -3461,3 +3461,51 @@ function public_0xd8b30904() public returns (uint256 ret0) {
 性能：
 
 EVM smoke 用时 `elapsed=29.37 user=33.64 sys=0.75 maxrss=985128`。
+
+## 2026-07-02：Solidity AST / Printer 重构
+
+问题：
+
+之前 Solidity backend 的函数体仍靠 `std::vector<std::string>` 拼输出，表达式、语句和顶层结构没有独立 AST，后续按 Solidity 语法修语义时很容易继续堆字符串规则。这次按官方 Solidity grammar snapshot 先补一层 AST，并把打印逻辑单独放到 Printer。
+
+参考文档：
+
+- [external/NotDec-llvm2c/docs/solidity-reference/README.md](/sn640/NotDec/external/NotDec-llvm2c/docs/solidity-reference/README.md:1) 记录 Solidity 文档来源 `/sn640/solidity` commit `6fd1c6ca619c70ee715a535615887ff5906c1170`。
+- [external/NotDec-llvm2c/docs/solidity-reference/grammar/SolidityParser.g4](/sn640/NotDec/external/NotDec-llvm2c/docs/solidity-reference/grammar/SolidityParser.g4:1) 和 `grammar.rst` 作为 AST / Printer 对照。
+
+改动：
+
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/AST/Nodes.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/AST/Nodes.h:22) 新增 `IdentifierPath`、`TypeName`、`Expression`、`Statement`、`SourceUnitItem` 等语法节点；`TypeRef` 保留现有可打印类型字符串，同时允许挂接 grammar-shaped `TypeName`。
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/Printer.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/Printer.h:20) 和 [external/NotDec-llvm2c/lib/Solidity/Printer.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Printer.cpp:53) 把 source unit、contract、state/event/error/struct/enum/function、statement、expression、type name 的输出集中到 `Printer`。
+- [external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h](/sn640/NotDec/external/NotDec-llvm2c/include/notdec-backends/Solidity/BodyBuilder.h:30) 把 `Payload` 改成 `std::variant<Statement, Expression>`，`readBody()` / `renderStructuredBody()` 返回 `Block`。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:847) 把 return / revert / require / emit / phi assignment / structured control-flow 输出改成 typed statement payload，保留现有 `formatReturnValue()` 字符串表达式作为 `UnknownExpr` 过渡层。
+- [external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp:970) dephication copy materialize 改为复制 typed payload 后只重写 `UnknownExpr`、`TodoConditionExpr` 和 `CommentStatement` 内的文本。
+- [external/NotDec-llvm2c/lib/Solidity/Reader.cpp](/sn640/NotDec/external/NotDec-llvm2c/lib/Solidity/Reader.cpp:350) `Reader::readFunction()` 直接接收 `Block`；空 payable fallback 明确设置空 body，避免被 Printer 打成声明。
+
+保守点：
+
+- 这次没有把 LLVM value 到 Solidity expression 的恢复完全改成结构化表达式树；为了保持 regression 稳定，已有运算符优先级逻辑暂时仍在 `formatReturnValue()` 里生成文本，再包成 `UnknownExpr`。
+- `CommentStatement` 仍保留给 block label 和 TODO，不作为 Solidity grammar 节点使用。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+ctest --test-dir build -R notdec.evm.solidity_rewrite --output-on-failure
+/usr/bin/time -f 'elapsed=%e user=%U sys=%S maxrss=%M' ./build/bin/notdec test/evm/solidity-patterns/cases/25928_19774281_d048a8d52d_2758caa02f46.ll -o /tmp/notdec-solidity-ast-smoke.sol --tr-level=2
+```
+
+结果：
+
+`notdec.evm.solidity_source` 通过，用时 11.84 秒；`notdec.evm.solidity_rewrite` 通过，用时 99.73 秒。
+
+性能：
+
+EVM smoke 用时 `elapsed=29.49 user=33.54 sys=0.75 maxrss=982024`。
+
+复杂度评分：
+
+- 实现效果：8/10。字符串 body 已迁到 typed AST / Printer，现有 golden 保持稳定。
+- 理解成本：6/10。节点数量明显增加，但按 Solidity grammar 分组，后续改语义会比散落字符串更直接。
+- 维护成本：6/10。短期仍有 `UnknownExpr` 过渡层；下一步应逐步把 `formatReturnValue()` 拆成结构化 expression builder。
