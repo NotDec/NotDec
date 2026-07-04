@@ -577,3 +577,35 @@ fortune smoke 必须固定同口径：
 - 实现效果：7/10。partial write 已经能作为 range def 被读回，循环低位写回能生成 `i32` PHI；但 block-local currentDef 还没有完整落地。
 - 理解成本：4/10。新增接口数量较少，但 `readRangeBefore()` 仍是扫描式实现，后续完整 SSA 时还要继续收敛。
 - 维护成本：4/10。`LocalRangeWrites` 是过渡结构，可以迁移到后续 `CurrentDef[(block, range)]`，不应该长期扩展成复杂 matcher。
+
+# 实现记录：阶段三 full load/store range wrapper
+
+本阶段把 full load 的入口收敛到 `readValueBefore()`，并让它先尝试 full-range 读取。旧 whole-register 扫描仍作为 fallback 保留，`RSP` 和 segment base register 先不走 range-first，避免影响栈指针和 canary 基址这类特殊逻辑。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3188`、`:3194`：`rewriteLoads()` 不再自己直接调用 `readFullRangeValueBefore()`，统一交给 `readValueBefore()`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3992`、`:3995`、`:3998`：`readValueBefore()` 增加 range-first wrapper，先用 `readFullRangeValueBefore()` 尝试按 planned segments 拼回整寄存器值，失败后继续走旧扫描路径。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4640`、`:5976`：新增并注册 `testFullStoreFeedsPartialReadThroughRangeSSA()`，确认 full `store @RAX` 后的低 32 位 partial read 可以通过 range SSA 消除，不留下 partial read helper 或原始 `RAX` load。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-stage3-20260704174012`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`seconds=9.71 user=9.59 sys=0.02 maxrss=170364`
+  - `partial_read=0`
+  - `partial_write=0`
+  - `summary_return=2`
+  - `summary_clobber=0`
+  - raw register load/store：`0/0`
+  - warning 文件：`/tmp/notdec-bin2llvm-fortune-range-stage3-20260704174012/register-ssa-warnings.txt`，共 7 行。
+  - `run.stdout` / `run.stderr` 都为空。
+
+## 复杂度评估
+
+- 实现效果：7/10。full load 现在默认先走 range 读取，full store 已能通过阶段二的 `writeAccessRange()` 被 partial read 消费；fortune 当前结果没有回退。
+- 理解成本：4/10。改动入口很小，但因为 whole-register fallback 还在，读代码时仍要同时理解两条路径。
+- 维护成本：4/10。这是保守过渡，后续完整 `CurrentDef[(block, range)]` 落地后，可以再删除旧 whole-register cache 和扫描 fallback。
