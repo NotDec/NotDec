@@ -1173,3 +1173,78 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=11`
 
 对比上一阶段 `/tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547`：`raw_load_all` 保持 0；中间调试发现的 post-signature `RDI.entry` 在本次输出中消失，`summary_entry_loads=0`。运行时间从 `7.78s` 到 `7.71s`，没有看到性能退化。剩余问题仍是 `summary_return=2`、`summary_clobber=6`，需要后续结合具体 callsite 再判断是否能安全消除。
+
+---
+
+# 实现记录 2026-07-04 return clobber pruning
+
+## 已完成范围
+
+本次继续处理剩余 `summary_clobber`。分析 fortune 后发现，部分 RDX clobber 并不是后续真实参数使用，而是被内部函数返回 tuple 的 RDX slot 拉进来：为了构造返回值，SummarySSA 又去读取外部调用后的 RDX，从而 materialize `notdec.register.summary_clobber.i64()`。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4464`：`collectFunctionReturnValues()` 在读取返回 slot 前先判断该 slot 沿返回路径是否会读到 call clobber；会读到时直接用 frozen poison 表达 unknown 返回值，避免为了构造返回 tuple 生成 clobber helper。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4480`：新增 `returnSlotMayReadCallClobber()`，从 return block 沿 predecessor 回看目标 register range。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4515`：新增 `blockMayClobberReturnRangesBefore()`，在单个 block 内遇到目标 register store 就停止，遇到会 clobber 目标 range 的 call 就判定该返回 slot 不应 materialize。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:2705`：新增 `testClobberReturnPhiDoesNotMaterializeHelper()`，覆盖返回 PHI 中一条路径来自 clobber、另一条路径是已知值时不保留 `summary_clobber` helper。
+
+## 实现判断
+
+这次仍然不是删除所有 clobber。真实进入后续普通调用参数的 clobber helper 继续保留并输出 warning；只裁掉“为了返回 tuple 读取 clobber”这一类中间产物。这个策略偏保守：如果某个返回 slot 沿路径可能读到 call clobber，就把该 slot 作为 unknown 返回值处理，不把外部调用 clobber 冒充成内部函数的稳定返回。
+
+复杂度评分：
+
+- 实现效果：7/10。fortune 中 `summary_clobber_calls` 从 6 降到 3，warning 从 11 行降到 8 行；raw register load/store 仍保持 0。
+- 理解成本：5/10。新增了一个只服务 return collection 的小型反向检查，但范围局限在返回值收集阶段。
+- 维护成本：4/10。逻辑复用现有 `callEffect()` 和 range planner；后续如果返回 demand 更精细，可以把这个检查合并到 range liveness。
+
+## 验证
+
+构建和单测：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target native_register_summary_ssa_test pcode_to_llvm_test \
+  native_register_summary_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-return-clobber-prune-clean-20260704103031/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-return-clobber-prune-clean-20260704103031/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-return-clobber-prune-clean-20260704103031/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-return-clobber-prune-clean-20260704103031/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-return-clobber-prune-clean-20260704103031/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-return-clobber-prune-clean-20260704103031/fortune.bc \
+  -o /dev/null
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-return-clobber-prune-clean-20260704103031`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.71 user=7.67 sys=0.03 maxrss=169904`
+- `partial_read_calls=0`
+- `partial_write_calls=0`
+- `summary_return_calls=2`
+- `summary_clobber_calls=3`
+- `register_access_metadata=0`
+- `summary_entry_loads=0`
+- `raw_load_all=0`
+- `raw_store_global_register=0`
+- `warning_lines=8`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350`：`summary_clobber_calls` 从 6 降到 3，warning 从 11 行降到 8 行；`partial_read` / `partial_write` / raw register load/store 继续保持 0。运行时间从 `7.71s` 到 `7.71s`，没有看到性能退化。剩余 helper 为 indirect call 后的 `RAX.summary_return`，以及仍真实进入后续使用的两个 RDX clobber。
