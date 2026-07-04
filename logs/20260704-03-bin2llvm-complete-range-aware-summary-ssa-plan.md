@@ -506,3 +506,39 @@ fortune smoke 必须固定同口径：
 - 不在这个阶段动主 NotDec 中端类型恢复。
 - 不用 0 替代 unknown。
 - 不为了让 fortune 更干净盲删 unresolved indirect return。
+
+# 实现记录：阶段一 planner/audit
+
+本阶段只补 range planner 的边界和审计信息，不改 full load/store、partial write、call effect 的实际 SSA 重写语义。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/include/notdec-bin2llvm/passes/summary/NativeRegisterSummarySSA.h:54`、`:102`：在函数级和总 summary 中加入 `RangeRegistersPlanned`、`RangeSegmentsPlanned`、`RangeReadEvents`、`RangeWriteEvents`、`RangeClobberEvents`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:127`：加入 `RangeEventKind`，用于审计 read/write/clobber 事件。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2742`：新增 ABI slot、summary demand mask 到 range boundary 的转换逻辑。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2847`：`planRegisterRanges()` 现在会把 ABI input/output、call killed/preserved register、`EntryDemandMask`、`ExitDemandMask` 纳入 planned segment，并统计 range read/write/clobber 事件。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4748`、`:4775`、`:5559`：把 range planner 计数写入函数 metadata、总 summary 聚合和文本输出。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:305`：新增 `summarySsaMetadataUInt()`，用于检查 `notdec.register.summary_ssa` metadata 里的计数。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:5090`、`:5117`：新增 ABI float slot 和 demand-mask range split 两个 planner 测试。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-stage1-20260704163204`
+  - 命令使用 `build/bin/notdec-native-llvm /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune --all-confirmed --skip-runtime`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`seconds=8.87 user=8.85 sys=0.01 maxrss=171512`
+  - `partial_read=0`
+  - `partial_write=0`
+  - `summary_return=2`
+  - `summary_clobber=0`
+  - raw register load/store：`0/0`
+  - warning 文件：`/tmp/notdec-bin2llvm-fortune-range-stage1-20260704163204/register-ssa-warnings.txt`，共 7 行。
+
+## 复杂度评估
+
+- 实现效果：7/10。阶段一已经能暴露 planner 切分规模和 range 事件，方便后续判断 whole-register fallback 来自哪里；但还没有改变实际 SSA 主路径。
+- 理解成本：3/10。新增逻辑集中在 `planRegisterRanges()` 附近，主要是补边界和计数，没有引入新的重写模型。
+- 维护成本：3/10。计数是审计信息，后续完整 range SSA 落地时可以继续复用；如果 planner 改成更严格的 mandatory coverage，只需要调整这里的统计口径。
