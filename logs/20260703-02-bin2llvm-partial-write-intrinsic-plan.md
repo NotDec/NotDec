@@ -215,3 +215,56 @@ fortune：
 - 维护成本：6/10。方案比继续匹配 keep-high pattern 更清楚；后续如果做 mask 粒度 summary，可以沿用 helper 的解析和 transfer 入口。
 
 更好的后续方案是把 summary 的 bool 粒度升级到 bit-mask 粒度，这样 partial write 的 liveness 和 demand 不需要继续按 whole-register 保守处理。
+
+## 修复记录（2026-07-04）：partial write helper 被重命名为 `@1`
+
+用户发现 fortune 输出里有：
+
+```llvm
+call void @1(ptr nonnull @RAX, i8 %unique_e800_1472, i64 0)
+declare void @1(ptr, i8, i64)
+```
+
+根因是 `notdec.partial_write.*` declaration 进入了 SummarySSA 的函数签名重写流程。`createReplacementFunction()` 会把旧函数名移动到新函数上，旧 declaration 失去名字后由 LLVM 打印成 `@1`，而残留 call 仍指向旧 helper，所以最终出现数字函数名。
+
+本次改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:821` 在 `isUnknownExternalFunction()` 中排除 `notdec.partial_write.*`，避免它被当成未知外部函数参与参数数量推断。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1750` 在 `buildInitialSignatureShapes()` 中排除 `notdec.partial_write.*`，避免它被创建 replacement function。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3896` 新增 `testPartialWriteHelperNameSurvivesSignatureRewrite()`，构造“未知外部调用触发签名重写 + partial helper 残留”的场景，检查 `notdec.partial_write.i64.i8` 没被改名，且没有生成 `@1` declaration。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4474` 把该回归测试接入 SummarySSA 测试主入口。
+
+验证：
+
+```bash
+cmake --build build --target native_register_summary_ssa_test -j4
+./build/bin/native_register_summary_ssa_test
+```
+
+通过。
+
+fortune 同口径重跑：
+
+```bash
+./build/bin/notdec-native-llvm /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-partial-helper-name-20260704030605/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-partial-helper-name-20260704030605/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-partial-helper-name-20260704030605/fortune.ll
+```
+
+结果：
+
+- 运行时间：`seconds=7.10`。
+- IR 路径：`/tmp/notdec-bin2llvm-fortune-partial-helper-name-20260704030605/fortune.ll`。
+- warning 文件：`/tmp/notdec-bin2llvm-fortune-partial-helper-name-20260704030605/register-ssa-warnings.txt`。
+- `llvm-as` 和 `opt -passes=verify` 通过。
+- `call void @1(ptr ...)`：0。
+- `declare void @1(ptr, ...)`：0。
+- `notdec.partial_write` 残留：79。
+- `summary_return` 残留：2。
+- `summary_clobber` 残留：40。
+- raw register access metadata：141。
+- warning：46 行。
+
+之前记录里的 `notdec.partial_write` 残留 0 是被 `@1` 改名问题掩盖了，不代表 helper 真被全部消除了。当前修复只解决错误重命名；剩余正常名字的 `notdec.partial_write.*` 是后续 register residue 消除问题。
