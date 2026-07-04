@@ -1248,3 +1248,108 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=8`
 
 对比上一阶段 `/tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350`：`summary_clobber_calls` 从 6 降到 3，warning 从 11 行降到 8 行；`partial_read` / `partial_write` / raw register load/store 继续保持 0。运行时间从 `7.71s` 到 `7.71s`，没有看到性能退化。剩余 helper 为 indirect call 后的 `RAX.summary_return`，以及仍真实进入后续使用的两个 RDX clobber。
+
+---
+
+# 实现记录 2026-07-04 native eh-frame cold block folding
+
+## 已完成范围
+
+本次处理 fortune 里 `0x3470` 被跳过、并派生出 `notdec_native_3d98` declaration 的问题。根因不是寄存器 SSA，而是 `.eh_frame` 给出的非连续冷块被当成独立函数；冷块尾跳回 `0x3470` 内部后，lowering 又把跨 range 目标当成 native tail-call 函数。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:4465`：`FlowFactNormalizer::run()` 在 split 后增加 decoded direct target block 导入，补齐已解码但不在 seed range 内的冷块。
+- `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:4596`：`foldEhFrameOnlyBranchTargets()` 增加 eh-frame-only 冷函数尾跳回已确认函数内部块的折回逻辑。
+- `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:4641`：新增 `restoreFoldedEhFrameFlowTargets()`，折回后恢复 direct/tail flow 的 CFG successor，并按 terminator 当前所属 block 写边，避免 split 后把旧 successor 写回错误 block。
+- `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:4709`：新增 `ensureFunctionBlockStartsAt()`，折回后如果 owner 内部 direct target 落在 copied block 中间，先切出目标 block。
+- `external/NotDec-bin2llvm/lib/NativeAnalysis.cpp:4792`：新增 `appendDecodedDirectTargetBlocks()` / `appendDecodedDirectTargetBlockAt()`，只导入 unowned decoded targets，避免 eh-frame-only 冷函数反向吸收主函数块。
+- `external/NotDec-bin2llvm/tests/native_analysis_facts_test.cpp:233`：新增 `testFlowNormalizerFoldsEhFrameTailBackIntoOwner()`，覆盖 eh-frame 冷函数尾跳回 owner 内部块时折回 owner，并清掉 tail-flow metadata。
+- `external/NotDec-bin2llvm/tests/native_analysis_facts_test.cpp:927`：新增 `testFlowNormalizerImportsDecodedColdDirectTarget()`，覆盖已解码冷 direct target 导入和 successor 保留。
+
+同时保留本轮 SummarySSA 小修：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:342`：补 `__errno_location` 已知原型，使其返回值 materialize 为真实 i64 返回，而不是未知 helper。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1682`：`mayDependOnSummaryClobberValue()` 递归追踪 `BinaryOperator`，避免 unknown external arity 把 clobber 参与的二元表达式当作实参证据。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:1616`：新增 `testKnownErrnoLocationReturnIsMaterialized()`。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3033`：新增 `testUnknownExternalArityStopsAtBinaryClobberArg()`。
+
+## 实现判断
+
+这次没有改 lowering 去容忍假的 `notdec_native_<addr>`，而是在 native facts 侧修正函数/块归属。这样 `0x27b2`、`0x27c0`、`0x27d6`、`0x27e3` 都成为 `0x3470` 的非连续 blocks，`0x3d98` 继续作为 `0x3470` 内部块存在，不再生成独立 declaration。
+
+复杂度评分：
+
+- 实现效果：8/10。fortune 中 `0x3470` 从 declaration/skip 恢复为 definition，`notdec_native_3d98` 消失，`llvm-as` 和 verifier 通过。
+- 理解成本：6/10。主要复杂度在 eh-frame 冷块折回后还要恢复 CFG 边，并处理 copied block 再 split 的情况。
+- 维护成本：5/10。逻辑仍限制在 `FlowFactNormalizer`，没有扩大到 lowering；后续如果 native discovery 有更正式的 block owner 模型，可以把这些 helper 收敛进去。
+
+## 验证
+
+构建和单测：
+
+```bash
+cd external/NotDec-bin2llvm
+
+git diff --check
+cmake --build build \
+  --target native_analysis_facts_test pcode_to_llvm_test \
+  native_register_summary_ssa_test native_register_summary_test \
+  notdec-native-llvm -j4
+
+build/bin/native_analysis_facts_test
+build/bin/pcode_to_llvm_test
+build/bin/native_register_summary_ssa_test
+build/bin/native_register_summary_test
+```
+
+额外 facts 检查：
+
+```bash
+build/bin/notdec-native-discover --block-json 0x27c0 \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune
+build/bin/notdec-native-discover --block-json 0x27d6 \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune
+```
+
+结果：
+
+- `0x27c0` 属于 `0x3470`，block `[0x27c0, 0x27d6)`，successor 只有 `0x27d6`。
+- `0x27d6` 属于 `0x3470`，block `[0x27d6, 0x27e3)`，successor `0x3596`。
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-cold-fold-20260704121449/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-cold-fold-20260704121449/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-cold-fold-20260704121449/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-cold-fold-20260704121449/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-cold-fold-20260704121449/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-cold-fold-20260704121449/fortune.bc \
+  -o /dev/null
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-cold-fold-20260704121449`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=8.83 user=8.80 sys=0.02 maxrss=171336`
+- `notdec_native_3470`：生成 definition
+- `notdec_native_3d98`：无残留 declaration/call
+- `partial_read_calls=0`
+- `partial_write_calls=0`
+- `summary_return_refs=2`
+- `summary_clobber_refs=0`
+- `register_access_metadata=0`
+- `raw_load_R=0`
+- `raw_store_R=0`
+- warnings 只剩 indirect call 的 `RAX.summary_return`，以及未知外部签名推断 warning。
+
+对比上一轮成功 smoke `/tmp/notdec-bin2llvm-fortune-scoped-cold-target-20260704111647`：运行时间从 `10.15s` 到 `8.83s`，没有看到性能退化；`notdec_native_3d98` 从 declaration 消失，`summary_clobber_refs` 从 0 保持 0，raw register load/store 继续保持 0。
