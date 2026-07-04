@@ -494,3 +494,86 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - partial write 直接成为 range def，减少对 whole-register fallback 的依赖。
 - full load/store 切成 segment read/write，但需要先设计 dominance-safe materialization，避免之前 call return/clobber extract 不支配 PHI use 的问题。
 - call ABI effect 和 return/clobber helper 按 ABI slot range 定义，尤其是 XMM/ZMM lane。
+
+---
+
+# 实现记录 2026-07-04 xor zero demand
+
+## 已完成范围
+
+本次处理 fortune 里 ZMM lane 清零残留的一类具体问题：lifting 会生成两个连续的同范围 partial read，然后 `xor` 这两个值，再 partial write 回同一 lane。SummarySSA 把两个 read 替换成同一个 range value 后，这个 `xor` 实际是清零，不应该继续向入口寄存器传播 demand。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummary.cpp:525` 在 `computeValueDemands()` 里识别 `xor x, x`，不再把 demand 传回两个输入，避免把清零前的寄存器值误标为真实 entry input。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2247` 在 partial demand 的 known mask 计算里把 `xor x, x` 视为零 mask。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2470` 在 partial demand 反向传播里遇到 `xor x, x` 直接停止，不再让 zero-demand rewrite 保留无意义输入。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4058` 新增 `testConsecutivePartialReadXorIsZeroedAfterSummarySSA()`，覆盖连续 partial read 被替换后 `xor` 折成零的场景。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4855` 把新增测试接入主测试序列。
+
+## 实现判断
+
+这一步不是完整的 ZMM range ABI 修复，只修正一个明确的需求传播错误。它减少了“清零动作被当成读取入口寄存器”的误判，也让后续 liveness 能删除更多 partial write。
+
+复杂度评分：
+
+- 实现效果：7/10。fortune 的 partial read 从 35 降到 33，partial write 从 13 降到 11，summary helper 从 30 降到 28。
+- 理解成本：3/10。规则只针对 LLVM 里明确的 `xor x, x` 清零 idiom，没有引入新的状态。
+- 维护成本：3/10。summary 和 SummarySSA 的两个 demand walker 都补同一条规则，后续若抽公共 bit-demand 逻辑可以统一。
+
+## 验证
+
+单测和构建：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target pcode_to_llvm_test native_register_summary_test \
+  native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732/fortune.bc \
+  -o /dev/null
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.19 user=7.16 sys=0.03 maxrss=170800`
+- `partial_read_calls=33`
+- `partial_write_calls=11`
+- `summary_return_calls=1`
+- `summary_clobber_calls=27`
+- `register_access_metadata=45`
+- `raw_load_all=6`，其中 5 个是 SummarySSA entry 脚手架 load，1 个是仍带寄存器访问的 `RDI` raw load
+- `raw_store_global_register=2`
+- `warning_lines=33`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-range-args-final-20260704064619`：partial read 从 35 降到 33，partial write 从 13 降到 11，summary return 从 2 降到 1，summary clobber 从 28 降到 27。运行时间从 `7.24s` 到 `7.19s`，没有看到性能退化。
+
+## 后续
+
+剩余主要集中在：
+
+- `notdec_native_3eb0`：还有较多 partial read 和 summary helper，需要继续看 call effect / return helper 的 range 化。
+- `notdec_native_32e0`：还有 ZMM0/ZMM1 partial write，下一步应继续做 partial write 的真正 range def。
+- `notdec_native_5270`、`notdec_native_5040`：还残留少量 summary helper，需要结合签名 shape 和 internal call effect 继续收窄。
