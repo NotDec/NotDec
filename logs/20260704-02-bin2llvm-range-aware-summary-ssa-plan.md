@@ -1088,3 +1088,88 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=11`
 
 对比上一阶段 `/tmp/notdec-bin2llvm-fortune-full-range-skip-special-20260704093656`：`raw_load_all` 从 3 降到 0；对比 canary mask 修复后的 `/tmp/notdec-bin2llvm-fortune-canary-mask-20260704094422`：剩余 `RDI` raw load 也降到 0。运行时间从 `7.75s` 到 `7.78s`，没有看到性能退化。剩余问题集中在仍有 use 的 `summary_return` / `summary_clobber` helper 和 unknown external signature warning。
+
+---
+
+# 实现记录 2026-07-04 clobber argument filtering and entry argument cleanup
+
+## 已完成范围
+
+本次继续收敛 SummarySSA 后的残留 helper 和 raw register load。上一版 fortune 已经做到 `partial_read` / `partial_write` / `notdec.register.access` 为 0，但分析 `summary_clobber` 时发现两个问题：
+
+- 外部调用后的 caller-clobbered RDX 可能被当成下一次未知外部调用的参数证据，导致未知签名推断偏大，或者把 `summary_clobber` helper 继续传下去。
+- 内部函数返回值收集时，如果返回 slot 的值来自外部调用 clobber helper，会把这个 helper 暴露到调用者侧。
+- post-signature cleanup 会重新通过 range entry 读取函数入口值；对于已经签名重写成 `%RDI.arg` 的函数，不应该再新建 `load @RDI`。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:138`：新增 `bindingForIndex()`，签名重写按 ABI 参数 index 查绑定，避免 clobber 证据中断后把稀疏 binding 当成连续数组。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4018`：新增 `entryArgument()`，post-signature cleanup 时从当前函数签名里查对应 register 参数。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4036`：`entryRangeInput()` 在 `PostSignatureCleanup` 下优先从 `%REG.arg` 抽取 range；没有参数时才 fallback 到 entry global load。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4208`：`callArgStoreBindings()` 遇到依赖 `summary_clobber` 的值时停止收集参数证据，不再把 caller-clobbered 值当实参。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4464`：`collectFunctionReturnValues()` 遇到依赖 `summary_clobber` 的返回 slot 时改用 frozen poison，避免内部函数把外部 clobber helper 作为返回值暴露出去。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4956`：`rewriteSignatureShapes()` 使用 `bindingForIndex()`，缺失参数用 frozen poison 补位。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:339`：新增 `valueNameContains()` 测试辅助函数。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:2516`：调整 RDX clobber 测试，让 RDX 被真实消费后再检查 warning，避免用死 load 期待 helper 残留。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:2579`：新增 `testUnknownExternalClobberArgBecomesUnknown()`，覆盖 clobber-derived value 不作为下一次 unknown external 参数。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:2656`：新增 `testInternalReturnDoesNotExposeExternalClobber()`，覆盖内部函数返回不暴露外部 clobber helper。
+
+## 实现判断
+
+这次没有试图直接删除所有 `summary_clobber`。仍然被真实使用的 clobber helper 保留并输出 warning；只阻断两类不应该传播的路径：未知外部参数证据、内部函数返回值。post-signature entry 修复也只在函数已经有签名参数时生效，不改变无签名函数的入口未知值表达。
+
+复杂度评分：
+
+- 实现效果：7/10。fortune 的 `raw_load_all` 和 SummarySSA entry load 回到 0，clobber-derived 参数/返回传播有单测覆盖；fortune 中 `summary_clobber_calls` 仍为 6，说明剩余 helper 是真实使用或还需要后续更细的 ABI/数据流判断。
+- 理解成本：4/10。新增逻辑都贴在已有 call arg、return collection、entry range input 路径上，没有新增分析阶段。
+- 维护成本：4/10。`entryArgument()` 依赖当前 SignatureShape 参数顺序，和签名重写已有逻辑一致；后续 whole-register fallback 删除时可以一起简化。
+
+## 验证
+
+构建和单测：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target native_register_summary_ssa_test pcode_to_llvm_test \
+  native_register_summary_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350/fortune.bc \
+  -o /dev/null
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-summaryssa-entry-arg-20260704101350`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.71 user=7.68 sys=0.02 maxrss=170640`
+- `partial_read_calls=0`
+- `partial_write_calls=0`
+- `summary_return_calls=2`
+- `summary_clobber_calls=6`
+- `register_access_metadata=0`
+- `summary_entry_loads=0`
+- `raw_load_all=0`
+- `raw_store_global_register=0`
+- `warning_lines=11`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547`：`raw_load_all` 保持 0；中间调试发现的 post-signature `RDI.entry` 在本次输出中消失，`summary_entry_loads=0`。运行时间从 `7.78s` 到 `7.71s`，没有看到性能退化。剩余问题仍是 `summary_return=2`、`summary_clobber=6`，需要后续结合具体 callsite 再判断是否能安全消除。
