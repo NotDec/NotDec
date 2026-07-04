@@ -784,3 +784,76 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=33`
 
 对比 duplicate partial read xor cleanup 后的 `/tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807`：`partial_read` 从 3 降到 0，metadata 从 3 降到 1；运行时间从 `7.22s` 到 `7.41s`，仍在当前 fortune 波动范围内。剩余重点是签名重写后的 full register load 和 `summary_clobber`。
+
+---
+
+# 实现记录 2026-07-04 dead summary helper cleanup
+
+## 已完成范围
+
+fortune 剩余 `summary_clobber` 里大部分是 use-empty 的 synthetic helper call。它们只是 SummarySSA 为 call clobber 创建的未知值，占位值没有被后续 IR 使用时可以直接删除。之前只删 unused helper declaration，没有删 call 本身，所以 final IR 和 warning 文件里还残留大量无 use 的 `notdec.register.summary_clobber.i64()`。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:896`：新增 `eraseDeadSummaryCallValueHelpers(...)`，扫描非 declaration 函数，只删除 use-empty、callee 名字为 `notdec.register.summary_*`，且带 `notdec.register.summary_ssa.call_value` metadata 的 call。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5087`：在 SummarySSA residue cleanup 尾部、warning 收集前调用 dead helper 删除，并再次清理 unused summary helper declaration。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4133`：新增 `testDeadSummaryCallValueHelperIsRemovedBySummarySSA()`，覆盖 dead helper 被删、仍被 store 使用的 helper 保留。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:5133`：把新增测试接入主测试序列。
+
+## 实现判断
+
+这一步只删没有 use 的 synthetic helper，不改变仍被 PHI、store、return 使用的 clobber/return 值。它减少的是调试噪声和输出残留；真正还被使用的 `summary_clobber` 仍保留，后续需要继续分析其值流。
+
+复杂度评分：
+
+- 实现效果：7/10。fortune 中 `summary_clobber` 从 27 降到 5，warning 从 33 降到 11，`register_access_metadata` 从 1 降到 0。
+- 理解成本：3/10。规则直接：SummarySSA 自己创建的 helper，use-empty 就删。
+- 维护成本：3/10。只依赖 helper 名字和既有 metadata；如果后续 helper 机制改名，需要同步这一处。
+
+## 验证
+
+构建和单测：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318/fortune.bc \
+  -o /tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318/fortune.verified.bc
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.27 user=7.24 sys=0.02 maxrss=170848`
+- `partial_read_calls=0`
+- `partial_write_calls=0`
+- `summary_return_calls=1`
+- `summary_clobber_calls=5`
+- `register_access_metadata=0`
+- `raw_load_all=5`
+- `raw_store_global_register=0`
+- `warning_lines=11`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629`：`summary_clobber` 从 27 降到 5，warning 从 33 降到 11，`register_access_metadata` 从 1 降到 0；运行时间从 `7.41s` 到 `7.27s`，没有看到性能退化。剩余 5 个 `summary_clobber` 都仍有 use，不能按 dead helper 删除。
