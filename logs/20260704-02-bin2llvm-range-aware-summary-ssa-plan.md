@@ -325,3 +325,88 @@ fortune smoke：
 - call ABI effect 和 return/clobber helper 按 ABI slot range 定义。
 - liveness/dead store 改成 range live set。
 - entry input 从 whole-register load 抽取，继续改成按需窄 entry input。
+
+---
+
+# 实现记录 2026-07-04 range liveness
+
+## 已完成范围
+
+本次继续推进 partial read/write 后面的 dead store liveness，把原来的 whole-register live set 改成 range live set。full load/store 和 call ABI 仍保守映射为完整 register 的所有 segment；partial read/write 则只让对应 bit range 参与活跃判断。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:115` 给 `RegisterRangeKey` 增加 `operator==`，并新增 `LiveRegisterRanges`，方便 liveness 固定点比较。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2933` 将 `removeDeadStoresByLiveness()` 的 `liveIn/liveOut` 从 `set<GlobalVariable *>` 改成 `LiveRegisterRanges`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2977` 将 `transferBlockLiveness()` 改成传递 range live set。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3004` 修改 `eraseDeadStoresInBlock()`：full store 仍看该 global 是否有任意 live range；partial write 则只看写入 range 是否 live。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3059` 修改 store/load/call 的 liveness transfer：full store kill 所有 segment，full load 让所有 segment live，call return/clobber kill 所有 segment，call read 让所有 segment live。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3083` 修改 partial read/write transfer：partial read 只插入覆盖的 planned ranges，partial write 只 kill 覆盖的 planned ranges。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3142` 新增 `insertGlobalRanges()`、`eraseGlobalRanges()`、`insertPartialRanges()`、`erasePartialRanges()`、`hasLiveGlobalRange()`、`hasLivePartialRange()`。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4073` 新增 `testDeadPartialWriteUsesRangeLiveness()`，验证写 `RAX[0:32]` 后只读 `RAX[32:32]` 时，低位 partial write 会被删除。
+
+## 实现判断
+
+这一步不是完整 partial write range SSA；它先解决 dead store 判断太粗的问题。现在 partial write 是否保留由写入 bit range 是否被后续读取决定，不再因为同一个 register 的其他 bit range live 而保留。
+
+复杂度评分：
+
+- 实现效果：8/10。fortune 的 partial write 残留从 21 降到 13，raw register load 从 2 降到 0。
+- 理解成本：6/10。range read SSA 和 range liveness 已经共用 `RegisterRangeKey`，但 whole-register SSA 仍存在。
+- 维护成本：6/10。full load/store 和 call ABI 仍用完整 segment 保守映射，后续迁移时需要继续收窄。
+
+## 验证
+
+单测和构建：
+
+```bash
+cmake --build build --target native_register_summary_ssa_test -j4
+./build/bin/native_register_summary_ssa_test
+
+cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4
+./build/bin/pcode_to_llvm_test
+./build/bin/native_register_summary_test
+./build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+./build/bin/notdec-native-llvm /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-range-liveness-20260704051959/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-range-liveness-20260704051959/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-range-liveness-20260704051959/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-range-liveness-20260704051959/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-range-liveness-20260704051959/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-range-liveness-20260704051959/fortune.bc \
+  -o /dev/null
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-range-liveness-20260704051959`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.06 user=7.03 sys=0.02 maxrss=170920`
+- `partial_read_calls=35`
+- `partial_write_calls=13`
+- `summary_return_calls=2`
+- `summary_clobber_calls=28`
+- `register_access_metadata=47`
+- `raw_register_loads=0`
+- `raw_register_stores=3`
+- `warning_lines=34`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-range-20260704050113`：partial write 从 21 降到 13，register access metadata 从 57 降到 47，raw register loads 从 2 降到 0。运行时间从 `6.87s` 到 `7.06s`，略有波动但没有明显退化。
+
+## 后续
+
+下一步仍是把定义侧真正切到 range：
+
+- partial write 直接成为 range def，而不是只在 liveness 中按 range 处理。
+- full load/store 切成 segment read/write，逐步删除 whole-register SSA cache。
+- call ABI effect 和 return/clobber helper 按 ABI slot range 定义，尤其是 XMM/ZMM lane。
