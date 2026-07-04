@@ -410,3 +410,87 @@ fortune smoke：
 - partial write 直接成为 range def，而不是只在 liveness 中按 range 处理。
 - full load/store 切成 segment read/write，逐步删除 whole-register SSA cache。
 - call ABI effect 和 return/clobber helper 按 ABI slot range 定义，尤其是 XMM/ZMM lane。
+
+---
+
+# 实现记录 2026-07-04 range call arguments
+
+## 已完成范围
+
+本次继续推进 call 参数读取，把 `callArgStoreBindings()` 从先读 whole register 再 cast，改成优先按签名 slot 的 bit range 读取。这样低 32 位参数可以直接从 range SSA 得到，不需要为了构造实参先读完整 `RDI/R9/...`。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3895` 修改 `callArgStoreBindings()`：参数绑定现在调用 `readSlotValueBefore()`，返回值已经是 `slotType(slot)`，后续签名重写直接使用该值。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3935` 新增 `readSlotValueBefore()`：先走 `readSlotRangeBefore()`，失败时才退回 whole-register `readValueBefore()`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3955` 新增 `readSlotRangeBefore()`：按 `slot.OffsetBits/slot.SizeBits` 查 planned ranges，通过 `assembleRangeRead()` 拼成整数或 float ABI 参数。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3991` 新增 `findNearestStoreBeforeCall()`：只扫描 call 前最近的同寄存器 store，用于保留旧的 ABI argument store 清理证据；不再为了找证据额外构造 whole-register SSA value。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:1643` 新增 `testCallArgUsesPartialRangeRead()`，覆盖 partial write 后直接作为外部 call 参数的场景，确认不生成 whole-register `i64` PHI，partial helper 被消除，call 被正常重写。
+
+## 实现判断
+
+这一步只收窄 call 参数收集，不改 full load/full store 的全局重写策略。这样避免了之前 full-load range 实验中出现的支配关系问题：新值只在 call 前 materialize，只服务当前 call 参数，不跨 block 复用到 PHI。
+
+复杂度评分：
+
+- 实现效果：7/10。fortune 的 `register.access` 从 47 降到 45，真实 raw register global store 从 4 降到 2，带 `register.access` 的 raw store 从 3 降到 1；partial read/write 数量持平。
+- 理解成本：6/10。参数读取现在有 slot range 路径和 whole-register fallback 两层，但范围只在 call 参数绑定内。
+- 维护成本：6/10。`findNearestStoreBeforeCall()` 是为了保留 ABI store 清理证据的过渡逻辑，后续 full store 切到 range 后可以再统一。
+
+## 验证
+
+单测和构建：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target pcode_to_llvm_test native_register_summary_test \
+  native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-range-args-final-20260704064619/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-range-args-final-20260704064619/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-range-args-final-20260704064619/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-range-args-final-20260704064619/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-range-args-final-20260704064619/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-range-args-final-20260704064619/fortune.bc \
+  -o /dev/null
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-range-args-final-20260704064619`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.24 user=7.20 sys=0.03 maxrss=169628`
+- `partial_read_calls=35`
+- `partial_write_calls=13`
+- `summary_return_calls=2`
+- `summary_clobber_calls=28`
+- `register_access_metadata=45`
+- `raw_load_all=1`，其中 `raw_load_summary_entry=1`，`raw_load_register_access=0`
+- `raw_store_global_register=2`
+- `raw_store_register_access=1`
+- `warning_lines=33`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-range-liveness-20260704051959`：partial read/write 持平，`register.access` 从 47 降到 45，warning 从 34 降到 33。上一阶段 raw load 统计里有 3 个 `load i64, ptr @...`，其中 1 个是 SummarySSA entry 脚手架；本阶段只剩 1 个 entry 脚手架 load，不带 `notdec.register.access`。运行时间从 `7.06s` 到 `7.24s`，略有波动，未见明显性能退化。
+
+## 后续
+
+下一步建议继续处理定义侧：
+
+- partial write 直接成为 range def，减少对 whole-register fallback 的依赖。
+- full load/store 切成 segment read/write，但需要先设计 dominance-safe materialization，避免之前 call return/clobber extract 不支配 PHI use 的问题。
+- call ABI effect 和 return/clobber helper 按 ABI slot range 定义，尤其是 XMM/ZMM lane。
