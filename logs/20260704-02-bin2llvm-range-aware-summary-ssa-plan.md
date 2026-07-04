@@ -1003,3 +1003,88 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=11`
 
 对比上一阶段 `/tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427`：raw register load 从 1 降到 0；运行时间从 `7.55s` 到 `7.49s`，没有看到性能退化。剩余问题集中在仍有 use 的 `summary_return` / `summary_clobber` helper。
+
+---
+
+# 实现记录 2026-07-04 full-range load dominance and late cleanup
+
+## 已完成范围
+
+本次继续处理 range-aware SummarySSA 后的 fortune 残留。上一版已经没有 `partial_read` / `partial_write`，但 full register load 和 late canary 形状仍会留下少量 raw register load：
+
+- `FS_OFFSET.entry`：stack canary 比较里，saved canary 一侧被 range rewrite 变成 `and load, 0xffffffff`，旧 canary cleanup 只认比较两边都是直接 `load`。
+- `RDI`：`notdec_native_5040` 已经被签名重写成带 `RDI.arg` 的内部函数，但函数体里一个原始 full register load 没在第一次 SummarySSA 中替掉，post-signature cleanup 也没有重新收集 load 并做 rewrite。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1907`：post-signature cleanup 阶段重新 `collectAccesses()` / `planRegisterRanges()`，然后执行 `rewriteLoads()` 和 `removeDeadReplacedLoads()`，让签名重写后仍可清理残留 full register load。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2861`：新增 `valueDominatesUse()`，full-range 拼接前检查 segment value 支配当前 use。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2881`：新增 `assembleRangeReadIfDominating()`，只在覆盖 segments 都支配当前 load/call 时拼接 full value，避免错误复用分支内局部值。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2925`：新增 `readFullRangeValueBefore()`，让 full register load 优先走 range SSA 拼接，失败时才回退到旧 whole-register SSA。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2988`：`rewriteLoads()` 接入 full-range read。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3526`、`3594`、`3629`、`3670`：range Braun SSA 读 entry/exit/PHI 时传入 dominator tree；unsafe incoming 会 materialize unknown，而不是留下不支配 use 的值。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4232`：call 参数 slot 读取也改用支配检查后的 range 拼接。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeStackCanaryCleanup.cpp:511`：新增 `savedCanaryLoadFromCompareOperand()`，只支持 `load` 或 `and load, 0xffffffff` 这两种 saved canary compare operand。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeStackCanaryCleanup.cpp:881`：canary predecessor 删除改用 saved-load wrapper 匹配，保留 FS canary 一侧必须是直接 load 的约束。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:384`：`createStackCanaryCheckFunction()` 增加 masked saved canary 构造。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3023`：新增 `testPostSignatureCleanupRewritesInternalEntryRawLoad()`，覆盖签名重写后仍要清理 raw entry register load 的场景。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3711`：新增 `testStackCanaryMaskedSavedLoadIsRemoved()`，覆盖 saved canary 被低 32 位 mask 包装时仍能删除 canary check。
+
+## 实现判断
+
+这次没有扩大 canary 识别到任意表达式，只补了 fortune 里实际出现的 `and load, low32_mask`。post-signature cleanup 也只补 SummarySSA 自己已有的 load rewrite，不引入新的 ABI 推断规则。
+
+复杂度评分：
+
+- 实现效果：8/10。fortune 的 raw register load 从 3 个 `FS_OFFSET.entry` 加 1 个 `RDI`，降到 0；`partial_read` / `partial_write` 继续保持 0。
+- 理解成本：5/10。full-range read 多了 dominance guard，但仍沿用现有 range SSA 和 whole-register fallback。
+- 维护成本：4/10。canary mask 匹配很窄；post-signature cleanup 复用既有 rewrite 流程，后续 whole-register SSA 移除时可以一起简化。
+
+## 验证
+
+构建和单测：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target pcode_to_llvm_test native_register_summary_test \
+  native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547/fortune.bc \
+  -o /tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547/fortune.verified.bc
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-final-range-cleanup-20260704095547`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.78 user=7.75 sys=0.03 maxrss=170012`
+- `partial_read_calls=0`
+- `partial_write_calls=0`
+- `summary_return_calls=2`
+- `summary_clobber_calls=6`
+- `register_access_metadata=0`
+- `raw_load_all=0`
+- `raw_store_global_register=0`
+- `warning_lines=11`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-full-range-skip-special-20260704093656`：`raw_load_all` 从 3 降到 0；对比 canary mask 修复后的 `/tmp/notdec-bin2llvm-fortune-canary-mask-20260704094422`：剩余 `RDI` raw load 也降到 0。运行时间从 `7.75s` 到 `7.78s`，没有看到性能退化。剩余问题集中在仍有 use 的 `summary_return` / `summary_clobber` helper 和 unknown external signature warning。
