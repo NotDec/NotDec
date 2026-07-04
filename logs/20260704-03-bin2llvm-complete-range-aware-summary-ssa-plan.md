@@ -542,3 +542,38 @@ fortune smoke 必须固定同口径：
 - 实现效果：7/10。阶段一已经能暴露 planner 切分规模和 range 事件，方便后续判断 whole-register fallback 来自哪里；但还没有改变实际 SSA 主路径。
 - 理解成本：3/10。新增逻辑集中在 `planRegisterRanges()` 附近，主要是补边界和计数，没有引入新的重写模型。
 - 维护成本：3/10。计数是审计信息，后续完整 range SSA 落地时可以继续复用；如果 planner 改成更严格的 mandatory coverage，只需要调整这里的统计口径。
+
+# 实现记录：阶段二 partial write range def
+
+本阶段先把 partial write 的定义侧接到统一 range 接口上。仍保留 backward scan，不引入完整 block event 预处理，也不删除 whole-register path。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:126`：新增 `InstRangeKey`，用于记录某条写指令定义了哪个 canonical range。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1961`：新增 `LocalRangeWrites`，保存 local write 产生的 segment value。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3046`、`:3117`：新增 `readAccessRange()` 和 `readAccessRangeIfDominating()`，把 access range 读取统一转成 planned segments 拼接。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3137`、`:3162`：full-range 读取和 partial read rewrite 改为先走 `readAccessRange*()`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3732`、`:3743`、`:3766`：新增 `writeSegment()`、`writeAccessRange()`、`writtenSegment()`，把写入值拆成 canonical segment 并缓存。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3788`、`:3805`：`readRangeBefore()` 遇到 full store 或 partial write 时，先调用统一 write semantics，再读取对应 segment。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:5044`、`:5942`：新增并注册 loop partial write 测试，确认循环里 `RAX[0:32]` 自增只生成 `i32` PHI，不生成 whole-register `i64` PHI。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-stage2-20260704173037`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`seconds=9.14 user=9.11 sys=0.02 maxrss=171448`
+  - `partial_read=0`
+  - `partial_write=0`
+  - `summary_return=2`
+  - `summary_clobber=0`
+  - raw register load/store：`0/0`
+  - warning 文件：`/tmp/notdec-bin2llvm-fortune-range-stage2-20260704173037/register-ssa-warnings.txt`，共 7 行。
+
+## 复杂度评估
+
+- 实现效果：7/10。partial write 已经能作为 range def 被读回，循环低位写回能生成 `i32` PHI；但 block-local currentDef 还没有完整落地。
+- 理解成本：4/10。新增接口数量较少，但 `readRangeBefore()` 仍是扫描式实现，后续完整 SSA 时还要继续收敛。
+- 维护成本：4/10。`LocalRangeWrites` 是过渡结构，可以迁移到后续 `CurrentDef[(block, range)]`，不应该长期扩展成复杂 matcher。
