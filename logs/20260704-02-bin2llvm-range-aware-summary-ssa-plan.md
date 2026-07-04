@@ -857,3 +857,76 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=11`
 
 对比上一阶段 `/tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629`：`summary_clobber` 从 27 降到 5，warning 从 33 降到 11，`register_access_metadata` 从 1 降到 0；运行时间从 `7.41s` 到 `7.27s`，没有看到性能退化。剩余 5 个 `summary_clobber` 都仍有 use，不能按 dead helper 删除。
+
+---
+
+# 实现记录 2026-07-04 float entry fallback
+
+## 已完成范围
+
+fortune 剩下的 raw load 里有 4 个是 `ZMM2.entry` / `ZMM3.entry`。这些值不是 dead：父函数把入口 ZMM 值继续传给内部函数。问题是内部函数 shape 构造时，float/ZMM 输入必须有明确 bit demand mask 才会加入参数；如果 demand walker 没恢复出 lane mask，就会跳过参数，后续只能保留 `load @ZMM*`。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1455`：在 `shapeForInternalFunction()` 的 float input 分支里，如果 `ReadEntry=true` 但 demand mask 缺失或为空，退回使用 backing register 类型作为内部函数参数，而不是保留 entry global load。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3041`：新增 `testPreservedZmmEntryIsPassedAsInternalArgument()`，覆盖父函数把入口 ZMM 传给内部子函数时，父函数应获得 `i512 %ZMM0.arg`，call 子函数也应直接使用这个参数。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:5169`：把新增测试接入主测试序列。
+
+## 实现判断
+
+这一步没有解决“ZMM 高位是否真的需要”的问题；在没有 demand mask 时仍会退到完整 `i512`。但它避免了更差的结果：IR 中保留对 register global 的 entry load。后续如果 bit demand 能在 internal call 参数上传递得更细，这里自然可以退回 float lane 或窄整数参数。
+
+复杂度评分：
+
+- 实现效果：7/10。fortune 中 raw register load 从 5 降到 1，`partial_read` / `partial_write` 保持 0。
+- 理解成本：4/10。规则只在内部函数 shape 构造处，且只处理 `ReadEntry=true` 的 float/ZMM 输入。
+- 维护成本：4/10。后续完善 call-arg bit demand 后，可能会减少走这个 fallback 的场景。
+
+## 验证
+
+构建和单测：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target pcode_to_llvm_test native_register_summary_test \
+  native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427/fortune.bc \
+  -o /tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427/fortune.verified.bc
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.55 user=7.50 sys=0.04 maxrss=170864`
+- `partial_read_calls=0`
+- `partial_write_calls=0`
+- `summary_return_calls=1`
+- `summary_clobber_calls=5`
+- `register_access_metadata=0`
+- `raw_load_all=1`
+- `raw_store_global_register=0`
+- `warning_lines=11`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318`：raw register load 从 5 降到 1；运行时间从 `7.27s` 到 `7.55s`，仍在当前 fortune 波动范围内。剩余 raw load 是 `notdec_native_4750` 的 `RAX.entry`，属于 integer output register 被函数入口读取，不能按 float fallback 处理。
