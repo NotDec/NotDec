@@ -652,3 +652,78 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=33`
 
 对比上一阶段 `/tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732`：计数持平，运行时间从 `7.19s` 到 `7.31s`，属于同量级波动。
+
+---
+
+# 实现记录 2026-07-04 duplicate partial read xor cleanup
+
+## 已完成范围
+
+本次处理 fortune 里大量残留的相邻同 range `partial_read` 后再 `xor` 的模式。前面已经在 demand walker 里识别 `xor x, x = 0`，但这里两个输入仍是两个 helper call，range SSA 又会被前面的未知 call effect 卡住，所以原先无法合并成同一个 SSA value。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1852`、`external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1874`：在 partial read rewrite 和死 helper 删除之后调用 `foldDuplicatePartialReadXors()`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2893`：新增 `foldDuplicatePartialReadXors()`，只折叠同一 basic block 内两个相同 `notdec.partial_read` helper 作为 `xor` 两边操作数的场景。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2944`：新增 `samePartialReadRange(...)`，要求 global、full width、read width 和 bit offset 完全一致。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2953`：新增 `hasInterveningWriteToPartialReadRange(...)`，两个 read 之间遇到同 register full store、overlap partial write 或普通 analyzable call 都不折叠。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4188`：新增 `testDuplicatePartialReadXorAfterUnknownCallIsZeroed()`，覆盖未知外部 call 后连续两次读同一 `R9[0:32]` 并 xor 的场景。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:5047`：把新增测试接入主测试序列。
+
+## 实现判断
+
+这一步不是完整的 range SSA 重构，只是清掉一种明确恒等式残留。它仍然朝目标前进：减少 range SSA 被 unknown call 阻断后留下的 `partial_read` helper，并让后续 liveness 能继续删掉相关 partial write。
+
+复杂度评分：
+
+- 实现效果：8/10。fortune 中 `partial_read` 从 33 降到 3，`partial_write` 从 11 降到 0，`notdec.register.access` metadata 从 45 降到 3。
+- 理解成本：5/10。新增的是一个很窄的 cleanup，规则清楚，但放在 SummarySSA 内会多一个局部 canonicalization 点。
+- 维护成本：4/10。只依赖 partial read/write helper 解析和现有 register store 识别；后续如果 full range SSA 覆盖这个模式，可以删掉该 cleanup。
+
+## 验证
+
+构建和单测：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807/fortune.bc \
+  -o /tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807/fortune.verified.bc
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.22 user=7.19 sys=0.02 maxrss=170032`
+- `partial_read_calls=3`
+- `partial_write_calls=0`
+- `summary_return_calls=1`
+- `summary_clobber_calls=27`
+- `register_access_metadata=3`
+- `raw_load_all=7`
+- `raw_store_global_register=0`
+- `warning_lines=33`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-return-range-20260704072757`：`partial_read` 从 33 降到 3，`partial_write` 从 11 降到 0，metadata 从 45 降到 3，运行时间从 `7.31s` 到 `7.22s`，没有看到性能退化。`raw_load_all` 从 6 到 7，主要是 `getenv` 后仍残留的 `RAX` full load 和几个 entry load，下一步应看签名重写后 full load 二次消除。
