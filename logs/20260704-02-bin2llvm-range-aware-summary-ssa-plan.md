@@ -930,3 +930,76 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=11`
 
 对比上一阶段 `/tmp/notdec-bin2llvm-fortune-dead-summary-helper-20260704082318`：raw register load 从 5 降到 1；运行时间从 `7.27s` 到 `7.55s`，仍在当前 fortune 波动范围内。剩余 raw load 是 `notdec_native_4750` 的 `RAX.entry`，属于 integer output register 被函数入口读取，不能按 float fallback 处理。
+
+---
+
+# 实现记录 2026-07-04 read-entry return-register params
+
+## 已完成范围
+
+float entry fallback 后，fortune 只剩 1 个 raw register load：`notdec_native_4750` 里的 `RAX.entry`。这不是死代码；函数入口早退路径会把入口 RAX 拼进返回值。当前 internal signature shape 只允许 ABI input / unaffected register 作为参数，RAX 只在 ABI output 集合里，所以即使 `ReadEntry=true`，也无法变成参数，只能保留 `load @RAX`。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1441`：`shapeForInternalFunction()` 的参数构造先看 summary fact 的 `ReadEntry`，然后允许 ABI input / unaffected register，或 ABI output register 进入内部参数 shape。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:2963`：新增 `testInternalSignatureRewriteUsesReadEntryReturnRegisterArg()`，覆盖 RAX 作为 ABI output register 但被内部函数入口读取时，应重写成 `i64 %RAX.arg`，不再读 `@RAX`。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:5210`：把新增测试接入主测试序列。
+
+## 实现判断
+
+这一步只影响内部函数。外部函数原型仍按 ABI 和原型库处理。对内部函数来说，只要 summary 明确 `ReadEntry=true`，这个寄存器就是函数输入；如果它同时属于 ABI output register，把它作为 internal 参数比保留全局寄存器 load 更直接。
+
+复杂度评分：
+
+- 实现效果：8/10。fortune 中 raw register load 从 1 降到 0。
+- 理解成本：4/10。internal 参数集合从 input/unaffected 扩到 read-entry output register。
+- 维护成本：4/10。后续如果 internal calling convention 单独建模，可以把这个判断挪到统一的 internal register class 规则里。
+
+## 验证
+
+构建和单测：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target pcode_to_llvm_test native_register_summary_test \
+  native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-return-reg-entry-param-20260704083954/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-return-reg-entry-param-20260704083954/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-return-reg-entry-param-20260704083954/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-return-reg-entry-param-20260704083954/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-return-reg-entry-param-20260704083954/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-return-reg-entry-param-20260704083954/fortune.bc \
+  -o /tmp/notdec-bin2llvm-fortune-return-reg-entry-param-20260704083954/fortune.verified.bc
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-return-reg-entry-param-20260704083954`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.49 user=7.47 sys=0.02 maxrss=169388`
+- `partial_read_calls=0`
+- `partial_write_calls=0`
+- `summary_return_calls=1`
+- `summary_clobber_calls=5`
+- `register_access_metadata=0`
+- `raw_load_all=0`
+- `raw_store_global_register=0`
+- `warning_lines=11`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-float-entry-fallback-20260704083427`：raw register load 从 1 降到 0；运行时间从 `7.55s` 到 `7.49s`，没有看到性能退化。剩余问题集中在仍有 use 的 `summary_return` / `summary_clobber` helper。
