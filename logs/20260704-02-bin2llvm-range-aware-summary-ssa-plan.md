@@ -577,3 +577,78 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `notdec_native_3eb0`：还有较多 partial read 和 summary helper，需要继续看 call effect / return helper 的 range 化。
 - `notdec_native_32e0`：还有 ZMM0/ZMM1 partial write，下一步应继续做 partial write 的真正 range def。
 - `notdec_native_5270`、`notdec_native_5040`：还残留少量 summary helper，需要结合签名 shape 和 internal call effect 继续收窄。
+
+---
+
+# 实现记录 2026-07-04 range return collection
+
+## 已完成范围
+
+本次把内部函数返回值收集从 whole-register 读取改成优先按签名 slot 的 bit range 读取。之前 call 参数已经走了 `readSlotRangeBefore()`，但 `collectFunctionReturnValues()` 仍直接 `readValueBefore()` 读取整个 register。对于 XMM/ZMM 低位返回，这会把低 64 位返回又拖回整 `i512`。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3944` 把 `readSlotValueBefore()` 抽成基于任意 `Instruction` 的 helper，call 参数路径继续复用它。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3974` 把 `readSlotRangeBefore()` 改成接受任意插入点，用于 call 参数和 return 收集两处。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4179` 让 `collectFunctionReturnValues()` 用 `readSlotValueBefore(*ret, slot, ...)`，优先读取 slot range，再 fallback 到 whole-register。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3041` 新增 `testInternalSignatureRewriteUsesZmmLowLaneReturn()`，覆盖 callee 只写 `ZMM0[0:64]`、caller 只读 `ZMM0[0:64]` 时，内部函数返回类型应重写为 `double`。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4953` 把新增测试接入主测试序列。
+
+## 实现判断
+
+这一步是 return 侧和 call 参数侧对齐，不做全局 full-load range 化，所以支配关系风险比较小。fortune 当前残留计数持平，说明这不是这批样例的主瓶颈，但它补上了 XMM/ZMM 低位返回的必要路径。
+
+复杂度评分：
+
+- 实现效果：6/10。补齐 return collection 的 range 读取，单测覆盖低位 ZMM 返回；fortune 指标持平。
+- 理解成本：4/10。只把已有 slot range helper 泛化到 `Instruction` 插入点。
+- 维护成本：4/10。call 参数和 return 收集复用同一条 helper，后续 ABI slot range 继续收窄时只需维护一处。
+
+## 验证
+
+单测和构建：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target pcode_to_llvm_test native_register_summary_test \
+  native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-return-range-20260704072757/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-return-range-20260704072757/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-return-range-20260704072757/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-return-range-20260704072757/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-return-range-20260704072757/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-return-range-20260704072757/fortune.bc \
+  -o /dev/null
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-return-range-20260704072757`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.31 user=7.25 sys=0.05 maxrss=170008`
+- `partial_read_calls=33`
+- `partial_write_calls=11`
+- `summary_return_calls=1`
+- `summary_clobber_calls=27`
+- `register_access_metadata=45`
+- `raw_load_all=6`
+- `raw_store_global_register=2`
+- `warning_lines=33`
+
+对比上一阶段 `/tmp/notdec-bin2llvm-fortune-xor-zero-20260704070732`：计数持平，运行时间从 `7.19s` 到 `7.31s`，属于同量级波动。
