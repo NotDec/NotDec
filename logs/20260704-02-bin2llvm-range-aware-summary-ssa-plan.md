@@ -727,3 +727,60 @@ external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
 - `warning_lines=33`
 
 对比上一阶段 `/tmp/notdec-bin2llvm-fortune-return-range-20260704072757`：`partial_read` 从 33 降到 3，`partial_write` 从 11 降到 0，metadata 从 45 降到 3，运行时间从 `7.31s` 到 `7.22s`，没有看到性能退化。`raw_load_all` 从 6 到 7，主要是 `getenv` 后仍残留的 `RAX` full load 和几个 entry load，下一步应看签名重写后 full load 二次消除。
+
+## 后续补充：删除 unused partial read helper
+
+上面 cleanup 后，fortune 剩下 3 个 `partial_read` 都是没有 use 的 dead helper。它们因为不是 `rewritePartialReads()` 成功替换出来的 helper，旧的 `removeDeadReplacedPartialReads()` 不会处理。
+
+具体改动：
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1849`、`external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1873`：在 duplicate partial read xor fold 后统一调用 dead partial read 删除，避免先删 helper 后又遍历旧指针。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2883`：把删除逻辑改成 `removeDeadPartialReads()`，候选包括已替换 helper 和所有收集到的 partial read helper，只删除 `use_empty()` 的 call。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4097`：新增 `testDeadPartialReadHelperIsRemovedBySummarySSA()`，覆盖未知 call 后残留的 unused partial read helper。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:5081`：把新增测试接入主测试序列。
+
+验证：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build \
+  --target native_register_summary_ssa_test notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/pcode_to_llvm_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_test
+external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test
+```
+
+fortune smoke：
+
+```bash
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  --all-confirmed --skip-runtime \
+  --summary-json-out /tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629/summary.json \
+  --register-ssa-warning-out /tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629/register-ssa-warnings.txt \
+  -o /tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629/fortune.ll
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629/fortune.ll \
+  -o /tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629/fortune.bc
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629/fortune.bc \
+  -o /tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629/fortune.verified.bc
+```
+
+结果：
+
+- 输出目录：`/tmp/notdec-bin2llvm-fortune-dead-partial-read-final-20260704081629`
+- `llvm-as` / `opt -passes=verify`：通过
+- 时间：`seconds=7.41 user=7.38 sys=0.02 maxrss=170740`
+- `partial_read_calls=0`
+- `partial_write_calls=0`
+- `summary_return_calls=1`
+- `summary_clobber_calls=27`
+- `register_access_metadata=1`
+- `raw_load_all=7`
+- `raw_store_global_register=0`
+- `warning_lines=33`
+
+对比 duplicate partial read xor cleanup 后的 `/tmp/notdec-bin2llvm-fortune-dup-read-xor-final-20260704080807`：`partial_read` 从 3 降到 0，metadata 从 3 降到 1；运行时间从 `7.22s` 到 `7.41s`，仍在当前 fortune 波动范围内。剩余重点是签名重写后的 full register load 和 `summary_clobber`。
