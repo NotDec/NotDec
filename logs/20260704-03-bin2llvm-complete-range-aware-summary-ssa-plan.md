@@ -646,3 +646,41 @@ fortune smoke 必须固定同口径：
 - 实现效果：8/10。直接调用的窄返回 helper 可以被签名重写消掉，fortune 保持阶段三的寄存器清洁度；间接调用仍保留 unresolved return helper，这是当前信息不足下的保守结果。
 - 理解成本：5/10。多了一类 range helper 和返回抽取逻辑，但路径集中在 call effect 与签名重写两处，没有改变现有 call shape 构造。
 - 维护成本：4/10。range helper 是过渡结构，后续完整 range-aware SSA 落地后仍可复用；关键约束是不能把间接调用也纳入这条路径。
+
+# 实现记录：阶段五 entry input 和 signature rewrite range 化
+
+本阶段让内部函数签名直接使用单段 demanded range。这样 `RDI[0:32]` 这类入口需求可以变成 `i32` 参数，不再为了低位读取制造整寄存器 entry load。最后一个 fortune 残留来自 `open` 这种外部变参调用：summary 阶段不知道后续 ABI 入参是否会被变参消费，导致 `RCX` 被误收窄成低 32 位。本次在 summary 的 backward call transfer 里对已知变参外部函数保守保留完整 ABI input demand。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1291`：新增 `integerSlotForSingleDemandRange()`，把连续单段 integer demand 转成带 `OffsetBits` / `SizeBits` 的窄 signature slot。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1515`、`:1538`、`:1561`、`:1580`：`shapeForInternalFunction()` 对 entry / exit demand 优先使用单段窄 slot，多段或不明确时仍回退整寄存器。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4392`、`:4415`、`:4448`：entry 参数查找改为同时返回 slot，并按 slot range 从参数里抽取入口 range。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5481`：新增 `integerEntrySlotReplacement()`，把 `trunc entry`、`lshr entry`、`and entry, mask` 这类从 entry load 派生的窄表达式替换成窄参数。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5606`：`rewriteInternalFunctionBody()` 只在类型一致时直接替换 entry load；类型不一致时尝试替换派生表达式，避免 RAUW 类型错误。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummary.cpp:655`：新增已知外部变参函数识别，覆盖 `open` / `open64` / `fcntl` / `ioctl` / `printf` / `sscanf` 等。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummary.cpp:1482`：已知外部变参调用在 backward demand 中保留完整 ABI input mask，防止 caller entry demand 被部分读取误收窄。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3358`、`:5992`：新增并注册窄 entry range 参数测试，确认 `RDI[0:32]` 变成 `i32` 参数且不留下 partial read helper。
+- `external/NotDec-bin2llvm/tests/native_register_summary_test.cpp:296`、`:628`：新增并注册 `open` 变参场景测试，确认 `RCX` 的 entry demand mask 保持完整 64 位。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_test native_register_summary_ssa_test -j4 && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-stage5-vararg-20260705044314`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`seconds=9.44 user=9.40 sys=0.03 maxrss=169684`
+  - `partial_read=0`
+  - `partial_write=0`
+  - `summary_return=0`
+  - `summary_clobber=0`
+  - raw register load/store：`0/0`
+  - warning 文件：`/tmp/notdec-bin2llvm-fortune-range-stage5-vararg-20260705044314/register-ssa-warnings.txt`，共 7 行。
+  - `stdout.txt` / `stderr.txt` 都为空。
+
+## 复杂度评估
+
+- 实现效果：9/10。fortune 的 raw register load/store 保持 0，`summary_return` 和 `summary_clobber` 也降到 0；阶段五原先因为 `open` 变参导致的 `RCX.entry` 残留已清掉。
+- 理解成本：5/10。签名 slot 多了 range 信息，entry load 派生替换需要看几个常见表达式形状；不过逻辑集中在签名构造和 post-signature cleanup。
+- 维护成本：5/10。已知变参函数表在 summary 和 SummarySSA 里暂时重复，后续最好抽成共享 helper；当前先保持小改动，避免扩大阶段五范围。
