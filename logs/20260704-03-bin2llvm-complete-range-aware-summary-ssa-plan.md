@@ -752,3 +752,29 @@ fortune smoke 必须固定同口径：
 - 实现效果：7/10。同一 block 内已经有真正的 range `CurrentDef` 写入和读取，fortune 结果没有回退；但 cache 仍按读点重建，跨 block 还没有改成唯一的 Braun-style currentDef。
 - 理解成本：5/10。`readRangeBefore()` 从 backward scan 变成 forward transfer，语义更接近计划，但仍和 `LocalRangeWrites`、`EntryRangeValue` 并存，读代码时需要知道这是过渡状态。
 - 维护成本：5/10。当前实现小而可控，后续第八阶段应把 predecessor 递归和 range PHI 接到同一套 `CurrentDef`，并逐步删除 `LocalRangeWrites`。
+
+# 实现记录：阶段 A range SSA 主闭环第一批
+
+本阶段继续推进阶段 A，不再把普通寄存器读失败后补回 whole-register SSA。普通寄存器 full load 和 partial read 都优先由 planned range 组装；同一 block 内的 range transfer 也改成可连续推进的 `CurrentDef` 状态，未知 call effect 会明确阻断回退到 block entry。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2076`：`CurrentDef` 注释更新为 block-local range current definition，并新增 `UnknownCurrentDef` / `CurrentDefPosition`，分别记录未知 reaching def 和当前 block 已处理到的位置。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3260`：`readFullRangeValueBefore()` 对普通寄存器直接使用 range read 组装 full-width value；`RSP` 和 segment base 仍暂时保留旧路径。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3279`：`rewritePartialReads()` 删除 full-register fallback，partial read 未能通过 range SSA 或最近覆盖写入恢复时不再反向制造 whole-register 读取。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3933`：`writeSegment()` 写入 `CurrentDef` 时同步清除该 range 的 unknown 状态。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3982`：新增 `clearBlockRangeDefs()`、`clearAllBlockRangeDefs()`、`markBlockRangeUnknown()`，把未知 call effect 和缓存重建拆成明确状态操作。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4024`：新增 `transferRangeInstruction()`，把 store、partial write、call return/clobber/unknown effect 统一转成 range `CurrentDef` 更新。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4126`：新增 `transferRangeBlockUntil()`，同一 block 内多个读点可以从上次位置继续推进；如果递归读 predecessor exit 已经把 block 推过当前读点，则清空并重建该 block 状态。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4316`：`readValueBefore()` 对普通寄存器 range read 失败后直接返回 `nullptr`，不再进入 `readBlockEntry()` / `PendingPhi` whole-register fallback。旧 path 目前只保留给 `RSP` 和 segment base 这类特殊寄存器。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+
+## 复杂度评估
+
+- 实现效果：8/10。普通寄存器读已经不再通过 whole-register fallback 创建 `PendingPhi`，同一 block 的 range state 可以连续推进，未知 call 后也不会误回到 entry value。
+- 理解成本：6/10。新增了 `UnknownCurrentDef` 和 `CurrentDefPosition` 两个状态，需要理解 block 内读点可能被递归 exit 读取推进过头，所以读更早位置时要重建。
+- 维护成本：5/10。旧 whole-register path 还存在于 `RSP` / segment base 特例，后续可以单独收敛；当前改动没有扩大到这些特殊寄存器，风险较低。
