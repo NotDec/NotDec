@@ -609,3 +609,40 @@ fortune smoke 必须固定同口径：
 - 实现效果：7/10。full load 现在默认先走 range 读取，full store 已能通过阶段二的 `writeAccessRange()` 被 partial read 消费；fortune 当前结果没有回退。
 - 理解成本：4/10。改动入口很小，但因为 whole-register fallback 还在，读代码时仍要同时理解两条路径。
 - 维护成本：4/10。这是保守过渡，后续完整 `CurrentDef[(block, range)]` 落地后，可以再删除旧 whole-register cache 和扫描 fallback。
+
+# 实现记录：阶段四 call effect range helper
+
+本阶段把直接调用产生的窄返回值接到 range helper，并让签名重写把这些 helper 替换成真实 call 返回值。间接调用仍保留 full-register helper，因为它没有稳定 callee shape，不能靠签名重写清掉；如果强行生成多个窄 helper，会让 fortune 的 unresolved helper 和 warning 明显回退。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:261`：新增 `RangeReturnHelper`，记录直接调用产生的窄 register range 返回 helper，供签名重写阶段替换。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1632`、`:1645`：`addDemandedExternalReturns()` 现在同时看 whole-register return helper 和 range return helper，避免只有低位返回被使用时漏掉外部函数返回签名。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3812`、`:3872`：`readRangeBefore()` 遇到直接调用且读取非整寄存器 range 时，生成 `summary_return.iN` / `summary_clobber.iN`；间接调用和整寄存器读取继续走旧 full helper。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4567`：`readSlotRangeBefore()` 增加 dominance 检查，并把新建 cast 插到 range bits 之后，修掉同块内 bits 定义不支配 use 的 verifier 问题。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4715`、`:4787`、`:4823`：新增 `callRangeValue()`、`callRangeValueHelper()`、`callRangeValueNode()`，metadata 里带上 `bit_offset` 和 `bit_width`，方便排查窄 helper 来源。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5125`、`:5565`：签名重写后用 `extractReturnRange()` 从新 call 返回值里抽取对应 range，替换并删除 range return helper。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4446`：扩展 libm float ABI 测试，允许 `log` 被 LLVM 折成 intrinsic，并断言低位返回 helper 不残留。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-stage4-20260705031101`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`seconds=9.36 user=9.32 sys=0.03 maxrss=171256`
+  - `partial_read=0`
+  - `partial_write=0`
+  - `summary_return=2`
+  - `summary_clobber=0`
+  - raw register load/store：`0/0`
+  - `range_segments_planned=1`
+  - warning 文件：`/tmp/notdec-bin2llvm-fortune-range-stage4-20260705031101/register-ssa-warnings.txt`，共 7 行。
+  - `run.stdout` / `run.stderr` 都为空。
+
+## 复杂度评估
+
+- 实现效果：8/10。直接调用的窄返回 helper 可以被签名重写消掉，fortune 保持阶段三的寄存器清洁度；间接调用仍保留 unresolved return helper，这是当前信息不足下的保守结果。
+- 理解成本：5/10。多了一类 range helper 和返回抽取逻辑，但路径集中在 call effect 与签名重写两处，没有改变现有 call shape 构造。
+- 维护成本：4/10。range helper 是过渡结构，后续完整 range-aware SSA 落地后仍可复用；关键约束是不能把间接调用也纳入这条路径。
