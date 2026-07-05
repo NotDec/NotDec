@@ -748,3 +748,35 @@ fortune smoke 必须固定同口径：
 - 实现效果：8/10。fortune 保持干净，range liveness 的 exit seed、call effect、dead store 判断都已不再无条件按整寄存器处理；但 full load 的 raw access 仍会按整寄存器插入 live ranges，这是保守行为。
 - 理解成本：4/10。改动集中在 liveness transfer 和几个 helper，没有改变 SSA 构造流程。
 - 维护成本：4/10。当前 helper 都复用 planned ranges；后续如果完整 `CurrentDef[(block, range)]` 落地，可以继续保留这套 liveness 判断。
+
+# 实现记录：阶段七 block-local range currentDef
+
+本阶段先落地同一基本块内的 range `CurrentDef`。目标不是一次性删除跨 block PHI 和旧 whole-register wrapper，而是让同一 block 内的 store、partial write、call return/clobber effect 先按顺序写入 range 当前定义，读点从这个状态拿值，不再从 use 点向前找最近写入。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:126`：新增 `RangedSSAValue`，显式记录 `Value` 和 `CoveredRange`，避免裸 LLVM value 被误当成完整寄存器值。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2076`：新增 `CurrentDef[(block, range)]`，作为第一个 block-local range currentDef 缓存。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3934`：`writeSegment()` 在保留 `LocalRangeWrites` 过渡缓存的同时，把 segment 写入 `CurrentDef`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3967`：新增 `currentSegment()`，统一校验 cached value 的 covered range 和 LLVM 类型。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3991`：`readRangeBefore()` 改成从 block 入口顺序处理到读点，store、partial write、call return/clobber 都更新 `CurrentDef`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4024`、`:4079`：遇到覆盖不完整的 partial write 或 unknown call 时，只标记当前 range blocked，继续允许后面更近的写入覆盖它；读点前仍 blocked 时才返回 unknown。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-stage7-fixed-20260705145413`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`seconds=10.25 user=10.24 sys=0.01 maxrss=171532`
+  - warning 文件：`/tmp/notdec-bin2llvm-fortune-range-stage7-fixed-20260705145413/register-ssa-warnings.txt`，共 7 行。
+  - 精确 helper call 统计：`partial_read_calls=0`、`partial_write_calls=0`、`summary_return_calls=1`、`summary_clobber_calls=0`。
+  - entry load 统计：`entry_loads=5`，与阶段六同口径一致。
+  - raw register store：`0`。
+
+## 复杂度评估
+
+- 实现效果：7/10。同一 block 内已经有真正的 range `CurrentDef` 写入和读取，fortune 结果没有回退；但 cache 仍按读点重建，跨 block 还没有改成唯一的 Braun-style currentDef。
+- 理解成本：5/10。`readRangeBefore()` 从 backward scan 变成 forward transfer，语义更接近计划，但仍和 `LocalRangeWrites`、`EntryRangeValue` 并存，读代码时需要知道这是过渡状态。
+- 维护成本：5/10。当前实现小而可控，后续第八阶段应把 predecessor 递归和 range PHI 接到同一套 `CurrentDef`，并逐步删除 `LocalRangeWrites`。
