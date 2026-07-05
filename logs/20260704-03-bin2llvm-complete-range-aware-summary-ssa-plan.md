@@ -146,9 +146,14 @@ RangeAccessRewriter:
   把 load/store/partial helper/call effect 转成 read/write range events
 ```
 
-第一版可以继续 backward scan，但 scan 看到 partial/full write 时必须调用统一的 range 解释逻辑。后续再把 block 预处理成 ordered events 提速。
+这个计划不能再允许 `readRangeBefore()` 长期靠反向扫描补定义。后续迁移的硬目标是：
 
-要点是：一旦某条指令定义了 segment，就必须进入同一套 `writeRange` 语义。不能一部分定义写到 whole-register cache，另一部分定义只靠局部 matcher。
+- block 内按指令顺序预处理成 range events。
+- `writeSegment()` 必须更新 `CurrentDef[(block, range)]`。
+- `readSegmentBefore()` 只能读取当前 block 已知 def、递归 predecessor def，或者创建 range PHI。
+- 不能因为当前 block 没扫到定义就退回 whole-register cache。
+
+要点是：一旦某条指令定义了 segment，就必须进入同一套 `writeRange` / `currentDef` 语义。不能一部分定义写到 whole-register cache，另一部分定义只靠局部 matcher。
 
 ## 3. read/write 接口语义
 
@@ -348,106 +353,127 @@ NativeSignatureSlot {
 
 # 迁移方案
 
-## 第一阶段：补齐 planner 和 range event
+## 当前状态
 
-目标：让所有后续阶段都知道每个 access 对应哪些 segment。
+前六个阶段已经把 fortune 这条链路跑干净了：partial helper、summary helper、raw register load/store 都没有残留。但这还不是完整 range SSA。当前代码仍有旧路径：
 
-工作：
+- `readValueBefore()` 仍维护 whole-register 读取逻辑。
+- `PendingPhi` 仍和 `PendingRangePhi` 并存。
+- `EntryInputs` 仍按 whole register 缓存入口值。
+- `LocalRangeWrites` 只是 instruction-local cache，不是 block-level `currentDef`。
+- `readRangeBefore()` 仍在 use 点附近反查 store、partial helper、call effect。
 
-- 扩展 `planRegisterRanges()`，加入 ABI slot、summary demand mask、call return/clobber slot 的边界。
-- 新增 `RangeAccess` / `RangeEvent` 小结构，描述一条指令对哪些 ranges 读、写、clobber。
-- 暂时不改变所有 rewrite，只先让 debug summary 能打印每个函数的 planned segments。
+后续迁移目标不是继续补 matcher，而是把寄存器状态改成唯一的 range SSA 主路径。
 
-判断：
+## 第七阶段：建立 block-local range currentDef
 
-- `AL/AH/EAX/RAX` 混合样例能规划出正确 segments。
-- `XMM0_Qa` 能规划到 `ZMM0[0:64]`，不是整个 `ZMM0[0:512]`。
-- fortune segment 数量可控，没有把 ZMM 默认拆成 64 段。
-
-## 第二阶段：partial write 成为 range def
-
-目标：先解决定义侧最核心的问题。
+目标：先把一条基本块内部的读写改成明确的 `currentDef` 更新。
 
 工作：
 
-- 实现 `writeAccessRange()`，把 helper value 拆成 segment value。
-- `readSegmentBefore()` 扫描到 partial write 时，不再返回局部 extract 特判，而是通过统一 write semantics 得到 segment def。
-- 如果 partial write 覆盖多个 segment，逐段 extract。
-- 删除或弱化 `rewriteZeroDemandOperands()` 对 partial write 的依赖；zero-demand 只作为后期清理，不作为 SSA 正确性的前提。
+- 新增 `RangedSSAValue { Value, CoveredRange }`。
+- 新增 `CurrentDef[(block, RegisterRangeKey)] -> RangedSSAValue`。
+- 在每个基本块内按指令顺序处理 range events。
+- `writeAccessRange()` 拆出的每个 segment 必须写入 `CurrentDef`。
+- `readSegmentBefore()` 在同一个 block 内只能读取前面已经写入的 `CurrentDef`。
+- 删除 `LocalRangeWrites` 作为主要定义来源；最多临时保留为断言或调试辅助。
 
 判断：
 
-- 分支两边写 `RAX[0:32]`，merge 读 `RAX[0:32]`，只生成 `phi i32`。
-- 写 `RAX[0:32]` 后读 `RAX[32:32]`，不读取低位 def。
-- 循环里读写 `RAX[0:32]`，只生成低位 PHI。
+- full store 后 partial read 由 `CurrentDef` 命中，不靠重新扫描 store。
+- partial write 后同 block 多次读取同一 segment，只复用同一个 segment def。
+- 如果 access range 不能被 planned segments 覆盖，直接 warning 或失败，不退回 whole-register。
 
-## 第三阶段：full load/store 切到 range
+## 第八阶段：用 Braun-style predecessor 递归替换 range 反查
 
-目标：删除 full load/store 的 whole-register 主路径。
+目标：跨 block 读取只通过 predecessor exit 和 range PHI。
 
 工作：
 
-- `rewriteLoads()` 改成对 full load 调用 `readAccessRange(REG, 0, fullWidth)`。
-- full store 调用 `writeAccessRange(REG, 0, fullWidth, value)`。
-- `readValueBefore()` 只作为兼容 wrapper，内部调用 `readAccessRange()`，不再维护独立 whole cache。
-- full-width PHI 只有在 full-width segment 本身存在时出现；否则应是多个窄 PHI 拼接。
+- `readSegmentEntry(block, range)` 实现 Braun SSA 逻辑。
+- 单 predecessor 直接读 predecessor exit。
+- 多 predecessor 先创建 `phi`，写入 `CurrentDef[(block, range)]`，再补 incoming。
+- PHI 类型必须等于 segment 宽度，例如 `i8`、`i32`、`i64`。
+- `PendingRangePhi` 成为唯一 PHI 机制。
+- 禁止 `readRangeBefore()` 从 use 点跨 block 反向扫描。
 
 判断：
 
-- 写低位后读完整值时，才拼接高位。
-- 不再为 `ZMM0[0:512]` 的低 64 位使用生成 `phi i512`。
-- old `EntryValue/ExitValue/PendingPhi` 可以删除或只剩 wrapper。
+- 分支 merge 低位读只生成低位 PHI。
+- 循环 header 先注册 PHI，不递归爆栈。
+- call return range 跨 block 使用时通过 PHI，不直接使用不支配的 call 后 value。
 
-## 第四阶段：call effect range 化
+## 第九阶段：full load/store 删除 whole-register 主路径
 
-目标：call 不再按 whole register kill/read。
+目标：full load/store 只是 range access，不再有单独的 whole-register SSA。
 
 工作：
 
-- 把 `callEffect(call, unit)` 改成 `callEffects(call) -> range effects`。
-- internal call 使用 callee summary 的 demand mask / effect mask。
-- known external 使用 prototype slot。
-- unknown external 使用推断出的 arity 和 ABI fallback。
-- return/clobber helper 按 segment 类型 materialize。例如 `ZMM0[0:64]` 是 `i64`，不是 `i512`。
+- full load 统一为 `readAccessRange(REG, 0, fullWidth)`。
+- full store 统一为 `writeAccessRange(REG, 0, fullWidth, value)`。
+- `readValueBefore()` 只保留为薄 wrapper，内部调用 `readAccessRange()`。
+- 删除 `EntryValue`、`ExitValue`、whole-register `PendingPhi` 相关状态。
+- 删除 `PendingPhi` 后，`finalizePendingPhis()` 只处理 range PHI。
 
 判断：
 
-- 已知 `double` 返回不生成 whole `i512` helper。
-- unknown external 的 warning 中能看到哪些 range 被假设 read/clobber/return。
-- `summary_clobber.i512` 不应因为低 lane ABI 出现。
+- `NativeRegisterSummarySSA.cpp` 不再有独立 whole-register `PendingPhi`。
+- 低 64 位 XMM/ZMM 使用不会生成 `phi i512`。
+- 写低位后读完整寄存器时，只在 use 点拼接需要的 segments。
 
-## 第五阶段：entry input 和 signature rewrite range 化
+## 第十阶段：entry input 全面改成 range input
 
-目标：函数签名直接使用 demanded segments。
+目标：入口值按 demanded segment materialize，不再先构造 full register。
 
 工作：
 
-- `entryRangeInput()` 不再先创建 full entry load；它直接为 demanded segment 创建参数或 frozen unknown。
-- internal function shape 使用 range demand，参数/返回 slot 可以是 `RAX[0:32]`、`ZMM0[0:64]`。
-- 如果多个 ABI slot 共同覆盖一个源码级参数，第一版不合并成复杂类型，只保持 ABI slot 级别。
-- callsite rewrite 传递 range value，不再要求最近 full store 作为证据。
+- `entryRangeInput()` 直接创建 segment 参数或 frozen unknown。
+- 删除 whole-register `EntryInputs` 缓存。
+- 如果确实需要完整寄存器，使用多个 segment input 拼接。
+- signature rewrite 只消费 range input，不再依赖最近 full store 或 full entry load。
 
 判断：
 
-- 低位参数函数不再有 entry `load i64 @RDI` 脚手架。
-- `XMM0_Qa` 参数/返回能变成 `double`，不暴露 `i512`。
-- fortune 中 summary entry load 数继续下降。
+- 低位参数函数不再有 entry `load i64 @RDI`。
+- `ZMM0[0:64]` 参数/返回不暴露 `i512`。
+- recursive pass-through ZMM 没有真实 observer 时，不创建 ZMM entry input。
 
-## 第六阶段：range liveness 和 cleanup 收尾
+## 第十一阶段：call effect 只走 range event
 
-目标：cleanup 只按真实 live range 保留寄存器 residue。
+目标：call 的 read、return、clobber、preserve 都不再按 whole register 生效。
 
 工作：
 
-- `addExitLiveRegisters()` 使用 `ExitDemandMask` 插入 range，不再 `insertGlobalRanges()`。
-- `transferCallLiveness()` 使用 range effects。
-- dead store 判断按 write range 和 live range overlap。
-- final cleanup 删除旧 helper declaration、死 register global、无 residue 函数 metadata。
+- `callEffects(call)` 只返回 range effects。
+- internal direct call 使用 callee entry/exit demand mask。
+- known external 使用 prototype ABI slot。
+- unknown external 使用推断出的 arity 和 ABI fallback，并输出 warning。
+- call return/clobber materialize 出来的值必须直接写入对应 segment 的 `CurrentDef`。
 
 判断：
 
-- partial read/write、raw register load/store、summary helper 在 fortune 上不回升。
-- 对 Bench2 其他样例，ZMM/XMM 低 lane 不再变成 whole `i512` 残留。
+- `summary_clobber.i512` 不因为低 lane ABI 出现。
+- unknown external warning 能说明哪些 range 被假设为 read、return、clobber。
+- clobber 只 kill 对应 ABI range，不 kill whole ZMM。
+
+## 第十二阶段：删除旧路径并固定验收
+
+目标：让完整 range SSA 成为唯一实现，而不是默认先试 range、失败再走旧逻辑。
+
+工作：
+
+- 删除 whole-register `PendingPhi`。
+- 删除 whole-register `EntryInputs`。
+- 删除扫描式 `readRangeBefore()` 主路径。
+- 删除任何“dominance 失败就 fallback 到 whole-register”的分支。
+- cleanup、metadata、warning 都按 range SSA 的结果输出。
+
+判断：
+
+- `NativeRegisterSummarySSA.cpp` 中不再有独立 whole-register SSA cache。
+- fortune 当前干净结果不回退。
+- 新增 range SSA 单测覆盖 partial range、full read/write、call effect、entry input、recursive demand。
+- fortune 同口径运行时间不能明显退化；如果超过 10%，先定位 segment 数量、PHI 数量或 block event 处理成本。
 
 # 需要避免的错误
 
