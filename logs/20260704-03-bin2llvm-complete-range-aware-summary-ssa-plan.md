@@ -684,3 +684,41 @@ fortune smoke 必须固定同口径：
 - 实现效果：9/10。fortune 的 raw register load/store 保持 0，`summary_return` 和 `summary_clobber` 也降到 0；阶段五原先因为 `open` 变参导致的 `RCX.entry` 残留已清掉。
 - 理解成本：5/10。签名 slot 多了 range 信息，entry load 派生替换需要看几个常见表达式形状；不过逻辑集中在签名构造和 post-signature cleanup。
 - 维护成本：5/10。已知变参函数表在 summary 和 SummarySSA 里暂时重复，后续最好抽成共享 helper；当前先保持小改动，避免扩大阶段五范围。
+
+# 实现记录：阶段六 range liveness 和 cleanup 收尾
+
+本阶段先完成 range liveness 的收尾小闭环，不继续大改完整 SSA 主路径。核心是让 dead store cleanup 不再按“某个寄存器还有任意 live range”保留整寄存器 store，而是按写入范围和真实 live range 是否重叠判断。同时，函数出口 live seed 使用 `ExitDemandMask`，外部/直接调用的返回或 clobber effect 也按 ABI range 删除。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3567`：dead store 判断从 `hasLiveGlobalRange()` 改成 `hasLiveWriteRange()`，避免高位/低位 range 互相误保留。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3671`：`transferCallLiveness()` 对 return/clobber 调用 `eraseRegisterEffectRanges()`，float ABI 输出只擦除对应低 lane。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3693`：`addExitLiveRegisters()` 使用 `ExitDemandMask` 通过 `insertMaskRanges()` 插入 live range，不再直接插入整个寄存器。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3699`：新增 `rangesOverlap()`，统一判断写入 range 和 live range 是否相交。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3709`：新增 `insertMaskRanges()`，把 demand mask 切成 planned ranges 后加入 live 集合。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3739`：新增 `eraseRegisterEffectRanges()`，让 float output ABI 按 slot range 擦除，而不是擦掉整个 ZMM backing register。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3831`：新增 `hasLiveWriteRange()`，按 planned write ranges 和 live ranges 的 overlap 判断 store 是否仍有用。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:285`：新增 `hasRegisterStore()` 测试 helper。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:5297`、`:6087`：新增并注册 float call effect range liveness 测试，确认 `log(double)` 这种低 lane float output 不会让整 ZMM store 残留。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-stage6-20260705110651`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`seconds=9.55 user=9.52 sys=0.02 maxrss=170268`
+  - `partial_read=0`
+  - `partial_write=0`
+  - `summary_return=0`
+  - `summary_clobber=0`
+  - raw register load/store：`0/0`
+  - warning 文件：`/tmp/notdec-bin2llvm-fortune-range-stage6-20260705110651/register-ssa-warnings.txt`，共 7 行。
+  - `stdout.txt` / `stderr.txt` 都为空。
+
+## 复杂度评估
+
+- 实现效果：8/10。fortune 保持干净，range liveness 的 exit seed、call effect、dead store 判断都已不再无条件按整寄存器处理；但 full load 的 raw access 仍会按整寄存器插入 live ranges，这是保守行为。
+- 理解成本：4/10。改动集中在 liveness transfer 和几个 helper，没有改变 SSA 构造流程。
+- 维护成本：4/10。当前 helper 都复用 planned ranges；后续如果完整 `CurrentDef[(block, range)]` 落地，可以继续保留这套 liveness 判断。
