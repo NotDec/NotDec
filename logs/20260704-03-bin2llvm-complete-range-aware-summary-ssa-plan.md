@@ -872,3 +872,29 @@ fortune smoke 必须固定同口径：
 - 实现效果：8/10。old whole-register SSA 主路径已删除，fortune 能 assemble/verify，raw register load/store 仍为 0；剩余 indirect tail call 后的 `summary_return` 还需要后续单独处理。
 - 理解成本：5/10。代码少了一套整寄存器 SSA，但仍需要理解 `CurrentDef`、`PendingRangePhi` 和 range metadata 的配合。
 - 维护成本：4/10。删除了旧 fallback 和重复 helper，后续维护重点集中到一套 range SSA 上。
+
+# 实现记录：阶段 C 收尾清理
+
+本阶段只做阶段 C 后的收尾，不改变 range SSA 主流程。目标是删掉已经无调用点的旧 helper，并把统计名从整寄存器语义改成 range 语义。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/include/notdec-bin2llvm/passes/summary/NativeRegisterSummarySSA.h:36`、`:82`：`EntryInputs` 改名为 `RangeEntryInputs`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:105`：删除未使用的 `BlockRegKey`，更新 `RegisterRangeKey` 注释，明确 SummarySSA 变量现在是寄存器 bit range。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2258`：删除无调用点的 `readCoveredPartialWriteBefore()`，避免误以为 partial read 还有 backward fallback。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4385`、`:4939`、`:5932`、`:5981`：统计累加和打印都改成 `RangeEntryInputs` / `range_entry_inputs`。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3532`：对应测试断言改为 `summary.RangeEntryInputs`。
+
+## 验证
+
+- 残留扫描：
+  - `rg -n "BlockRegKey|readCoveredPartialWriteBefore|EntryInputs|entry_inputs" include lib tests || true`
+  - `NativeRegisterSummarySSA` 里不再有 old whole-register entry 命名；`NativeHeritageSSA` 仍有自己的旧 `BlockRegKey`，不属于本次 SummarySSA 清理。
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+
+## 复杂度评估
+
+- 实现效果：8/10。SummarySSA 文件里旧 entry 命名和死 fallback 已清掉，主路径更像完整 range SSA；没有重新跑 fortune，因为本次只是收尾命名和死代码删除，小套件已经覆盖编译和核心行为。
+- 理解成本：4/10。删除误导性代码后更容易读；唯一外部影响是 summary 字段名变化。
+- 维护成本：3/10。少了一段旧 fallback，后续维护面更小。
