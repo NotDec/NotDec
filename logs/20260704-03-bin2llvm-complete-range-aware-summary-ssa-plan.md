@@ -778,3 +778,44 @@ fortune smoke 必须固定同口径：
 - 实现效果：8/10。普通寄存器读已经不再通过 whole-register fallback 创建 `PendingPhi`，同一 block 的 range state 可以连续推进，未知 call 后也不会误回到 entry value。
 - 理解成本：6/10。新增了 `UnknownCurrentDef` 和 `CurrentDefPosition` 两个状态，需要理解 block 内读点可能被递归 exit 读取推进过头，所以读更早位置时要重建。
 - 维护成本：5/10。旧 whole-register path 还存在于 `RSP` / segment base 特例，后续可以单独收敛；当前改动没有扩大到这些特殊寄存器，风险较低。
+
+# 实现记录：阶段 B range entry 和 call effect
+
+本阶段把普通寄存器的 entry input 和 call effect 接到 range SSA 主路径。`RSP` 和 segment base 仍保留旧路径，避免和栈指针、canary 基址逻辑混在同一批改。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3196`：`valueDominatesUse()` 对已经脱离 basic block 的 instruction 返回 false，避免后续 `comesBefore()` 触发 LLVM 断言。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4093`：`transferRangeInstruction()` 的 call return/clobber 不再先创建 whole-register helper 再 extract，而是直接用 `callRangeValue()` 写入对应 range `CurrentDef`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4118`：`CurrentDefPosition` 命中已删除 instruction 时清空当前 block 的 range state 并重新扫描，修复 fortune 中的悬空 instruction 缓存崩溃。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4643`：新增 `entryRangeNode()`，给 range entry unknown 写入寄存器名、bit offset 和 bit width metadata。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4658`：`entryRangeInput()` 直接创建 segment 宽度的 frozen unknown，不再通过 `entryInput()` 生成 whole-register entry load 后 extract。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4980`：`isEntryInputValue()` 识别 range entry value，保证未知外部函数参数推断和签名重写还能判断“这个值来自函数入口”。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5822`：新增 `rangeEntrySlotReplacement()`，post-signature cleanup 根据 range entry metadata 从真实参数里取对应 bit range。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5924`：`rewriteInternalFunctionBody()` 消费 `notdec.register.summary_ssa.range_entry` metadata，把 range entry frozen unknown 替换成参数派生值。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:354`：新增 summary call helper metadata 检查 helper。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:1489`、`:6197`：新增并注册外部返回 range helper 测试，确认 return helper 带 `RAX[0:64]` metadata 且不留下 live raw register load。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3479`、`:6197`：新增并注册窄 entry range 不创建 whole entry load 的测试。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:4572`、`:6201`：新增并注册 non-return killed register 的 clobber range helper 测试，确认 clobber helper 带 `R10[0:64]` metadata。
+
+## 验证
+
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-ssa-b-20260706022703`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`elapsed=9.50 maxrss=170816`
+  - `partial_read=0`
+  - `partial_write=0`
+  - `summary_return=7` 文本命中，其中 4 个是实际 helper call，3 个是声明。
+  - `summary_clobber=0`
+  - raw register load/store：`0/0`
+  - `summary_metadata=436`
+  - stdout/stderr：`/tmp/notdec-bin2llvm-fortune-range-ssa-b-20260706022703/stdout.txt`、`/tmp/notdec-bin2llvm-fortune-range-ssa-b-20260706022703/stderr.txt` 都为空。
+
+## 复杂度评估
+
+- 实现效果：8/10。普通 entry input 和 call effect 已走 range helper，fortune 能 assemble/verify 且 raw register load/store 保持 0；剩余 `summary_return` 来自 indirect tail call 后的 RAX 返回拼接，不是 whole-register fallback。
+- 理解成本：6/10。range entry value 现在靠 metadata 连接到签名重写，读代码时需要知道 frozen unknown 是临时占位，不是最终语义值。
+- 维护成本：5/10。旧 whole-register `entryInput()` / `callValue()` 仍服务 `RSP`、segment base 和少量兼容路径；阶段 C 再统一删除更稳。
