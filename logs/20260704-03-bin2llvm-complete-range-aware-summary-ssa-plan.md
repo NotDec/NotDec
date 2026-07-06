@@ -819,3 +819,56 @@ fortune smoke 必须固定同口径：
 - 实现效果：8/10。普通 entry input 和 call effect 已走 range helper，fortune 能 assemble/verify 且 raw register load/store 保持 0；剩余 `summary_return` 来自 indirect tail call 后的 RAX 返回拼接，不是 whole-register fallback。
 - 理解成本：6/10。range entry value 现在靠 metadata 连接到签名重写，读代码时需要知道 frozen unknown 是临时占位，不是最终语义值。
 - 维护成本：5/10。旧 whole-register `entryInput()` / `callValue()` 仍服务 `RSP`、segment base 和少量兼容路径；阶段 C 再统一删除更稳。
+
+# 实现记录：阶段 C 删除 whole-register SSA 主路径
+
+本阶段删除阶段 B 后剩下的 old whole-register SSA 主路径，让 full load、partial read、slot argument read 都只通过 range SSA 取值。读不到 range reaching definition 时返回失败，不再静默创建整寄存器 entry value、整寄存器 PHI 或整寄存器 call helper。
+
+## 已完成
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:136`：删除 `CallValueKey`，只保留 `CallRangeValueKey`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:2062`：删除 `EntryValue`、`ExitValue`、`PendingPhi`、`ResolvingEntry`、`LocalRangeWrites`、`EntryInputs`、`CallValues`，状态只保留 range entry、range PHI、range currentDef 和 range call value。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3247`：`readFullRangeValueBefore()` 不再特判跳过 `RSP` 或 segment base，full-width register load 统一尝试 range SSA 组装。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3263`：`rewritePartialReads()` 删除 `readCoveredPartialWriteBefore()` fallback，partial read 只能从 range SSA 读。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:3904`：`writeSegment()` 删除 `LocalRangeWrites` 过渡缓存，只写 `CurrentDef[(block, range)]`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4269`：`readValueBefore()` 简化成 range full read wrapper，失败就返回 `nullptr`，不再进入 `readBlockEntry()` / `readBlockExit()` / `PendingPhi`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4289`：`finalizePendingPhis()` 只补全 `PendingRangePhi`，删除整寄存器 PHI 补全路径。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:4942`：`attachMetadata()` 只统计 range PHI，`phis_remaining` 不再混入整寄存器 PHI。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5433`：`rangeEntrySlotReplacement()` 继续用 range metadata 处理签名重写后的 entry value 替换，slot argument read 不再依赖整寄存器 entry load。
+
+## 删除的旧函数
+
+- `readBlockEntry()` / `readBlockExit()`
+- `unknownBefore()` / `registerTypedValueOrUnknown()`
+- `ensurePhi()` / `completePhi()` / whole-register `simplifyPhi()`
+- `entryInput()`
+- `callValue()` / `callValueHelper()` / `callValueNode()`
+- `writtenSegment()`
+- `castRegisterValueToSlot()`
+
+## 验证
+
+- old path 扫描：
+  - `rg -n "EntryValue|ExitValue|PendingPhi|EntryInputs|LocalRangeWrites|CallValues|CallValueKey|entryInput\\(|callValue\\(|callValueHelper|callValueNode|readBlockEntry|readBlockExit|ensurePhi\\(|completePhi\\(|registerTypedValueOrUnknown|unknownBefore|writtenSegment\\(|castRegisterValueToSlot" external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp || true`
+  - 剩余命中只来自 `PendingRangePhi`、summary counter 里的 `EntryInputs` 文本和统计输出，不再有整寄存器 SSA 主路径。
+- `cmake --build build --target native_register_summary_ssa_test -j4 && build/bin/native_register_summary_ssa_test`
+- `cmake --build build --target pcode_to_llvm_test native_register_summary_test native_register_summary_ssa_test notdec-native-llvm -j4 && build/bin/pcode_to_llvm_test && build/bin/native_register_summary_test && build/bin/native_register_summary_ssa_test`
+- fortune smoke：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-range-ssa-c-20260706030510`
+  - `llvm-as` 和 `opt -passes=verify` 通过。
+  - 时间：`elapsed=9.39 maxrss=171224`
+  - `partial_read=0`
+  - `partial_write=0`
+  - `summary_return=7` 文本命中，其中 4 个是实际 helper call，3 个是声明。
+  - `summary_clobber=0`
+  - raw register load/store：`0/0`
+  - `summary_metadata=428`
+  - `range_entry_metadata=0`
+  - `warnings=0`
+  - stdout/stderr：`/tmp/notdec-bin2llvm-fortune-range-ssa-c-20260706030510/stdout.txt`、`/tmp/notdec-bin2llvm-fortune-range-ssa-c-20260706030510/stderr.txt`
+
+## 复杂度评估
+
+- 实现效果：8/10。old whole-register SSA 主路径已删除，fortune 能 assemble/verify，raw register load/store 仍为 0；剩余 indirect tail call 后的 `summary_return` 还需要后续单独处理。
+- 理解成本：5/10。代码少了一套整寄存器 SSA，但仍需要理解 `CurrentDef`、`PendingRangePhi` 和 range metadata 的配合。
+- 维护成本：4/10。删除了旧 fallback 和重复 helper，后续维护重点集中到一套 range SSA 上。
