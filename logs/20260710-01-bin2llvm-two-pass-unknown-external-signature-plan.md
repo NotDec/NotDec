@@ -2,7 +2,7 @@
 
 > 按照这个方式挺不错的，规划一下要怎么改进具体的代码。
 
-# bin2llvm 未知外部函数签名两遍分析计划
+# bin2llvm 未知外部函数签名两遍分析计划（已完成）
 
 ## 背景
 
@@ -234,14 +234,9 @@ caller。
 
 使用当前同口径 fortune 命令分别记录：
 
-- 总运行时间，至少运行三次取中位数。
-- 第一遍和第二遍 `NativeRegisterSummary` 时间。
 - 最终函数参数数量变化。
 - unknown external warning 数量。
 - 剩余 register access 和 summary helper 数量。
-
-两遍 summary 会增加固定开销。如果 fortune 总耗时中位数上升超过约 10%，再考虑让第一遍
-跳过 top-down demand；第一版先保持实现简单，不提前增加半套 summary 模式。
 
 ## 风险
 
@@ -276,5 +271,86 @@ caller。
 3. 已明确设置参数的 unknown external 能在第二遍正确影响 wrapper 和上层 caller。
 4. external 参数数量在 SummarySSA rewrite 前已经确定，后面不再发生 shape 收窄。
 5. 现有 unknown external arity、clobber、return 和 range 测试保持通过。
-6. fortune IR 通过 LLVM 22 verifier，性能和 register residue 有同口径记录。
+6. fortune IR 通过 LLVM 22 verifier，函数签名、warning 和 register residue 有记录。
 
+## 实现记录
+
+完成日期：2026-07-10。
+
+### 代码改动
+
+- `include/notdec-bin2llvm/passes/summary/NativeRegisterSummary.h:31-75`
+  - 新增 `NativeRegisterUnknownExternalInputPolicy`、callsite 来源和 slot evidence 数据结构。
+  - `NativeRegisterSummaryOptions` 可接收 external call shape，并控制是否收集 unknown external 证据。
+- `lib/passes/summary/NativeRegisterSummary.cpp:1070-1074, 1259-1344, 1754-1849`
+  - `Analyzer::run()` 在第一遍 summary 后收集 unknown external callsite。
+  - `collectUnknownExternalCallsiteEvidence()` 复用 bottom-up 最后保存的稳定 block flow，不重复实现一套 summary 求解。
+  - `applyUnknownExternalCallEffect()` 分开处理输入读取和 ABI clobber；`NoInputs` 不读取参数，但仍保留 caller-saved clobber。
+- `lib/passes/summary/NativeRegisterSummarySSA.cpp:1398-1548, 5848-5906`
+  - `buildExternalCallShapes()` 统一把 prototype 映射到 ABI register slot。
+  - `inferUnknownExternalPrototypes()` 汇总所有 callsite 的连续 `LocalDefinition` 前缀，取最大 arity 并生成 warning。
+  - `runNativeRegisterSummarySSA()` 固定执行“基础 summary、external 推断、最终 summary、SummarySSA rewrite”。
+  - 删除旧的 SummarySSA 后置 external 参数数量收窄。
+- `lib/passes/summary/NativeRegisterSummarySSA.cpp:2204-2290`
+  - 修复多返回值引入后的 bit-demand 位宽断言；aggregate `extractvalue` 结果按标量结果宽度保守使用 full mask。
+- `tests/native_register_summary_test.cpp:400-523`
+  - 覆盖 unknown external 零输入、known prototype 精确读取和 callsite 来源分类。
+- `tests/native_register_summary_ssa_test.cpp:3047-3438`
+  - 覆盖多 callsite 最大 arity、JSON prototype 优先、call clobber、PHI clobber 和 binary clobber。
+- `tests/native_register_summary_ssa_test.cpp:2653-2733`
+  - 覆盖 aggregate return extract 和 register store，防止 bit-demand 位宽断言回归。
+- `ARCHITECTURE.md:241-388`
+  - 更新 native SummarySSA 的实际 pass 顺序和清理步骤。
+- `docs/analysis/abstract-interpretation-register-summary.md:256-393`
+  - 补充 external 输入/clobber 分离、两遍分析、证据分类和 callsite 聚合规则。
+
+计划中的“稳定后重新 replay CFG”实现时改为直接保存并复用 bottom-up 最后一轮的稳定
+block flow。这样证据仍来自稳定状态，也没有复制或重新实现 SummarySSA/CFG 求解逻辑。
+
+### 验证
+
+通过：
+
+```bash
+./build/bin/native_register_summary_test
+./build/bin/native_register_summary_ssa_test
+
+llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-two-pass-final-20260710/fortune.native.ll \
+  -o /tmp/notdec-bin2llvm-fortune-two-pass-final-20260710/fortune.native.bc
+
+llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-two-pass-final-20260710/fortune.native.bc \
+  -disable-output
+```
+
+fortune 产物：
+
+- lifting IR：
+  `/tmp/notdec-bin2llvm-fortune-two-pass-final-20260710/fortune.native.ll`
+- bitcode：
+  `/tmp/notdec-bin2llvm-fortune-two-pass-final-20260710/fortune.native.bc`
+- warning：
+  `/tmp/notdec-bin2llvm-fortune-two-pass-final-20260710/register-ssa-warnings.tsv`
+
+结果：
+
+- `recode_new_outer` 推断为 1 个参数。
+- `recode_new_request` 没有强证据，保持 0 个参数并输出 unresolved warning。
+- `recode_string` 的两个 callsite 分别得到 1 和 2，最终取 2，并输出 inconsistent warning。
+- IR 中没有活跃的 `summary_return`、`summary_clobber`、匿名数字函数声明和负常量
+  `inttoptr`；`llvm.ssub.with.overflow.i32` 有实际调用，不是无用声明。
+- `undef` 只用于构造 aggregate return 的首个 `insertvalue`，随后两个字段都被覆盖。
+- 仍残留 `@RDI` 和一个 `notdec.partial_read.i64.i32`。`main` 最终参数是 `RSI/R9`，
+  但对照 `0x2820` 的 prologue，真实入口把 `EDI` 保存到 `EBP`、把 `RSI` 保存到
+  `R12`。因此 fortune 还没有完整消除入口寄存器，`main` 参数恢复仍有既有问题；
+  这不是本次 unknown external 两遍分析新增的回归。
+
+### 评价
+
+- 实现效果：8/10。unknown external 不再按 ABI 最大参数集合污染第一遍 summary，且
+  callsite 推断结果能够进入第二遍 SummarySSA。
+- 复杂度：7/10。新增的数据流来源状态较多，但复用了现有 bottom-up flow 和最终
+  SummarySSA，没有复制求解器。
+- 后期维护成本：7/10。prototype 到 ABI slot 的映射集中在 SummarySSA 调度层；后续主要
+  风险是 callsite 来源分类和函数入口参数恢复需要继续补测试。
