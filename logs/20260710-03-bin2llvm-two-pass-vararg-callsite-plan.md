@@ -2,7 +2,7 @@
 
 > 之前重构外部函数类型推测的时候，不是分了两阶段的register summary分析吗？第一阶段是保守分析，假设外部函数调用的参数为0，找出一定存在的参数。然后第二阶段前分析了外部函数的参数数量，再第三阶段重做 register summary分析。  这里也一样吧，在第一阶段，对于vararg的函数采取保守假设吧，都假设为没有任何额外参数，然后第二阶段前也类似分析一下，分callsite看有几个vararg参数，最后第二阶段重做register summary分析就准确了。详细规划一下，先不急着实现
 
-# bin2llvm vararg callsite 两遍 RegisterSummary 计划
+# bin2llvm vararg callsite 两遍 RegisterSummary 计划（已完成）
 
 ## 背景
 
@@ -443,3 +443,134 @@ demand 正是本次要删除的行为。
 5. bounded vararg 严格遵守 `MaxArgs`。
 6. fortune 的无用 `%R9.arg` 消失，真实参数和调用语义不退化。
 7. 原有 unknown external 两遍分析、单元测试和 LLVM verifier 保持通过。
+
+## 实现记录
+
+完成日期：2026-07-10。
+
+bin2llvm 子模块提交：
+
+```text
+59b8abb Infer vararg inputs per callsite
+```
+
+### 代码改动
+
+- `include/notdec-bin2llvm/passes/summary/NativeRegisterSummary.h:23-142`
+  - 扩展 `NativeExternalCallShape`，分开保存固定输入和 vararg 候选输入。
+  - 新增 `NativeExternalCallsiteShapeMap`。
+  - 将 unknown-only evidence 泛化为 `NativeRegisterExternalCallsite`，区分
+    `UnknownExternal` 和 `KnownVarArg`。
+  - `NativeRegisterSummaryOptions` 同时接收 callee shape 和 callsite shape。
+- `lib/passes/summary/NativeRegisterSummary.cpp:1260-1387`
+  - `externalCallShape()` 统一按 callsite、callee 顺序查询 external 输入。
+  - `recordExternalCallsite()` 和 `collectExternalCallsiteEvidence()` 复用稳定
+    `FunctionFlow`，同时收集 unknown external 和 known vararg 证据。
+- `lib/passes/summary/NativeRegisterSummary.cpp:1788-1884,2084-2090`
+  - `transferCall()` 和 top-down call demand 共用同一个 shape 查询。
+  - 基础 summary 的 known vararg 只读取固定输入；最终 summary 才读取推断出的 tail。
+- `lib/passes/summary/NativeRegisterSummarySSA.cpp:1411-1461`
+  - `buildExternalCallShapes()` 不再把 known vararg 展开到全部 ABI 输入。
+  - 根据固定参数实际占用的 slot 生成剩余整数 GPR 候选，固定浮点参数不会错误消耗 GPR。
+- `lib/passes/summary/NativeRegisterSummarySSA.cpp:1468-1615`
+  - `inferExternalCallShapes()` 保留原 unknown external 聚合。
+  - known vararg 按 callsite 统计连续 `LocalDefinition` tail。
+  - `MaxArgs` 按 `MaxArgs - FixedArgs` 限制，结果写入 callsite shape map。
+  - 不连续证据、超出上界和固定参数 ABI 映射不完整时输出 warning。
+- `lib/passes/summary/NativeRegisterSummarySSA.cpp:4486-4629`
+  - `FunctionBuilder::callReadsRegister()` 使用 callsite shape。
+  - `callParamSlots()` 显式构造固定参数和本 callsite 的 vararg tail。
+  - `callArgStoreBindings()` 不再看到 `VarArg=true` 就遍历全部 ABI 输入。
+- `lib/passes/summary/NativeRegisterSummarySSA.cpp:5942-6010`
+  - 调度顺序变为基础 summary、统一 external 推断、最终 summary、SummarySSA。
+  - 同一份 callsite shape 同时传给最终 summary 和 signature rewrite。
+- `tests/native_register_summary_test.cpp:474-553`
+  - 新增 `testKnownVarArgUsesFixedThenCallsiteInputs()`，直接覆盖基础 fixed-only 和最终
+    callsite override。
+- `tests/native_register_summary_ssa_test.cpp:2569-2777`
+  - 保留 all-register vararg 和 bounded vararg 覆盖。
+  - 新增 fixed-only `__fprintf_chk`，确认 caller 不再产生 tail 参数。
+  - 新增同一 callee 两个 callsite 分别为 3 和 6 个实参的测试。
+- `ARCHITECTURE.md:274-352`
+  - 更新两遍 summary、known vararg callsite 推断和签名重写顺序。
+- `docs/analysis/abstract-interpretation-register-summary.md:299-433`
+  - 补充 unknown external 与 known vararg 共用两遍分析的语义。
+
+### 实现时调整
+
+计划原本准备把额外 XMM 的 `LocalDefinition` 当作浮点 vararg 证据，并让该 callsite
+退回 fixed-only。fortune 实测发现这种证据过弱：函数中较早的普通 XMM 写也会保持为
+`LocalDefinition`，导致两个虚假的 `unsupported_float_vararg_evidence` warning。
+
+最终实现不根据 XMM 来源状态推断或阻断整数 vararg tail。当前只处理整数 GPR tail，
+浮点 vararg 仍明确不支持。后续如要支持，需要结合 `%al` 的 SSE 参数数量、格式字符串或
+更强的邻近定义分析，不能复用当前的宽松来源状态直接判断。
+
+### 验证
+
+构建和单元测试：
+
+```bash
+cmake --build build \
+  --target native_register_summary_test native_register_summary_ssa_test \
+  notdec-native-llvm -j4
+
+ctest --test-dir build -R 'native_register_summary' --output-on-failure
+```
+
+结果：
+
+```text
+notdec.native_register_summary.fixpoint  Passed
+notdec.native_register_summary.ssa       Passed
+100% tests passed
+```
+
+fortune：
+
+```bash
+OUT=/tmp/notdec-bin2llvm-fortune-vararg-callsite-20260710
+./build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  -o "$OUT/fortune.native.ll" --all-confirmed --skip-runtime \
+  --register-ssa-warning-out "$OUT/register-ssa-warnings.tsv"
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/llvm-as \
+  "$OUT/fortune.native.ll" -o "$OUT/fortune.native.bc"
+
+/sn640/NotDec/llvm-22.1.0.obj/bin/opt \
+  -passes=verify "$OUT/fortune.native.bc" -disable-output
+```
+
+结果目录：
+
+```text
+/tmp/notdec-bin2llvm-fortune-vararg-callsite-20260710
+```
+
+结果：
+
+- 运行时间 `12.78s`。
+- `llvm-as` 和 verifier 通过。
+- `main` 从旧结果的 `RSI/R9` 变为：
+
+  ```llvm
+  define i64 @main(i64 %RSI.arg, i32 %RDI.arg)
+  ```
+
+- `__fprintf_chk` 的 callsite 分别生成 3 或 4 个实际参数，没有再统一扩大到全部 GPR。
+- warning 文件只剩原有 unknown external 推断，没有新增 vararg warning。
+- 最终 IR 没有 `summary_return` / `summary_clobber` 调用，也没有 raw register load/store。
+
+`FUN_3470` 仍有一个函数体内未使用的 `%R9.arg`。它不是 callsite arity 扩大造成的：
+对应 `__snprintf_chk` call 已使用本地常量作为最后一个参数。该问题更接近 partial write
+高位 demand 与函数形状生成之间的不一致，不在本次计划范围内。
+
+### 评价
+
+- 实现效果：9/10。known vararg 不再污染基础 summary，fortune 的 `main` 参数恢复正确，
+  不同 callsite 能保留不同 arity。
+- 复杂度：7/10。新增 callsite shape 和泛化 evidence，但没有复制 summary solver，
+  bottom-up、top-down 和 rewrite 共用同一结果。
+- 后期维护成本：7/10。整数 vararg 路径清楚；后续主要风险是浮点 vararg 和 partial write
+  demand，需要单独设计，不能继续扩大当前启发式。
