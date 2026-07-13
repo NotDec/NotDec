@@ -112,3 +112,70 @@ define i64 @main(i64 %RSI.arg, i32 %RDI.arg, i64 %R9.arg)
 - 实现效果：9/10。修复了 RBP 模块级忽略导致的参数漏判，同时保留局部栈地址恢复。
 - 复杂度：9/10。只删除错误的全局状态扩散，没有新增新的分析域或特殊匹配。
 - 后期维护成本：9/10。ignored register 的边界更清楚，回归测试覆盖跨函数误伤场景。
+
+## 2026-07-13 follow-up：stack GEP 缓存
+
+### 原因
+
+fortune 的 `FUN_3470` 对应源码 `add_file(...)`，第六个参数 `parent` 走 x64 SysV 的
+`R9`。入口汇编有 `mov [rsp+0x8], r9`，后续递归调用会从同一栈槽取值再传给
+`FUN_3470`。
+
+stack rewrite 之前这些访问都落在 `RSP.entry -1152`。rewrite 之后，同一 offset
+会生成多个不同的 `notdec_stack.native + 24` GEP。后面的 stack alloca cleanup 用
+pointer identity 判断 store 是否有 load 使用，因此会误删入口的 `%R9.arg` store。
+
+### 改动
+
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeStackFrame.cpp:399-426`
+  - `rewriteFunctionStackAccesses()` 新增按 offset 缓存的 `stackPointers`。
+  - 同一 native stack offset 只生成一个 entry-dominating GEP。
+  - `ptrtoint` 结果按 `(offset, type)` 缓存，避免重复生成整数形式的同一栈地址。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeStackFrame.cpp:428-445`
+  - pointer address rewrite 和 integer address rewrite 都改为复用缓存结果。
+
+### 验证
+
+通过：
+
+```bash
+cmake --build external/NotDec-bin2llvm/build --target notdec-native-llvm -j4
+
+external/NotDec-bin2llvm/build/bin/notdec-native-llvm \
+  /sn640/NotDec-Exp/Bench2/rootfs/usr/games/fortune \
+  -o /tmp/notdec-bin2llvm-fortune-stack-gep-final-20260713/fortune.native.ll \
+  --all-confirmed --skip-runtime \
+  --register-ssa-warning-out \
+  /tmp/notdec-bin2llvm-fortune-stack-gep-final-20260713/warnings.tsv
+
+llvm-22.1.0.obj/bin/llvm-as \
+  /tmp/notdec-bin2llvm-fortune-stack-gep-final-20260713/fortune.native.ll \
+  -o /tmp/notdec-bin2llvm-fortune-stack-gep-final-20260713/fortune.native.bc
+
+llvm-22.1.0.obj/bin/opt -passes=verify \
+  /tmp/notdec-bin2llvm-fortune-stack-gep-final-20260713/fortune.native.bc \
+  -o /tmp/notdec-bin2llvm-fortune-stack-gep-final-20260713/fortune.verified.bc
+```
+
+结果：
+
+- `FUN_3470` 中 `notdec_stack.native + 24` 只剩一个 GEP。
+- `%R9.arg` 的入口 store 被保留：
+  `store i64 %R9.arg, ptr %notdec_stack.native.ptr837`。
+- 同一栈槽后续 load 和递归调用参数都使用这个 GEP。
+- IR 通过 LLVM 22 `llvm-as` 和 `opt -passes=verify`。
+- warning 文件只有未知外部函数签名相关 warning。
+
+### 没有落地的尝试
+
+- 完全停止删除 stack alloca store 会把 callee-saved 保存也保留下来，导致 register
+  residue 明显增加，因此没有采用。
+- 尝试把非零 `entry_demand_mask` 直接作为内部函数参数证据，会触发 signature rewrite
+  崩溃。这个属于后续签名分析问题，本次不混在 stack rewrite 修复里。
+
+### 评价
+
+- 实现效果：7/10。修住了同 offset 多 GEP 导致的 `%R9.arg` store 误删。
+- 复杂度：8/10。只在 stack rewrite 内增加缓存，没有改动 cleanup 的分析边界。
+- 后期维护成本：8/10。缓存逻辑局部清楚，但真正安全的 store cleanup 仍需要后续做
+  range-aware liveness。
