@@ -50,3 +50,58 @@
 
 - `rangeMayComeFromEntry()` 当前在 summary fact 缺失时保持兼容，仍允许 entry read；这是为了避免误伤无 summary 的边界场景。
 - `allowUnknownSegments` 只在 full load replacement 和 function return collection 打开；如果后续发现其他路径也需要保留部分已知片段，应逐个审查，不能直接全局放开。
+
+## 补充：vararg 未知值不再落成 0
+
+### 背景
+
+fortune 里还残留 `__fprintf_chk(..., i64 0, i64 0)` 作为后面的 vararg 参数。对 no-instcombine IR 反查后确认，这些值不是源码里的真实 0，而是 R8/R9 等未知 register range 经 `freeze poison`、PHI、`notdec.reg.insert` 拼接后，后续优化任选成了 0。
+
+### 实现
+
+- `external/NotDec-bin2llvm/include/notdec-bin2llvm/passes/summary/NativeRegisterSummary.h:17`-`22`、`55`-`60`
+  - 在 call input slot 和 callsite evidence 上记录 `Float`，让已知 vararg 的整数槽和浮点槽能分开推断。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummary.cpp:1388`-`1400`
+  - callsite evidence 传递 `Float` 标记。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1150`-`1163`
+  - 抽出 `floatTypeForSizeBits()`，供 ABI float slot 和 callsite vararg slot 复用。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1445`-`1465`、`1530`-`1578`
+  - call input slot 保留 float 属性；vararg 推断前把 integer / float evidence 分开并重新编号。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:1581`-`1629`、`1659`-`1721`
+  - 对 SysV vararg 使用 `RAX/AL` 的 SSE 参数数量提示；`__fprintf_chk("%5.2f%%", double)` 这类调用现在会绑定 XMM/ZMM 低 64 位为 `double`，不会退成整数尾参。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5071`-`5118`
+  - `callParamSlots()` 支持把 callsite 推断出的 float vararg slot 转成 `FloatRegister` signature slot。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:343`-`350`、`6233`-`6306`、`6473`-`6481`
+  - 新增临时 `notdec.register.vararg_unknown.*` helper；vararg 尾参如果是已知 0、`freeze poison`、或经 PHI / select / cast / binop / `notdec.reg.insert` / `notdec.reg.extract` 依赖未知占位，则先改写成这个 helper。
+- `external/NotDec-bin2llvm/include/notdec-bin2llvm/passes/summary/NativeRegisterFinalCleanup.h:21`-`28`、`external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterFinalCleanup.cpp:82`-`84`、`193`-`219`、`394`-`395`、`430`-`438`
+  - FinalCleanup 把 `notdec.register.vararg_unknown.*` 降成 LLVM `poison`，并统计 `vararg_unknown_helpers_lowered`。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:155`-`194`
+  - 增加 mixed integer/float vararg ABI 测试辅助。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:2913`-`2977`
+  - 新增 `testKnownVarArgUsesSseCountForFloatTail()`，覆盖 `AL=1` 时优先使用 float vararg。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:2979`-`3032`
+  - 新增 `testKnownVarArgZeroTailUsesPoison()`，覆盖未证明的零尾参降成 poison。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:3034`-`3120`
+  - 新增 `testKnownVarArgUnknownPhiTailUsesPoison()`，覆盖未知 PHI 经 `notdec.reg.insert` 拼接后作为 vararg 的路径。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:7426`-`7428`
+  - 注册上述新增测试。
+
+### 验证
+
+- `cmake --build external/NotDec-bin2llvm/build --target native_register_summary_ssa_test notdec-native-llvm -j4`
+- `external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test`
+- `ctest --test-dir external/NotDec-bin2llvm/build -R notdec.native_register_summary.ssa --output-on-failure`
+- fortune native：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-vararg-poison-20260717-190041`
+  - `llvm-as` 通过。
+  - `opt -passes=verify` 通过。
+  - `rg "__fprintf_chk\\([^\\n]*i64 0"` 无结果。
+  - `__fprintf_chk` 中未知尾参现在显示为 `poison`；float 百分比输出保留为 `double`。
+  - `register-ssa-warnings.tsv` 仍是外部签名推断 warning。
+  - residue audit 仍剩 1 条 `ZMM1.range_entry`，和本次 vararg poison 修复无关。
+
+### 评分
+
+- 实现效果：8/10。fortune 的假 0 vararg 已清掉，float vararg 也正确落成 `double`；剩余 ZMM1 residue 仍需单独处理。
+- 复杂度：6/10。多了一个 vararg unknown helper，但只在 signature rewrite 到 FinalCleanup 之间存在。
+- 维护成本：5/10。unknown 依赖检查集中在 vararg 尾参绑定处，后续如果新增 register glue helper，需要把它加入递归检查。
