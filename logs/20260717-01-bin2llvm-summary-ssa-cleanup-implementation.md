@@ -105,3 +105,61 @@ fortune 里还残留 `__fprintf_chk(..., i64 0, i64 0)` 作为后面的 vararg �
 - 实现效果：8/10。fortune 的假 0 vararg 已清掉，float vararg 也正确落成 `double`；剩余 ZMM1 residue 仍需单独处理。
 - 复杂度：6/10。多了一个 vararg unknown helper，但只在 signature rewrite 到 FinalCleanup 之间存在。
 - 维护成本：5/10。unknown 依赖检查集中在 vararg 尾参绑定处，后续如果新增 register glue helper，需要把它加入递归检查。
+
+## 补充：unknown 不再用 freeze poison 表示
+
+### 背景
+
+上一轮把部分不确定 vararg 降成 `poison`，但继续排查后确认 LLVM 可以把 `freeze poison` 任选成具体常量，fortune 中就可能出现源码里不存在的 `0`。这次把“确实不知道的值”改成外部 opaque helper call，让优化器不能把它折叠成固定常量。
+
+### 实现
+
+- `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:42`-`80`
+  - 新增 `notdec.unknown.<type>` helper 创建逻辑，同名同类型才复用；如果已有同名不同类型声明，则创建 `.typed` 后缀版本，避免 call 返回类型被改坏。
+- `external/NotDec-bin2llvm/lib/PcodeToLLVM.cpp:1358`、`1421`-`1424`、`1443`-`1480`
+  - unmodeled varnode、无 predecessor 的 missing value、non-dominating PHI missing incoming 都改为 `notdec.unknown.*()`，不再生成 `freeze poison`。
+- `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:37`-`75`
+  - Heritage lowering 也使用同一类 `notdec.unknown.<type>` helper。
+- `external/NotDec-bin2llvm/lib/HeritageToLLVM.cpp:691`-`716`、`770`-`771`
+  - register input temp、stack input temp、unmodeled varnode fallback 都改成 opaque unknown helper，同时保留原有 metadata。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:332`-`370`
+  - 删除 `frozenPoisonBefore()` / `frozenPoisonAt()`，改为 `unknownValueBefore()` / `unknownValueAt()`。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:424`-`450`、`800`-`815`、`2077`-`2084`
+  - `notdec.unknown.*` 不再当未知 external、analyzable call 或可重写函数签名处理，避免 helper 自己参与 register summary / signature rewrite。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:5845`-`5849`、`5875`-`5878`、`6496`-`6498`、`6547`-`6568`
+  - foreign argument、跨函数 value localize、缺失 call 参数、缺失 return/range return 都改成同类型 opaque unknown；return helper 替换前补了类型检查，避免 RAUW 类型不一致。
+- `external/NotDec-bin2llvm/lib/passes/summary/NativeRegisterSummarySSA.cpp:6672`-`6683`
+  - 残留 helper warning 反查 source call 时只认 analyzable call，避免把 `notdec.unknown.*` 或 register glue helper 误报成 callee。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:448`-`455`、`1432`-`1457`、`1460`-`1505`
+  - 单测 oracle 从 freeze poison 改成 opaque unknown helper。
+- `external/NotDec-bin2llvm/tests/native_register_summary_ssa_test.cpp:1289`-`1294`、`5538`-`5542`
+  - pass 可能重写函数签名并替换旧 `Function`，测试改为 pass 后重新从 module lookup，避免用悬空指针。
+
+### 验证
+
+- `cmake --build external/NotDec-bin2llvm/build --target notdec-native-llvm native_register_summary_ssa_test -j4`
+- `external/NotDec-bin2llvm/build/bin/native_register_summary_ssa_test`
+- fortune no-instcombine / no-residue：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-opaque-unknown-20260718-071408`
+  - `llvm-as` 通过。
+  - `freeze .*poison` 无结果。
+  - `notdec.unknown.*` 声明同名同类型，例如 `declare i32 @notdec.unknown.i32()`。
+  - `register-ssa-warnings.tsv` 不再把 `notdec.unknown.*` 或 `notdec.reg.extract.*` 当 callee 报警。
+- fortune 默认链路：
+  - 输出目录：`/tmp/notdec-bin2llvm-fortune-opaque-unknown-final-20260718-071729`
+  - `llvm-as` 通过。
+  - `freeze .*poison` 无结果。
+  - `rg "__fprintf_chk\\([^\\n]*i64 0"` 无结果。
+  - 最终 IR 没有寄存器全局 load/store，也没有 `notdec.register.summary_return` / `summary_clobber` 残留。
+  - warning 文件只剩 6 条签名推断类 warning。
+
+### 评分
+
+- 实现效果：8/10。假 0 的根源从 freeze poison 改成 opaque unknown，fortune 默认输出不再出现 `__fprintf_chk` 的伪 0 vararg，也没有寄存器 residue。
+- 复杂度：5/10。新增 helper 在三个 lowering/summary 文件里各有一份局部实现，逻辑简单，但后续可以考虑抽公共工具函数减少重复。
+- 维护成本：4/10。`notdec.unknown.*` 被明确排除出 register summary 和签名重写，后续新增 helper 也应按这个边界处理。
+
+### 风险
+
+- `notdec.unknown.*` 是外部 opaque call，会保留“不知道”的事实；这会让 IR 比直接 `poison` 更保守，也更容易 debug。
+- `PcodeToLLVM::unknownValueAtEnd()` 在没有 terminator 时仍只能返回裸 `poison`，这是非法 block 兜底路径，正常 lowered block 不走这里。
