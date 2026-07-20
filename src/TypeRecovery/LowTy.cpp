@@ -111,6 +111,9 @@ std::string llvmType2Elem(llvm::Type *T) {
   if (T->isAggregateType()) {
     return "aggregate";
   }
+  if (T->isVectorTy()) {
+    return "vector";
+  }
   assert(false && "TODO: unhandled LLVM type");
 }
 

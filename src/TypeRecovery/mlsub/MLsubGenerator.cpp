@@ -60,7 +60,6 @@ struct PolyPolicyConfig {
 
 constexpr llvm::StringLiteral kValueTypesFile = "ValueTypes.txt";
 constexpr llvm::StringLiteral kVarOriginsFile = "VarOrigins.txt";
-constexpr llvm::StringLiteral kTypeStructMergeFile = "type-struct-merge.md";
 constexpr llvm::StringLiteral kValueHTypesFile = "ValueHTypes.txt";
 constexpr llvm::StringLiteral kImportantHTypesFile = "ImportantHTypes.txt";
 constexpr llvm::StringLiteral kSelectableValuesFile = "SelectableValues.txt";
@@ -1720,6 +1719,9 @@ void appendDebugValueTypes(
 
   for (const auto &Ent : V2N) {
     auto formatSolvedType = [&](bool Pos) {
+      if (!Ent.second->isVariableState()) {
+        return binarysub::debug_string(Ent.second);
+      }
       auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pos});
       if (It == Res.end() || !It->second) {
         return std::string("<null>");
@@ -1774,6 +1776,9 @@ void appendDebugVarOrigins(
   std::map<std::uint32_t, VarOriginEntry> Entries;
 
   for (const auto &Ent : V2N) {
+    if (!Ent.second->isVariableState()) {
+      continue;
+    }
     bool Pol = getPol(Ent.first);
     auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pol});
     if (It == Res.end() || !It->second) {
@@ -1813,91 +1818,6 @@ void appendDebugVarOrigins(
   }
 }
 
-void appendDebugStructMerge(
-    llvm::StringRef DebugDir, llvm::StringRef SCCName,
-    DSUMap<ExtValuePtr, SimpleType> &V2N,
-    const binarysub::StructMergeInfo &Info, bool SolveMemory,
-    const binarysub::PolarVar &PolMem) {
-  std::error_code EC;
-  llvm::raw_fd_ostream Out(join(DebugDir.str(), kTypeStructMergeFile.str()), EC,
-                           llvm::sys::fs::OF_Append);
-  if (EC) {
-    llvm::errs() << "Error printing to " << kTypeStructMergeFile << ", "
-                 << EC.message() << "\n";
-    return;
-  }
-
-  std::map<binarysub::PolarVar, std::string> RootLabels;
-  for (const auto &Ent : V2N) {
-    auto Label = formatExtValueMappingLabel(Ent.first);
-    RootLabels[binarysub::PolarVar{.var = Ent.second, .pos = true}] =
-        Label + " lower";
-    RootLabels[binarysub::PolarVar{.var = Ent.second, .pos = false}] =
-        Label + " upper";
-  }
-  if (SolveMemory) {
-    RootLabels[PolMem] = "<memory>";
-  }
-
-  auto FormatRoot = [&](const binarysub::PolarVar &Root) {
-    if (auto It = RootLabels.find(Root); It != RootLabels.end()) {
-      return It->second;
-    }
-    return binarysub::debug_string(Root.var) +
-           (Root.pos ? std::string(" lower") : std::string(" upper"));
-  };
-
-  std::map<std::uint32_t, const binarysub::StructMergeCandidateInfo *>
-      CandidateById;
-  for (const auto &Candidate : Info.candidates) {
-    CandidateById[Candidate.id] = &Candidate;
-  }
-
-  Out << "## SCC: " << SCCName << "\n\n";
-  Out << "Candidates: " << Info.candidates.size() << "\n\n";
-  for (const auto &Candidate : Info.candidates) {
-    Out << "- node#" << Candidate.id << "\n";
-    Out << "  root: " << FormatRoot(Candidate.root) << "\n";
-    Out << "  path: " << Candidate.path << "\n";
-    Out << "  pol: " << (Candidate.pol ? "pos" : "neg") << "\n";
-    Out << "  labels: " << formatOriginIdSummary(Candidate.labelIds) << "\n";
-    Out << "  body: " << Candidate.body << "\n";
-  }
-
-  Out << "\nGroups: " << Info.groups.size() << "\n\n";
-  for (const auto &Group : Info.groups) {
-    Out << "- group#" << Group.id << "\n";
-    Out << "  label: ";
-    if (Group.labelId) {
-      Out << "vs#" << *Group.labelId;
-    } else {
-      Out << "<none>";
-    }
-    Out << "\n";
-    Out << "  nodes:";
-    if (Group.candidateIds.empty()) {
-      Out << " <none>";
-    }
-    for (auto Id : Group.candidateIds) {
-      Out << " node#" << Id;
-    }
-    Out << "\n";
-    for (auto Id : Group.candidateIds) {
-      auto It = CandidateById.find(Id);
-      if (It == CandidateById.end()) {
-        continue;
-      }
-      const auto &Candidate = *It->second;
-      Out << "    - node#" << Id << " " << FormatRoot(Candidate.root)
-          << " " << Candidate.path << "\n";
-    }
-    if (!Group.mergedBody.empty()) {
-      Out << "  merged-body: " << Group.mergedBody << "\n";
-    }
-  }
-  Out << "\n";
-}
-
 std::string formatTypeBuilderRootLabel(ExtValuePtr Value) {
   std::string Label = toString(Value, true);
   std::string Stable = toStableString(Value);
@@ -1932,7 +1852,7 @@ std::string formatExtValueMappingLabel(ExtValuePtr Value) {
 void collectUTypeVariableDetailsImpl(
     const binarysub::UTypePtr &Ty, std::map<std::uint32_t, UTypeVariableDetail> &Out,
     std::set<const binarysub::UType *> &Seen) {
-  if (!Ty || !Seen.insert(Ty.get()).second) {
+  if (!Ty || !Seen.insert(Ty).second) {
     return;
   }
 
@@ -3338,6 +3258,9 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   SnapshotContraVariantValues = ContraVariantValues;
   std::set<PolarVar> Tys;
   for (auto &Ent : V2N) {
+    if (!Ent.second->isVariableState()) {
+      continue;
+    }
     Tys.insert(PolarVar{.var = Ent.second, .pos = true});
     Tys.insert(PolarVar{.var = Ent.second, .pos = false});
   }
@@ -3354,65 +3277,33 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
   const auto &Res = BulkResult.types;
 
-  // Create TypeBuilder context and builder
-  std::map<PolarVar, std::string> TypeBuilderRootLabels;
-  for (const auto &Ent : V2N) {
-    auto Label = formatTypeBuilderRootLabel(Ent.first);
-    TypeBuilderRootLabels[PolarVar{.var = Ent.second, .pos = true}] =
-        Label + " lower";
-    TypeBuilderRootLabels[PolarVar{.var = Ent.second, .pos = false}] =
-        Label + " upper";
-  }
-  if (SolveGlobals) {
-    TypeBuilderRootLabels[PolMem] = "<memory>";
-    if (StorageType != nullptr) {
-      TypeBuilderRootLabels[PolStorage] = "<storage>";
-    }
-  }
-
-  std::map<std::uint32_t, const binarysub::StructMergeCandidateInfo *>
-      StructMergeCandidateById;
-  for (const auto &Candidate : BulkResult.structMerge.candidates) {
-    StructMergeCandidateById[Candidate.id] = &Candidate;
-  }
-  std::map<std::string, std::vector<std::uint32_t>> StructMergeRootGroups;
-  for (const auto &Group : BulkResult.structMerge.groups) {
-    for (auto CandidateId : Group.candidateIds) {
-      auto CandidateIt = StructMergeCandidateById.find(CandidateId);
-      if (CandidateIt == StructMergeCandidateById.end()) {
-        continue;
-      }
-      const auto &Candidate = *CandidateIt->second;
-      if (Candidate.path != "$") {
-        continue;
-      }
-      auto LabelIt = TypeBuilderRootLabels.find(Candidate.root);
-      if (LabelIt == TypeBuilderRootLabels.end()) {
-        continue;
-      }
-      StructMergeRootGroups[LabelIt->second].push_back(Group.id);
-    }
-  }
-
-  TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, &BulkResult.structMerge,
-                           &StructMergeRootGroups, notdec::getWorkDirOpt());
+  // Create TypeBuilder context and builder.
+  TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, notdec::getWorkDirOpt());
   TypeBuilder TB(TBCtx);
 
-  auto convertSolvedType = [&](const PolarVar &Var, llvm::StringRef RootLabel) {
-    auto It = Res.find(Var);
-    if (It == Res.end() || !It->second) {
+  auto convertSolvedType = [&](SimpleType Ty, bool Pos,
+                               llvm::StringRef RootLabel) {
+    binarysub::UTypePtr SolvedTy = nullptr;
+    if (Ty->isVariableState()) {
+      auto It = Res.find(PolarVar{.var = Ty, .pos = Pos});
+      if (It != Res.end()) {
+        SolvedTy = It->second;
+      }
+    } else {
+      SolvedTy = binarysub::coalesceType(Ty, Pos);
+    }
+    if (!SolvedTy) {
       return static_cast<ast::HType *>(nullptr);
     }
     TB.setDebugRootLabel(RootLabel.str());
-    auto *Converted = TB.convert(It->second);
+    auto *Converted = TB.convert(SolvedTy);
     TB.setDebugRootLabel(std::nullopt);
     return Converted;
   };
 
   for (auto &Ent : V2N) {
     auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
-    auto *Lower = convertSolvedType(
-        PolarVar{.var = Ent.second, .pos = true}, RootLabel + " lower");
+    auto *Lower = convertSolvedType(Ent.second, true, RootLabel + " lower");
     ValueTypesLower.insert({Ent.first, Lower});
   }
   if (SolveGlobals) {
@@ -3435,8 +3326,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   }
   for (auto &Ent : V2N) {
     auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
-    auto *Upper = convertSolvedType(
-        PolarVar{.var = Ent.second, .pos = false}, RootLabel + " upper");
+    auto *Upper = convertSolvedType(Ent.second, false, RootLabel + " upper");
     ValueTypesUpper.insert({Ent.first, Upper});
   }
 
@@ -3445,8 +3335,6 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                           OriginalVariableSources, SolveGlobals, PolMem);
     appendDebugVarOrigins(*WorkDir, Name, V2N, ContraVariantValues, Res,
                           OriginalVariableSources, SolveGlobals, PolMem);
-    appendDebugStructMerge(*WorkDir, Name, V2N, BulkResult.structMerge,
-                           SolveGlobals, PolMem);
   }
 }
 
@@ -4038,6 +3926,8 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
             }
           }
         }
+        return binarysub::make_variable(
+            lvl, getSize(getExtValuePtr(C, User, OpInd)));
       } else {
         llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
                      << "ERROR: ConstraintsGenerator::convertSimpleTypeVal "
@@ -4067,7 +3957,7 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
     } else if (isa<ConstantPointerNull>(C)) {
       return binarysub::make_variable(
           lvl, getSize(getExtValuePtr(C, User, OpInd)));
-    } else if (C->getType()->isAggregateType()) {
+    } else if (C->getType()->isAggregateType() || C->getType()->isVectorTy()) {
       return binarysub::make_variable(
           lvl, getSize(getExtValuePtr(C, User, OpInd)));
     } else if (isa<UndefValue>(C)) {

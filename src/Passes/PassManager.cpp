@@ -65,9 +65,9 @@ using namespace llvm;
 namespace {
 
 // The middle-end passes currently encode Wasm lowering assumptions. Keep the
-// target split explicit so EVM IR can enter the main driver without reusing the
-// Wasm recovery pipeline by accident.
-enum class TargetArch { Wasm, Evm, Other };
+// target split explicit so native source IR can run type recovery without
+// accidentally reusing Wasm stack/memory recovery passes.
+enum class TargetArch { Wasm, Evm, X64, Other };
 
 TargetArch classifyTargetArch(StringRef Triple) {
   if (Triple.starts_with("wasm32") || Triple.starts_with("wasm64")) {
@@ -75,6 +75,9 @@ TargetArch classifyTargetArch(StringRef Triple) {
   }
   if (Triple.starts_with("evm")) {
     return TargetArch::Evm;
+  }
+  if (Triple.starts_with("x86_64") || Triple.starts_with("amd64")) {
+    return TargetArch::X64;
   }
   return TargetArch::Other;
 }
@@ -375,6 +378,21 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
       MPM.addPass(evm::EventLogPass(*TR));
       MPM.addPass(evm::EvmStorageHighLevelRewritePass(*TR));
+    }
+    return;
+  case TargetArch::X64:
+    if (level >= 2) {
+      // Source-built native IR is already normal LLVM IR. Do not run the Wasm
+      // pre-TR recovery passes here; they assume Wasm-specific stack/memory
+      // shapes and can rewrite x64 source IR in the wrong direction.
+      prepareTypeRecoveryContext();
+      if (stopBeforeTypeRecovery) {
+        return;
+      }
+      add_type_recovery_passes(level);
+      if (!HTypeDumpPath.empty()) {
+        MPM.addPass(HTypeDumpPass(*TR, HTypeDumpPath));
+      }
     }
     return;
   case TargetArch::Other:
