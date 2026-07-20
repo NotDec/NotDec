@@ -91,6 +91,12 @@ static cl::opt<std::string> mergeEvalDir(
     cl::desc("Write DebugInfo merge-policy evaluation files to this directory."),
     cl::init(""), cl::value_desc("dir"), cl::Optional, cl::cat(NotdecCat));
 
+static cl::opt<bool> mergeStructPtrLoadStore(
+    "merge-struct-ptr-load-store",
+    cl::desc("Merge load/store target variables when both look like struct "
+             "pointers. Experimental and disabled by default."),
+    cl::init(false), cl::cat(NotdecCat));
+
 static cl::list<std::string> primitiveSemanticLatticeFiles(
     "primitive-semantic-lattice",
     cl::desc("Load a primitive semantic lattice family definition from a DOT "
@@ -290,6 +296,7 @@ int main(int argc, char *argv[]) {
   };
   opts.emitTRInputIR = emitTRInputIR;
   opts.mergeEvalDir = mergeEvalDir;
+  opts.mergeStructPtrLoadStore = mergeStructPtrLoadStore;
   opts.frozenTRInputIR = frozenTRInputIR;
   if (genWorkDir) {
     opts.workDir = workDirOverride.empty()

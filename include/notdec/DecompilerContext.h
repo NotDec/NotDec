@@ -18,6 +18,7 @@ struct Options {
   std::string mergeEvalDir;
   std::string emitTRInputIR;
   bool frozenTRInputIR = false;
+  bool mergeStructPtrLoadStore = false;
   std::vector<std::string> primitiveSemanticLatticeFiles;
 };
 

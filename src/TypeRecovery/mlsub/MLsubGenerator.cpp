@@ -106,6 +106,26 @@ bool isUnknownPNDiffOffsetRange(const OffsetRange &Range) {
   return Range == getUnknownPNDiffOffsetRange();
 }
 
+std::optional<uint64_t> parseConstantFieldOffset(llvm::StringRef FieldName) {
+  if (FieldName.empty() || FieldName.contains("+") ||
+      FieldName.contains("i")) {
+    return std::nullopt;
+  }
+  if (FieldName.starts_with("@")) {
+    FieldName = FieldName.drop_front();
+  }
+  uint64_t Offset = 0;
+  if (FieldName.getAsInteger(10, Offset)) {
+    return std::nullopt;
+  }
+  return Offset;
+}
+
+bool isStructFieldEvidence(llvm::StringRef FieldName) {
+  auto Offset = parseConstantFieldOffset(FieldName);
+  return Offset && *Offset >= 4;
+}
+
 std::optional<OffsetRange> matchPNDiffOffsetRange(llvm::Value *I) {
   assert(I->getType()->isIntegerTy());
   if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(I)) {
@@ -2377,6 +2397,175 @@ void ConstraintsGenerator::observeOldMemoryTypeEdge(const SimpleType &Lhs,
       " load=" + binarysub::debug_string(Load->to));
 }
 
+bool ConstraintsGenerator::configureConstraintContext(
+    binarysub::ConstraintContext &Context) {
+  bool HasHook = false;
+  if (MergeEval) {
+    Context.onVariableMerged =
+        [Eval = MergeEval](const binarysub::MergeEvent &Event) {
+          Eval->observeVariableMerged(Event);
+        };
+    HasHook = true;
+  }
+  return HasHook;
+}
+
+bool ConstraintsGenerator::hasStructPointerEvidence(SimpleType Ty) const {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->size != PointerSize) {
+    return false;
+  }
+
+  auto HasStructField = [](const std::vector<SimpleType> &Bounds) {
+    for (const auto &Bound : Bounds) {
+      auto ResolvedBound = binarysub::resolve_variable(Bound);
+      auto *Mem = ResolvedBound ? ResolvedBound->getAsTMemObject() : nullptr;
+      if (Mem == nullptr) {
+        continue;
+      }
+      for (const auto &[FieldName, _] : Mem->fields) {
+        if (isStructFieldEvidence(FieldName)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  return HasStructField(Var->lowerBounds) || HasStructField(Var->upperBounds);
+}
+
+std::vector<ConstraintsGenerator::LoadStoreStructPtrMergeCandidate>
+ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
+  std::vector<LoadStoreStructPtrMergeCandidate> Candidates;
+  std::set<std::tuple<const binarysub::TypeNode *, const binarysub::TypeNode *,
+                      const binarysub::TypeNode *, unsigned>>
+      Seen;
+
+  for (const auto &[_, Node] : V2N) {
+    auto Ptr = binarysub::resolve_variable(Node);
+    auto *PtrVar = Ptr ? Ptr->getAsVariableState() : nullptr;
+    if (PtrVar == nullptr) {
+      continue;
+    }
+
+    for (const auto &LoadBound : PtrVar->upperBounds) {
+      auto *Load = LoadBound ? LoadBound->getAsPtrLoad() : nullptr;
+      if (Load == nullptr) {
+        continue;
+      }
+      for (const auto &StoreBound : PtrVar->upperBounds) {
+        auto *Store = StoreBound ? StoreBound->getAsPtrStore(Load->Size)
+                                 : nullptr;
+        if (Store == nullptr) {
+          continue;
+        }
+
+        auto LoadTarget = binarysub::resolve_variable(Load->to);
+        auto StoreTarget = binarysub::resolve_variable(Store->to);
+        auto *LoadVar = LoadTarget ? LoadTarget->getAsVariableState() : nullptr;
+        auto *StoreVar =
+            StoreTarget ? StoreTarget->getAsVariableState() : nullptr;
+        if (LoadVar == nullptr || StoreVar == nullptr ||
+            LoadTarget.get() == StoreTarget.get()) {
+          continue;
+        }
+        if (LoadVar->level != StoreVar->level ||
+            LoadVar->size != StoreVar->size || LoadVar->size != PointerSize) {
+          continue;
+        }
+        if (!hasStructPointerEvidence(LoadTarget) ||
+            !hasStructPointerEvidence(StoreTarget)) {
+          continue;
+        }
+
+        const auto *First = LoadTarget.get();
+        const auto *Second = StoreTarget.get();
+        if (Second < First) {
+          std::swap(First, Second);
+        }
+        auto Key = std::make_tuple(Ptr.get(), First, Second, Load->Size);
+        if (!Seen.insert(Key).second) {
+          continue;
+        }
+        Candidates.push_back(LoadStoreStructPtrMergeCandidate{
+            .Pointer = Ptr,
+            .LoadTarget = LoadTarget,
+            .StoreTarget = StoreTarget,
+            .AccessSize = Load->Size});
+      }
+    }
+  }
+
+  return Candidates;
+}
+
+std::size_t ConstraintsGenerator::applyStructPtrLoadStoreMergePolicy() {
+  std::size_t Merged = 0;
+  while (true) {
+    bool Changed = false;
+    auto Candidates = collectStructPtrLoadStoreMergeCandidates();
+    for (const auto &Candidate : Candidates) {
+      auto LoadTarget = binarysub::resolve_variable(Candidate.LoadTarget);
+      auto StoreTarget = binarysub::resolve_variable(Candidate.StoreTarget);
+      auto *LoadVar = LoadTarget ? LoadTarget->getAsVariableState() : nullptr;
+      auto *StoreVar =
+          StoreTarget ? StoreTarget->getAsVariableState() : nullptr;
+      if (LoadVar == nullptr || StoreVar == nullptr ||
+          LoadTarget.get() == StoreTarget.get()) {
+        continue;
+      }
+      if (LoadVar->level != StoreVar->level ||
+          LoadVar->size != StoreVar->size || LoadVar->size != PointerSize) {
+        continue;
+      }
+      if (!hasStructPointerEvidence(LoadTarget) ||
+          !hasStructPointerEvidence(StoreTarget)) {
+        continue;
+      }
+
+      auto From = LoadVar->id <= StoreVar->id ? StoreTarget : LoadTarget;
+      auto Into = LoadVar->id <= StoreVar->id ? LoadTarget : StoreTarget;
+      emitMergeTrace("load-store-struct-ptr", From, Into, {});
+      maybeUnifyPNDiffTypeVariablePair(From, Into);
+
+      binarysub::ConstraintContext Context;
+      binarysub::ConstraintContext *ContextPtr =
+          configureConstraintContext(Context) ? &Context : nullptr;
+      auto Result = binarysub::merge_variable_into(
+          From, Into,
+          [this](const SimpleType &Lhs, const SimpleType &Rhs) {
+            maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
+            observeOldMemoryTypeEdge(Lhs, Rhs);
+          },
+          ContextPtr);
+      if (!Result) {
+        emitPointerAnalysisTrace(
+            "[merge-policy:load-store-struct-ptr:skip] ptr=" +
+            binarysub::debug_string(Candidate.Pointer) +
+            " load=" + binarysub::debug_string(LoadTarget) +
+            " store=" + binarysub::debug_string(StoreTarget) +
+            " reason=" + Result.error().msg);
+        continue;
+      }
+
+      ++Merged;
+      Changed = true;
+      emitPointerAnalysisTrace(
+          "[merge-policy:load-store-struct-ptr] ptr=" +
+          binarysub::debug_string(Candidate.Pointer) +
+          " from=" + binarysub::debug_string(From) +
+          " into=" + binarysub::debug_string(Into) +
+          " size=" + std::to_string(Candidate.AccessSize));
+      break;
+    }
+    if (!Changed) {
+      return Merged;
+    }
+  }
+}
+
 void ConstraintsGenerator::recordLoad(ExtValuePtr Addr, SimpleType ResultTy,
                                       unsigned BitSize,
                                       llvm::Instruction *Source) {
@@ -3304,7 +3493,8 @@ void MLsubRecovery::bottomUpPhase() {
     auto &Data = AG.AllSCCs.at(Ind);
     Data.Generator = std::make_shared<ConstraintsGenerator>(
         Data.SCCName, PointerSize, Data.SCCSet, MemoryType, StorageType,
-        &StorageFields, Data.level, BinarysubTraceFile.get(), MergeEval);
+        &StorageFields, Data.level, BinarysubTraceFile.get(), MergeEval,
+        EnableStructPtrLoadStoreMerge);
     auto &G = Data.Generator;
     // insert ContraVariantValues
     if (Ind == 0) {

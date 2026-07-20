@@ -131,9 +131,25 @@ struct ConstraintsGenerator {
   std::ostream *TraceStream = nullptr;
   PointerAnalysisMode PAMode = PointerAnalysisMode::Original;
   std::shared_ptr<MergePolicyEval> MergeEval;
+  bool EnableStructPtrLoadStoreMerge = false;
+
+  // A load/store pair on the same pointer variable.  The policy only merges
+  // LoadTarget and StoreTarget after both targets already look like struct
+  // pointers, so scalar pointers and byte buffers stay separate.
+  struct LoadStoreStructPtrMergeCandidate {
+    SimpleType Pointer;
+    SimpleType LoadTarget;
+    SimpleType StoreTarget;
+    unsigned AccessSize = 0;
+  };
 
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
+  bool configureConstraintContext(binarysub::ConstraintContext &Context);
+  bool hasStructPointerEvidence(SimpleType Ty) const;
+  std::vector<LoadStoreStructPtrMergeCandidate>
+  collectStructPtrLoadStoreMergeCandidates() const;
+  std::size_t applyStructPtrLoadStoreMergePolicy();
 
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
                           const ConstraintsGenerator &Summary);
@@ -145,11 +161,13 @@ struct ConstraintsGenerator {
                            nullptr,
                        int lvl = 0,
                        std::ostream *TraceStream = nullptr,
-                       std::shared_ptr<MergePolicyEval> MergeEval = nullptr)
+                       std::shared_ptr<MergePolicyEval> MergeEval = nullptr,
+                       bool EnableStructPtrLoadStoreMerge = false)
       : PointerSize(pointer_size), Name(Name), PG(Name, pointer_size),
         SCCs(SCCs), lvl(lvl), MemoryType(MemoryType),
         StorageType(StorageType), StorageFields(StorageFields),
-        TraceStream(TraceStream), MergeEval(std::move(MergeEval)) {
+        TraceStream(TraceStream), MergeEval(std::move(MergeEval)),
+        EnableStructPtrLoadStoreMerge(EnableStructPtrLoadStoreMerge) {
     PG.TraceStream = TraceStream;
     configurePNDiffCallbacks();
     if (auto *Mode = std::getenv("NOTDEC_POINTER_ANALYSIS_MODE")) {
@@ -199,6 +217,11 @@ struct ConstraintsGenerator {
     if (isPointerAnalysisEnabled()) {
       PA.solve();
       flushPointerDerivedTypeConstraints();
+    }
+    if (EnableStructPtrLoadStoreMerge) {
+      auto Merged = applyStructPtrLoadStoreMergePolicy();
+      llvm::errs() << "Info: load/store struct pointer merge policy merged "
+                   << Merged << " pair(s)\n";
     }
   }
   void genTypes(ast::HTypeContext &HCtx, unsigned PointerSizeBytes,
@@ -262,14 +285,8 @@ struct ConstraintsGenerator {
     }
     binarysub::Cache cache;
     binarysub::ConstraintContext Context;
-    binarysub::ConstraintContext *ContextPtr = nullptr;
-    if (MergeEval) {
-      Context.onVariableMerged =
-          [Eval = MergeEval](const binarysub::MergeEvent &Event) {
-            Eval->observeVariableMerged(Event);
-          };
-      ContextPtr = &Context;
-    }
+    binarysub::ConstraintContext *ContextPtr =
+        configureConstraintContext(Context) ? &Context : nullptr;
     binarysub::constrain(lhs, rhs, cache,
                          [this](const SimpleType &Lhs, const SimpleType &Rhs) {
                            maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
@@ -478,6 +495,7 @@ class MLsubRecovery {
   const char *ExtraConstraintsFile = std::getenv("NOTDEC_EXTRA_CONSTRAINTS");
   std::string MergeEvalDir;
   std::shared_ptr<MergePolicyEval> MergeEval;
+  bool EnableStructPtrLoadStoreMerge = false;
   llvm::json::Value SummaryOverrideDoc = nullptr;
   std::set<llvm::Function *> SummaryOverrideFuncs;
   llvm::json::Value SignatureOverrideDoc = nullptr;
@@ -519,6 +537,9 @@ public:
       : Mod(Mod), MAM(MAM) {}
 
   void setMergeEvalDir(std::string Dir) { MergeEvalDir = std::move(Dir); }
+  void setMergeStructPtrLoadStore(bool Enable) {
+    EnableStructPtrLoadStoreMerge = Enable;
+  }
   void run();
   void loadSummaryFile(llvm::Module &M, const char *path,
                        bool StrictValidation = true);

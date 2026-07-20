@@ -75,12 +75,14 @@ struct PassEnv {
 
   std::shared_ptr<mlsub::MLsubRecovery> TR;
   std::string MergeEvalDir;
+  bool MergeStructPtrLoadStore = false;
 
   void prepareTypeRecoveryContext() {
     if (TR == nullptr) {
       TR = std::make_shared<mlsub::MLsubRecovery>(Mod, MAM);
     }
     TR->setMergeEvalDir(MergeEvalDir);
+    TR->setMergeStructPtrLoadStore(MergeStructPtrLoadStore);
   }
 
   void add_pre_type_recovery_passes();
@@ -88,7 +90,8 @@ struct PassEnv {
   void build_passes(int level, bool stopBeforeTypeRecovery = false,
                     bool frozenTRInputIR = false,
                     llvm::StringRef HTypeDumpPath = "",
-                    llvm::StringRef MergeEvalDir = "");
+                    llvm::StringRef MergeEvalDir = "",
+                    bool MergeStructPtrLoadStore = false);
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
                   bool disableTypeRecovery);
   void add_solidity(std::string OutFilePath);
@@ -129,8 +132,14 @@ struct DecompileConfig {
                       "(tr-level >= 2).\n";
       std::abort();
     }
+    if (Opts.mergeStructPtrLoadStore && EffectiveLevel < 2) {
+      llvm::errs() << "Error: --merge-struct-ptr-load-store requires type "
+                      "recovery (tr-level >= 2).\n";
+      std::abort();
+    }
     PE.build_passes(EffectiveLevel, EmitTRInputIR, FrozenTRInputIR,
-                    HTypeDumpPath, Opts.mergeEvalDir);
+                    HTypeDumpPath, Opts.mergeEvalDir,
+                    Opts.mergeStructPtrLoadStore);
     if (EmitTRInputIR) {
       return;
     }
