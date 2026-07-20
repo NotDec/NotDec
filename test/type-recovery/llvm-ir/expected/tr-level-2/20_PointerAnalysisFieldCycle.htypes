@@ -1,21 +1,31 @@
 # HTypeResult
 
 [decls]
+struct struct_0 {
+  'i:8 field_0; /* at offset: 0 */
+  'i:8[] field_1; /* at offset: 1 */
+};
+
+struct struct_1 {
+  'i:8 field_0; /* at offset: 0 */
+  'i:8[] field_1; /* at offset: 1 */
+};
+
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
 [+] @main => lower=(bottom:32 (*)(top:32))* ; upper=top:32
 [+] const(i32 0)@main::%bb.exit.i0:0 => lower=bottom:32 ; upper=top:32
 [+] const(i32 0)@main::%i:0 => lower=bottom:32 ; upper=top:32
-[+] main::%base => lower=bottom:32 ; upper='i:8[]*
-[-] main::%buf => lower=bottom:32 ; upper='i:8[]*
+[+] main::%base => lower=bottom:32 ; upper=struct_0*
+[-] main::%buf => lower=bottom:32 ; upper=struct_0*
 [+] main::%done => lower=bool ; upper=bool
 [+] main::%i => lower=bottom:32 ; upper=top:32
 [+] main::%i.next => lower=bottom:32 ; upper=top:32
 [+] main::%next => lower=bottom:32 ; upper='i:8[]*
 [+] main::%next.ptr => lower=bottom:32 ; upper='i:8[]*
-[+] main::%p => lower=bottom:32 ; upper='i:8[]*
-[+] main::%p.ptr => lower=bottom:32 ; upper='i:8[]*
+[+] main::%p => lower=bottom:32 ; upper=struct_1*
+[+] main::%p.ptr => lower=bottom:32 ; upper=struct_1*
 [+] main::%v => lower=bottom:8 ; upper=top:8
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32

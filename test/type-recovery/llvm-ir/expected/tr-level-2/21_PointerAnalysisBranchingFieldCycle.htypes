@@ -7,16 +7,88 @@ struct struct_0 {
 };
 
 union union_0 {
-  rec_36 field_0; /* at offset: 0 */
-  struct_0 field_1; /* at offset: 0 */
+  rec_79 field_0; /* at offset: 0 */
+  rec_88 field_1; /* at offset: 0 */
 };
 
-struct rec_36 {
-  struct_0 field_0; /* recursive body at offset: 0 */
+struct rec_79 {
+  struct_1 field_0; /* recursive body at offset: 0 */
 };
 
-struct rec_60 {
-  struct_0 field_0; /* recursive body at offset: 0 */
+struct struct_1 {
+  'r:8 field_0; /* at offset: 0 */
+  union_1 field_1; /* at offset: 1 */
+};
+
+union union_1 {
+  rec_79 field_0; /* at offset: 0 */
+  struct_1 field_1; /* at offset: 0 */
+};
+
+struct rec_88 {
+  struct_2 field_0; /* recursive body at offset: 0 */
+};
+
+struct struct_2 {
+  'r:8 field_0; /* at offset: 0 */
+  union_2 field_1; /* at offset: 1 */
+};
+
+union union_2 {
+  rec_88 field_0; /* at offset: 0 */
+  struct_2 field_1; /* at offset: 0 */
+};
+
+struct struct_3 {
+  'r:8 field_0; /* at offset: 0 */
+  union_3 field_1; /* at offset: 1 */
+};
+
+union union_3 {
+  rec_34 field_0; /* at offset: 0 */
+  rec_43 field_1; /* at offset: 0 */
+};
+
+struct rec_34 {
+  struct_4 field_0; /* recursive body at offset: 0 */
+};
+
+struct struct_4 {
+  'r:8 field_0; /* at offset: 0 */
+  union_4 field_1; /* at offset: 1 */
+};
+
+union union_4 {
+  rec_34 field_0; /* at offset: 0 */
+  struct_4 field_1; /* at offset: 0 */
+};
+
+struct rec_43 {
+  struct_5 field_0; /* recursive body at offset: 0 */
+};
+
+struct struct_5 {
+  'r:8 field_0; /* at offset: 0 */
+  union_5 field_1; /* at offset: 1 */
+};
+
+union union_5 {
+  rec_43 field_0; /* at offset: 0 */
+  struct_5 field_1; /* at offset: 0 */
+};
+
+struct rec_62 {
+  struct_6 field_0; /* recursive body at offset: 0 */
+};
+
+struct struct_6 {
+  'r:8 field_0; /* at offset: 0 */
+  union_6 field_1; /* at offset: 1 */
+};
+
+union union_6 {
+  rec_62 field_0; /* at offset: 0 */
+  struct_6 field_1; /* at offset: 0 */
 };
 
 
@@ -31,15 +103,15 @@ struct rec_60 {
 [+] const(i8 5)@main::%bb.wide_right.i2:0 => lower=bottom:8 ; upper=top:8
 [-] main::%base => lower=bottom:32 ; upper=struct_0*
 [+] main::%done => lower=bool ; upper=bool
-[+] main::%echo.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::%echo.ptr => lower=bottom:32 ; upper=struct_3*
 [+] main::%i => lower=bottom:32 ; upper=top:32
 [+] main::%i.next => lower=bottom:32 ; upper=top:32
 [+] main::%loaded => lower=bottom:8 ; upper=top:8
 [+] main::%next => lower=bottom:32 ; upper='r:8[]*
 [+] main::%next.ptr => lower=bottom:32 ; upper='r:8[]*
-[+] main::%p => lower=bottom:32 ; upper=struct_0*
-[+] main::%short.next => lower=bottom:32 ; upper=rec_60*
-[+] main::%short.ptr => lower=bottom:32 ; upper=rec_60*
+[+] main::%p => lower=bottom:32 ; upper=struct_3*
+[+] main::%short.next => lower=bottom:32 ; upper=rec_62*
+[+] main::%short.ptr => lower=bottom:32 ; upper=rec_62*
 [+] main::%wide.left.next => lower=bottom:32 ; upper='r:8[]*
 [+] main::%wide.left.ptr => lower=bottom:32 ; upper='r:8[]*
 [+] main::%wide.right.next => lower=bottom:32 ; upper='r:8[]*

@@ -29,7 +29,8 @@ TEST(Retypd, TypeBuilderSemanticPrimitiveAliasTest) {
   M->setDataLayout("e-p:32:32");
 
   notdec::ast::HTypeContext HCtx;
-  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilderContext TBParent(
+      HCtx, M->getDataLayout().getPointerSize());
   notdec::mlsub::TypeBuilder TB(TBParent);
 
   auto SemanticTy = binarysub::make_uprimitivetype("prim.uint32.win.HWND", 32);
@@ -81,7 +82,8 @@ TEST(Retypd, SemanticPrimitiveStringIsBytesSubtype) {
   M->setDataLayout("e-p:256:256");
 
   notdec::ast::HTypeContext HCtx;
-  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilderContext TBParent(
+      HCtx, M->getDataLayout().getPointerSize());
   notdec::mlsub::TypeBuilder TB(TBParent);
 
   auto *HTy = TB.convert(
@@ -103,7 +105,8 @@ TEST(Retypd, TypeBuilderTopFieldRecordLayoutTest) {
   M->setDataLayout("e-p:32:32");
 
   notdec::ast::HTypeContext HCtx;
-  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilderContext TBParent(
+      HCtx, M->getDataLayout().getPointerSize());
   notdec::mlsub::TypeBuilder TB(TBParent);
 
   auto RecordTy = binarysub::make_urecordtype({
@@ -137,7 +140,8 @@ TEST(Retypd, TypeBuilderRecursiveRecordSetAnchorsPointeeRecord) {
   M->setDataLayout("e-p:32:32");
 
   notdec::ast::HTypeContext HCtx;
-  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilderContext TBParent(
+      HCtx, M->getDataLayout().getPointerSize());
   notdec::mlsub::TypeBuilder TB(TBParent);
 
   auto RecRef = binarysub::make_utypevariable("r", 32, 1);
@@ -206,7 +210,8 @@ TEST(Retypd, TypeBuilderSignedUnsignedByteSetPrinting) {
   M->setDataLayout("e-p:32:32");
 
   notdec::ast::HTypeContext HCtx;
-  notdec::mlsub::TypeBuilderContext TBParent(HCtx, M->getDataLayout());
+  notdec::mlsub::TypeBuilderContext TBParent(
+      HCtx, M->getDataLayout().getPointerSize());
   notdec::mlsub::TypeBuilder TB(TBParent);
 
   auto ByteSet = binarysub::make_uinter(

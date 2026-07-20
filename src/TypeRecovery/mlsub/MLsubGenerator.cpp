@@ -20,11 +20,14 @@
 #include "notdec/Utils/Utils.h"
 
 #include <cassert>
+#include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/Operator.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/FormattedStream.h>
@@ -243,6 +246,121 @@ std::optional<int64_t> getSigned64ConstantAddress(const llvm::ConstantInt &CI) {
     return std::nullopt;
   }
   return Value.getSExtValue();
+}
+
+std::optional<int64_t> getSigned64APInt(const llvm::APInt &Value) {
+  if (!Value.isSignedIntN(64)) {
+    return std::nullopt;
+  }
+  return Value.getSExtValue();
+}
+
+std::optional<OffsetRange> getGEPOffsetRange(const llvm::GEPOperator &GEP,
+                                             const llvm::DataLayout &DL) {
+  if (GEP.getPointerOperandType()->isVectorTy() || GEP.getType()->isVectorTy()) {
+    return std::nullopt;
+  }
+
+  auto BitWidth = DL.getIndexTypeSizeInBits(GEP.getPointerOperandType());
+  llvm::APInt ConstantOffset(BitWidth, 0, true);
+  if (GEP.accumulateConstantOffset(DL, ConstantOffset)) {
+    auto Offset = getSigned64APInt(ConstantOffset);
+    if (!Offset) {
+      return std::nullopt;
+    }
+    return OffsetRange{.offset = *Offset};
+  }
+
+  llvm::SmallMapVector<llvm::Value *, llvm::APInt, 4> VariableOffsets;
+  ConstantOffset = llvm::APInt(BitWidth, 0, true);
+  if (!GEP.collectOffset(DL, BitWidth, VariableOffsets, ConstantOffset)) {
+    return std::nullopt;
+  }
+
+  auto Offset = getSigned64APInt(ConstantOffset);
+  if (!Offset) {
+    return std::nullopt;
+  }
+
+  OffsetRange Range{.offset = *Offset};
+  for (const auto &Entry : VariableOffsets) {
+    auto Scale = getSigned64APInt(Entry.second);
+    if (!Scale) {
+      return std::nullopt;
+    }
+    if (*Scale == 0) {
+      continue;
+    }
+    // OffsetRange can model array-like dynamic steps, but later record sizing
+    // assumes non-negative access sizes. Keep negative dynamic addressing out
+    // of field constraints until the type builder has a representation for it.
+    if (*Scale < 0) {
+      return std::nullopt;
+    }
+    Range.access.emplace_back(*Scale);
+  }
+  return Range;
+}
+
+bool lowerGEPOperatorAsPtrAdd(ConstraintsGenerator &CG,
+                              const llvm::GEPOperator &GEP,
+                              llvm::User &GEPUser, const llvm::DataLayout &DL,
+                              ExtValuePtr Result) {
+  if (GEP.getPointerOperand()->getName().starts_with("table_")) {
+    return false;
+  }
+
+  auto *BaseValue = const_cast<llvm::Value *>(GEP.getPointerOperand());
+  auto Base = getExtValuePtr(BaseValue, &GEPUser,
+                             llvm::GEPOperator::getPointerOperandIndex());
+  if (GEP.hasAllZeroIndices()) {
+    CG.getOrInsertNode(Base);
+    CG.addRemapType(Result, Base);
+    return true;
+  }
+
+  auto Offset = getGEPOffsetRange(GEP, DL);
+  if (!Offset || Offset->hasNegativeBaseOffset()) {
+    return false;
+  }
+
+  CG.setAsPtrAdd(Base, Result, std::move(*Offset));
+  return true;
+}
+
+bool lowerConstantExprGEPAddress(ConstraintsGenerator &CG, llvm::Value *Ptr,
+                                 llvm::User &User, long OpInd,
+                                 const llvm::DataLayout &DL) {
+  auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(Ptr);
+  if (CE == nullptr) {
+    return false;
+  }
+
+  if (CE->getOpcode() == llvm::Instruction::BitCast) {
+    auto *InnerCE = llvm::dyn_cast<llvm::ConstantExpr>(CE->getOperand(0));
+    if (InnerCE == nullptr ||
+        InnerCE->getOpcode() != llvm::Instruction::GetElementPtr) {
+      return false;
+    }
+
+    auto InnerResult = getExtValuePtr(InnerCE, CE, 0);
+    if (!lowerGEPOperatorAsPtrAdd(CG, llvm::cast<llvm::GEPOperator>(*InnerCE),
+                                  *InnerCE, DL, InnerResult)) {
+      return false;
+    }
+
+    auto BitCastResult = getExtValuePtr(CE, &User, OpInd);
+    CG.addRemapType(BitCastResult, InnerResult);
+    return true;
+  }
+
+  if (CE->getOpcode() != llvm::Instruction::GetElementPtr) {
+    return false;
+  }
+
+  auto Result = getExtValuePtr(CE, &User, OpInd);
+  return lowerGEPOperatorAsPtrAdd(CG, llvm::cast<llvm::GEPOperator>(*CE), *CE,
+                                  DL, Result);
 }
 
 [[noreturn]] void failSignatureOverride(llvm::StringRef Path,
@@ -5793,6 +5911,12 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   // if this is access to table, then we ignore the type, and return func ptr.
   auto Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 0));
   if (!Node) {
+    if (lowerConstantExprGEPAddress(cg, I.getPointerOperand(), I, 0,
+                                    I.getModule()->getDataLayout())) {
+      Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 0));
+    }
+  }
+  if (!Node) {
     if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
       if (CE->getOpcode() == Instruction::BitCast) {
         if (auto CE2 = dyn_cast<ConstantExpr>(CE->getOperand(0))) {
@@ -5825,6 +5949,12 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   // if this is access to table, then we ignore the type, and return func ptr.
   auto Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 1));
+  if (!Node) {
+    if (lowerConstantExprGEPAddress(cg, I.getPointerOperand(), I, 1,
+                                    I.getModule()->getDataLayout())) {
+      Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 1));
+    }
+  }
   if (!Node) {
     if (auto CE = dyn_cast<ConstantExpr>(I.getPointerOperand())) {
       if (CE->getOpcode() == Instruction::BitCast) {
@@ -5870,17 +6000,16 @@ void ConstraintsGenerator::MLsubVisitor::visitGetElementPtrInst(
   // supress warnings for table gep
   if (Gep.getPointerOperand()->getName().starts_with("table_")) {
     return;
-  } else if (Gep.hasAllZeroIndices()) {
-    auto Src = getExtValuePtr(Gep.getPointerOperand(), &Gep, 0);
-    cg.getOrInsertNode(Src);
-    cg.addRemapType(&Gep, Src);
+  }
+
+  if (lowerGEPOperatorAsPtrAdd(cg, cast<GEPOperator>(Gep), Gep,
+                               Gep.getModule()->getDataLayout(), &Gep)) {
     return;
   }
+
   std::cerr << "Warning: MLsubVisitor::visitGetElementPtrInst: "
-               "Gep should not exist before this pass!\n";
-  // But if we really want to support this, handle it the same way as AddInst.
-  // A shortcut to create a offseted pointer. the operate type must be i8*.
-  // Just like ptradd.
+               "skip unsupported GEP offset lowering: "
+            << toStableString(&Gep) << "\n";
 }
 
 void ConstraintsGenerator::addCmpConstraint(const ExtValuePtr LHS,

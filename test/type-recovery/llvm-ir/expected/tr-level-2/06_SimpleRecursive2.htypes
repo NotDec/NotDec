@@ -1,36 +1,36 @@
 # HTypeResult
 
 [decls]
-struct rec_13 {
-  rec_13* field_0; /* recursive body at offset: 0 */
+struct rec_12 {
+  rec_12* field_0; /* recursive body at offset: 0 */
 };
 
-struct rec_20 {
-  rec_20* field_0; /* recursive body at offset: 0 */
+struct rec_19 {
+  rec_19* field_0; /* recursive body at offset: 0 */
 };
 
-struct rec_16 {
-  rec_16* field_0; /* recursive body at offset: 0 */
+struct rec_15 {
+  rec_15* field_0; /* recursive body at offset: 0 */
 };
 
-struct rec_18 {
-  rec_18* field_0; /* recursive body at offset: 0 */
+struct rec_17 {
+  rec_17* field_0; /* recursive body at offset: 0 */
 };
 
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
 [+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
-[+] @rec1 => lower=(void (*)(ptr<load=rec_13*, store=void, psize=32>))* ; upper=(void (*)(bottom:32))*
+[+] @rec1 => lower=(void (*)(ptr<load=rec_12*, store=void, psize=32>))* ; upper=(void (*)(bottom:32))*
 [+] const(i32 0)@main::%bb.allocator.i3:0 => lower=bottom:32 ; upper=top:32
-[-] main::%bb.allocator.i0 => lower=bottom:32 ; upper=rec_20*
-[+] main::%bb.allocator.i1 => lower=bottom:32 ; upper=rec_20*
+[-] main::%bb.allocator.i0 => lower=bottom:32 ; upper=rec_19*
+[+] main::%bb.allocator.i1 => lower=bottom:32 ; upper=rec_19*
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 [+] main::arg1 => lower=bottom:32 ; upper=top:32
-[+] rec1::%bb.allocator.i0 => lower=bottom:32 ; upper=ptr<load=rec_16*, store=void, psize=32>
-[+] rec1::%bb.allocator.i1 => lower=bottom:32 ; upper=rec_18*
-[+] rec1::arg0 => lower=bottom:32 ; upper=ptr<load=rec_16*, store=void, psize=32>
+[+] rec1::%bb.allocator.i0 => lower=bottom:32 ; upper=ptr<load=rec_15*, store=void, psize=32>
+[+] rec1::%bb.allocator.i1 => lower=bottom:32 ; upper=rec_17*
+[+] rec1::arg0 => lower=bottom:32 ; upper=ptr<load=rec_15*, store=void, psize=32>
 
 [memory]
 type => top:32
