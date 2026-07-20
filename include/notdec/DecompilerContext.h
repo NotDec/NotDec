@@ -15,6 +15,7 @@ struct Options {
   int trLevel = 3;
   int log_level = 5; // default log level = level_notice
   std::string workDir;
+  std::string mergeEvalDir;
   std::string emitTRInputIR;
   bool frozenTRInputIR = false;
   std::vector<std::string> primitiveSemanticLatticeFiles;

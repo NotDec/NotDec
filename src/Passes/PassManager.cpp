@@ -340,7 +340,9 @@ void PassEnv::add_type_recovery_passes(int level) {
 }
 
 void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
-                           bool frozenTRInputIR, StringRef HTypeDumpPath) {
+                           bool frozenTRInputIR, StringRef HTypeDumpPath,
+                           StringRef MergeEvalDirArg) {
+  MergeEvalDir = MergeEvalDirArg.str();
   TargetArch Arch = classifyTargetArch(Mod.getTargetTriple().getTriple());
   switch (Arch) {
   case TargetArch::Wasm:
@@ -396,9 +398,9 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
     }
     return;
   case TargetArch::Other:
-    if (!HTypeDumpPath.empty()) {
-      llvm::errs() << "Error: --dump-htypes requires a target with type "
-                      "recovery pipeline support.\n";
+    if (!HTypeDumpPath.empty() || !MergeEvalDir.empty()) {
+      llvm::errs() << "Error: HType dump / merge eval requires a target with "
+                      "type recovery pipeline support.\n";
       std::abort();
     }
     return;

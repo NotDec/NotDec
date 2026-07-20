@@ -74,18 +74,21 @@ struct PassEnv {
   }
 
   std::shared_ptr<mlsub::MLsubRecovery> TR;
+  std::string MergeEvalDir;
 
   void prepareTypeRecoveryContext() {
     if (TR == nullptr) {
       TR = std::make_shared<mlsub::MLsubRecovery>(Mod, MAM);
     }
+    TR->setMergeEvalDir(MergeEvalDir);
   }
 
   void add_pre_type_recovery_passes();
   void add_type_recovery_passes(int level);
   void build_passes(int level, bool stopBeforeTypeRecovery = false,
                     bool frozenTRInputIR = false,
-                    llvm::StringRef HTypeDumpPath = "");
+                    llvm::StringRef HTypeDumpPath = "",
+                    llvm::StringRef MergeEvalDir = "");
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
                   bool disableTypeRecovery);
   void add_solidity(std::string OutFilePath);
@@ -121,8 +124,13 @@ struct DecompileConfig {
                       "(tr-level >= 2).\n";
       std::abort();
     }
+    if (!Opts.mergeEvalDir.empty() && EffectiveLevel < 2) {
+      llvm::errs() << "Error: --merge-eval-dir requires type recovery "
+                      "(tr-level >= 2).\n";
+      std::abort();
+    }
     PE.build_passes(EffectiveLevel, EmitTRInputIR, FrozenTRInputIR,
-                    HTypeDumpPath);
+                    HTypeDumpPath, Opts.mergeEvalDir);
     if (EmitTRInputIR) {
       return;
     }

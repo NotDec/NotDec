@@ -86,6 +86,11 @@ static cl::opt<std::string> dumpHTypes(
     cl::init(""), cl::value_desc("output.htypes"), cl::Optional,
     cl::cat(NotdecCat));
 
+static cl::opt<std::string> mergeEvalDir(
+    "merge-eval-dir",
+    cl::desc("Write DebugInfo merge-policy evaluation files to this directory."),
+    cl::init(""), cl::value_desc("dir"), cl::Optional, cl::cat(NotdecCat));
+
 static cl::list<std::string> primitiveSemanticLatticeFiles(
     "primitive-semantic-lattice",
     cl::desc("Load a primitive semantic lattice family definition from a DOT "
@@ -236,6 +241,11 @@ int main(int argc, char *argv[]) {
                     "--dump-htypes.\n";
     return 1;
   }
+  if (!emitTRInputIR.empty() && !mergeEvalDir.empty()) {
+    llvm::errs() << "Error: --emit-tr-input-ir cannot be combined with "
+                    "--merge-eval-dir.\n";
+    return 1;
+  }
   if (frozenTRInputIR && !emitTRInputIR.empty()) {
     llvm::errs() << "Error: --frozen-tr-input-ir cannot be combined with "
                     "--emit-tr-input-ir.\n";
@@ -279,6 +289,7 @@ int main(int argc, char *argv[]) {
                                    primitiveSemanticLatticeFiles.end()),
   };
   opts.emitTRInputIR = emitTRInputIR;
+  opts.mergeEvalDir = mergeEvalDir;
   opts.frozenTRInputIR = frozenTRInputIR;
   if (genWorkDir) {
     opts.workDir = workDirOverride.empty()

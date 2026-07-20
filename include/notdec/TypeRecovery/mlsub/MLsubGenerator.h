@@ -38,6 +38,7 @@
 #include <clang/Tooling/Tooling.h>
 
 #include "TypeRecovery/mlsub/MLsubGraph.h"
+#include "TypeRecovery/mlsub/MergePolicyEval.h"
 #include "TypeRecovery/mlsub/PointerAnalysis.h"
 #include "binarysub/PNDiff.h"
 #include "binarysub/binarysub-core.h"
@@ -129,6 +130,7 @@ struct ConstraintsGenerator {
   bool EnablePNDiffTypeVariableClosureUnification = true;
   std::ostream *TraceStream = nullptr;
   PointerAnalysisMode PAMode = PointerAnalysisMode::Original;
+  std::shared_ptr<MergePolicyEval> MergeEval;
 
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
@@ -142,11 +144,12 @@ struct ConstraintsGenerator {
                        std::map<std::string, SimpleType> *StorageFields =
                            nullptr,
                        int lvl = 0,
-                       std::ostream *TraceStream = nullptr)
+                       std::ostream *TraceStream = nullptr,
+                       std::shared_ptr<MergePolicyEval> MergeEval = nullptr)
       : PointerSize(pointer_size), Name(Name), PG(Name, pointer_size),
         SCCs(SCCs), lvl(lvl), MemoryType(MemoryType),
         StorageType(StorageType), StorageFields(StorageFields),
-        TraceStream(TraceStream) {
+        TraceStream(TraceStream), MergeEval(std::move(MergeEval)) {
     PG.TraceStream = TraceStream;
     configurePNDiffCallbacks();
     if (auto *Mode = std::getenv("NOTDEC_POINTER_ANALYSIS_MODE")) {
@@ -254,12 +257,25 @@ struct ConstraintsGenerator {
   void addSubtype(SimpleType lhs, SimpleType rhs) {
     assert(lhs != nullptr);
     assert(rhs != nullptr);
+    if (MergeEval) {
+      MergeEval->observeAddSubtype();
+    }
     binarysub::Cache cache;
+    binarysub::ConstraintContext Context;
+    binarysub::ConstraintContext *ContextPtr = nullptr;
+    if (MergeEval) {
+      Context.onVariableMerged =
+          [Eval = MergeEval](const binarysub::MergeEvent &Event) {
+            Eval->observeVariableMerged(Event);
+          };
+      ContextPtr = &Context;
+    }
     binarysub::constrain(lhs, rhs, cache,
                          [this](const SimpleType &Lhs, const SimpleType &Rhs) {
                            maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
                            observeOldMemoryTypeEdge(Lhs, Rhs);
-                         });
+                         },
+                         ContextPtr);
   }
 
   SimpleType addVarSubtype(llvm::Value *Val, SimpleType dtv) {
@@ -460,6 +476,8 @@ class MLsubRecovery {
   const char *SummaryFile = std::getenv("NOTDEC_SUMMARY_OVERRIDE");
   const char *SignatureFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
   const char *ExtraConstraintsFile = std::getenv("NOTDEC_EXTRA_CONSTRAINTS");
+  std::string MergeEvalDir;
+  std::shared_ptr<MergePolicyEval> MergeEval;
   llvm::json::Value SummaryOverrideDoc = nullptr;
   std::set<llvm::Function *> SummaryOverrideFuncs;
   llvm::json::Value SignatureOverrideDoc = nullptr;
@@ -500,6 +518,7 @@ public:
   MLsubRecovery(llvm::Module &Mod, llvm::ModuleAnalysisManager &MAM)
       : Mod(Mod), MAM(MAM) {}
 
+  void setMergeEvalDir(std::string Dir) { MergeEvalDir = std::move(Dir); }
   void run();
   void loadSummaryFile(llvm::Module &M, const char *path,
                        bool StrictValidation = true);

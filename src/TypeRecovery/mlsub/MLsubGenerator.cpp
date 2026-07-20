@@ -2593,6 +2593,9 @@ void ConstraintsGenerator::addMergeNode(SimpleType From, SimpleType To) {
     MovedValues = It->second;
   }
   emitMergeTrace("merge", From, To, MovedValues);
+  if (MergeEval) {
+    MergeEval->observeValueMapMerge(From, To, MovedValues);
+  }
   V2N.merge(From, To);
 }
 
@@ -2672,6 +2675,9 @@ SimpleType ConstraintsGenerator::createNode(ExtValuePtr Val) {
   if (auto *VS = N->getAsVariableState()) {
     OriginalVariableSources[VS->id].insert(Val);
   }
+  if (MergeEval) {
+    MergeEval->observeValueNode(Val, N);
+  }
   emitMappingTrace("create", Val, N);
   getOrInsertPNINode(Val);
   if (std::get_if<ConstantAddr>(&Val)) {
@@ -2705,6 +2711,9 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
     std::abort();
   }
   emitRemapTrace("remap", Val, Target, Ty);
+  if (MergeEval) {
+    MergeEval->observeValueNode(Val, Ty);
+  }
   remapPNINode(Val, Target);
   addPointerCopy(Val, Target);
   return It.first->second;
@@ -2712,6 +2721,12 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
 
 void MLsubRecovery::run() {
   auto &M = const_cast<llvm::Module &>(Mod);
+  if (!MergeEvalDir.empty()) {
+    MergeEval = std::make_shared<MergePolicyEval>(M, MergeEvalDir, PointerSize);
+  } else {
+    MergeEval.reset();
+  }
+
   // 0.4 prepare debug dir and SCCsCatalog
   auto WorkDir = notdec::getWorkDirOpt();
   if (WorkDir) {
@@ -3289,7 +3304,7 @@ void MLsubRecovery::bottomUpPhase() {
     auto &Data = AG.AllSCCs.at(Ind);
     Data.Generator = std::make_shared<ConstraintsGenerator>(
         Data.SCCName, PointerSize, Data.SCCSet, MemoryType, StorageType,
-        &StorageFields, Data.level, BinarysubTraceFile.get());
+        &StorageFields, Data.level, BinarysubTraceFile.get(), MergeEval);
     auto &G = Data.Generator;
     // insert ContraVariantValues
     if (Ind == 0) {
@@ -3536,6 +3551,9 @@ void MLsubRecovery::topDownPhase() {
     // solve memory if ind == 0
     Data.Generator->genTypes(*HCtx, Mod.getDataLayout().getPointerSize(),
                              Ind == 0);
+  }
+  if (MergeEval) {
+    MergeEval->finish(AG);
   }
   for (auto &Data : AG.AllSCCs) {
     Data.Generator->releaseBinarysubState();
