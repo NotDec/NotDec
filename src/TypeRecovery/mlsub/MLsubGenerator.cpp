@@ -21,12 +21,17 @@
 
 #include <cassert>
 #include <llvm/ADT/MapVector.h>
+#include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/DataLayout.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/Metadata.h>
 #include <llvm/IR/Operator.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/FormatVariadic.h>
@@ -73,6 +78,7 @@ constexpr llvm::StringLiteral kMLsubInputAnchorFile =
 constexpr llvm::StringLiteral kPNDiffAnnotatedFile = "03-pndiff-final.ll";
 constexpr llvm::StringLiteral kBinarysubTraceFile = "binarysub-trace.log";
 constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
+constexpr llvm::StringLiteral kMallocWrappersFile = "MallocWrappers.txt";
 
 bool envFlagEnabled(llvm::StringRef Name) {
   auto *Value = std::getenv(Name.data());
@@ -2302,6 +2308,333 @@ void writePNDiffAnnotatedModule(const llvm::Module &M, const std::string &Path,
   M.print(Out, &Writer);
 }
 
+bool isMallocWrapperAllocator(const llvm::Function *F) {
+  if (F == nullptr || !F->hasName()) {
+    return false;
+  }
+  auto Name = F->getName();
+  return Name == "malloc" || Name == "calloc";
+}
+
+bool isIgnorableMallocWrapperUser(const llvm::Instruction *I) {
+  auto *CB = llvm::dyn_cast<llvm::CallBase>(I);
+  if (CB == nullptr) {
+    return false;
+  }
+  auto *Callee = CB->getCalledFunction();
+  if (Callee == nullptr || !Callee->hasName()) {
+    return false;
+  }
+  auto Name = Callee->getName();
+  return Name.starts_with("llvm.dbg") || Name.starts_with("llvm.lifetime");
+}
+
+bool isKnownNoReturnCall(const llvm::CallBase &CB) {
+  if (CB.hasFnAttr(llvm::Attribute::NoReturn)) {
+    return true;
+  }
+  auto *Callee = CB.getCalledFunction();
+  if (Callee == nullptr) {
+    return false;
+  }
+  if (Callee->hasFnAttribute(llvm::Attribute::NoReturn)) {
+    return true;
+  }
+  if (!Callee->hasName()) {
+    return false;
+  }
+  auto Name = Callee->getName();
+  return Name == "exit" || Name == "_Exit" || Name == "abort" ||
+         Name == "__assert_fail";
+}
+
+bool isNullPointerValue(const llvm::Value *V) {
+  auto *C = llvm::dyn_cast_or_null<llvm::Constant>(V);
+  return C != nullptr && C->getType()->isPointerTy() && C->isNullValue();
+}
+
+bool blockCanReachReturn(llvm::BasicBlock *Start) {
+  llvm::SmallPtrSet<llvm::BasicBlock *, 16> Visited;
+  llvm::SmallVector<llvm::BasicBlock *, 16> Worklist;
+  Worklist.push_back(Start);
+
+  while (!Worklist.empty()) {
+    auto *BB = Worklist.pop_back_val();
+    if (!Visited.insert(BB).second) {
+      continue;
+    }
+    if (llvm::isa<llvm::ReturnInst>(BB->getTerminator())) {
+      return true;
+    }
+
+    bool StopsHere = llvm::isa<llvm::UnreachableInst>(BB->getTerminator());
+    for (auto &I : *BB) {
+      auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+      if (CB != nullptr && isKnownNoReturnCall(*CB)) {
+        StopsHere = true;
+        break;
+      }
+    }
+    if (StopsHere) {
+      continue;
+    }
+
+    for (auto *Succ : llvm::successors(BB)) {
+      Worklist.push_back(Succ);
+    }
+  }
+  return false;
+}
+
+// The checker only accepts local forwarding of the allocator result. Any real
+// use of that pointer, such as GEP, store-through, or passing it to another
+// function, means the function is a factory/initializer, not a generic wrapper.
+struct MallocWrapperUseChecker {
+  const llvm::CallBase *Alloc = nullptr;
+  llvm::SmallPtrSet<const llvm::Value *, 32> ValueSeen;
+  llvm::SmallPtrSet<const llvm::Value *, 32> UseSeen;
+  llvm::SmallPtrSet<const llvm::AllocaInst *, 8> SlotValueSeen;
+  llvm::SmallPtrSet<const llvm::AllocaInst *, 8> SlotUseSeen;
+
+  llvm::AllocaInst *getLocalSlot(llvm::Value *Ptr) const {
+    auto *Slot = llvm::dyn_cast_or_null<llvm::AllocaInst>(
+        Ptr->stripPointerCasts());
+    if (Slot == nullptr || Slot->getFunction() != Alloc->getFunction()) {
+      return nullptr;
+    }
+    return Slot;
+  }
+
+  bool isMallocResultValue(llvm::Value *V) {
+    if (V == nullptr) {
+      return false;
+    }
+    if (V == Alloc) {
+      return true;
+    }
+    if (!ValueSeen.insert(V).second) {
+      return false;
+    }
+
+    if (auto *I = llvm::dyn_cast<llvm::Instruction>(V)) {
+      if (llvm::isa<llvm::BitCastInst, llvm::AddrSpaceCastInst>(I)) {
+        return isMallocResultValue(I->getOperand(0));
+      }
+      if (auto *Freeze = llvm::dyn_cast<llvm::FreezeInst>(I)) {
+        return isMallocResultValue(Freeze->getOperand(0));
+      }
+      if (auto *PN = llvm::dyn_cast<llvm::PHINode>(I)) {
+        for (auto &Incoming : PN->incoming_values()) {
+          if (!isMallocResultValue(Incoming.get())) {
+            return false;
+          }
+        }
+        return PN->getNumIncomingValues() > 0;
+      }
+      if (auto *Sel = llvm::dyn_cast<llvm::SelectInst>(I)) {
+        return isMallocResultValue(Sel->getTrueValue()) &&
+               isMallocResultValue(Sel->getFalseValue());
+      }
+      if (auto *Load = llvm::dyn_cast<llvm::LoadInst>(I)) {
+        auto *Slot = getLocalSlot(Load->getPointerOperand());
+        return Slot != nullptr && slotStoresOnlyMallocResult(Slot);
+      }
+    }
+    return false;
+  }
+
+  bool slotStoresOnlyMallocResult(llvm::AllocaInst *Slot) {
+    if (!SlotValueSeen.insert(Slot).second) {
+      return true;
+    }
+
+    bool SawStore = false;
+    for (auto *User : Slot->users()) {
+      auto *I = llvm::dyn_cast<llvm::Instruction>(User);
+      if (I == nullptr) {
+        return false;
+      }
+      if (isIgnorableMallocWrapperUser(I)) {
+        continue;
+      }
+      if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(I)) {
+        if (getLocalSlot(Store->getPointerOperand()) != Slot) {
+          return false;
+        }
+        SawStore = true;
+        if (!isMallocResultValue(Store->getValueOperand())) {
+          return false;
+        }
+        continue;
+      }
+      if (auto *Load = llvm::dyn_cast<llvm::LoadInst>(I)) {
+        if (getLocalSlot(Load->getPointerOperand()) == Slot) {
+          continue;
+        }
+      }
+      return false;
+    }
+    return SawStore;
+  }
+
+  bool isMallocNullCompare(llvm::ICmpInst &ICmp) {
+    auto Pred = ICmp.getPredicate();
+    if (Pred != llvm::CmpInst::ICMP_EQ && Pred != llvm::CmpInst::ICMP_NE) {
+      return false;
+    }
+
+    auto *LHS = ICmp.getOperand(0);
+    auto *RHS = ICmp.getOperand(1);
+    return (isNullPointerValue(LHS) && isMallocResultValue(RHS)) ||
+           (isNullPointerValue(RHS) && isMallocResultValue(LHS));
+  }
+
+  bool valueUsesOnlyWrapperFlow(llvm::Value *V) {
+    if (!UseSeen.insert(V).second) {
+      return true;
+    }
+
+    for (auto *User : V->users()) {
+      auto *I = llvm::dyn_cast<llvm::Instruction>(User);
+      if (I == nullptr) {
+        return false;
+      }
+      if (isIgnorableMallocWrapperUser(I)) {
+        continue;
+      }
+      if (llvm::isa<llvm::BitCastInst, llvm::AddrSpaceCastInst,
+                    llvm::FreezeInst, llvm::PHINode, llvm::SelectInst>(I)) {
+        if (!valueUsesOnlyWrapperFlow(I)) {
+          return false;
+        }
+        continue;
+      }
+      if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(I)) {
+        if (!isMallocResultValue(RI->getReturnValue())) {
+          return false;
+        }
+        continue;
+      }
+      if (auto *ICmp = llvm::dyn_cast<llvm::ICmpInst>(I)) {
+        if (!isMallocNullCompare(*ICmp)) {
+          return false;
+        }
+        continue;
+      }
+      if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(I)) {
+        if (Store->getValueOperand() != V) {
+          return false;
+        }
+        auto *Slot = getLocalSlot(Store->getPointerOperand());
+        if (Slot == nullptr || !slotUsesOnlyWrapperFlow(Slot)) {
+          return false;
+        }
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  bool slotUsesOnlyWrapperFlow(llvm::AllocaInst *Slot) {
+    if (!SlotUseSeen.insert(Slot).second) {
+      return true;
+    }
+
+    for (auto *User : Slot->users()) {
+      auto *I = llvm::dyn_cast<llvm::Instruction>(User);
+      if (I == nullptr) {
+        return false;
+      }
+      if (isIgnorableMallocWrapperUser(I)) {
+        continue;
+      }
+      if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(I)) {
+        if (getLocalSlot(Store->getPointerOperand()) != Slot ||
+            !isMallocResultValue(Store->getValueOperand())) {
+          return false;
+        }
+        continue;
+      }
+      if (auto *Load = llvm::dyn_cast<llvm::LoadInst>(I)) {
+        if (getLocalSlot(Load->getPointerOperand()) != Slot ||
+            !valueUsesOnlyWrapperFlow(Load)) {
+          return false;
+        }
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  bool nullErrorBranchesDoNotReturn(llvm::Function &F) {
+    for (auto &BB : F) {
+      auto *BI = llvm::dyn_cast<llvm::BranchInst>(BB.getTerminator());
+      if (BI == nullptr || !BI->isConditional()) {
+        continue;
+      }
+      auto *ICmp = llvm::dyn_cast<llvm::ICmpInst>(BI->getCondition());
+      if (ICmp == nullptr || !isMallocNullCompare(*ICmp)) {
+        continue;
+      }
+
+      auto Pred = ICmp->getPredicate();
+      auto *NullSucc =
+          BI->getSuccessor(Pred == llvm::CmpInst::ICMP_EQ ? 0 : 1);
+      if (blockCanReachReturn(NullSucc)) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
+  if (F.isDeclaration() || F.isIntrinsic() || !F.getReturnType()->isPointerTy() ||
+      isMallocWrapperAllocator(&F)) {
+    return nullptr;
+  }
+
+  llvm::CallBase *Alloc = nullptr;
+  for (auto &BB : F) {
+    for (auto &I : BB) {
+      auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+      if (CB == nullptr || !isMallocWrapperAllocator(CB->getCalledFunction())) {
+        continue;
+      }
+      if (Alloc != nullptr) {
+        return nullptr;
+      }
+      Alloc = CB;
+    }
+  }
+  if (Alloc == nullptr || !Alloc->getType()->isPointerTy()) {
+    return nullptr;
+  }
+
+  llvm::DominatorTree DT(F);
+  MallocWrapperUseChecker Checker{.Alloc = Alloc};
+  bool SawReturn = false;
+  for (auto &BB : F) {
+    auto *RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator());
+    if (RI == nullptr) {
+      continue;
+    }
+    SawReturn = true;
+    if (!DT.dominates(Alloc, RI) ||
+        !Checker.isMallocResultValue(RI->getReturnValue())) {
+      return nullptr;
+    }
+  }
+  if (!SawReturn || !Checker.nullErrorBranchesDoNotReturn(F) ||
+      !Checker.valueUsesOnlyWrapperFlow(Alloc)) {
+    return nullptr;
+  }
+
+  return Alloc;
+}
+
 } // namespace
 
 void ConstraintsGenerator::emitMappingTrace(llvm::StringRef Event,
@@ -3030,6 +3363,8 @@ void MLsubRecovery::run() {
     validateExtraConstraintsFile(M, ExtraConstraintsFile, ModuleSHA256Hex);
   }
 
+  detectMallocWrappers(M);
+
   CallGraphAnalysis Ana;
   CallG = std::make_unique<CallGraph>(Ana.run(M, MAM));
 
@@ -3147,6 +3482,47 @@ void MLsubRecovery::emitTRInputArtifacts(llvm::Module &M,
   if (!OutputPath.empty()) {
     writeTRInputModule(M, OutputPath);
     llvm::errs() << "TR input IR emitted to " << OutputPath << "\n";
+  }
+}
+
+void MLsubRecovery::detectMallocWrappers(llvm::Module &M) {
+  DetectedMallocWrappers.clear();
+  std::vector<std::pair<std::string, std::string>> Rows;
+
+  for (auto &F : M) {
+    auto *Alloc = getGenericMallocWrapperAllocator(F);
+    if (Alloc == nullptr) {
+      continue;
+    }
+
+    F.setMetadata(KIND_MLSUB_POLYMORPHIC_FUNCTION,
+                  llvm::MDNode::get(F.getContext(), {}));
+    DetectedMallocWrappers.insert(&F);
+
+    auto AllocName = Alloc->getCalledFunction()->getName().str();
+    Rows.push_back({F.getName().str(), AllocName});
+    llvm::errs() << "Info: detected generic malloc wrapper: " << F.getName()
+                 << " via " << AllocName << "\n";
+  }
+
+  if (auto WorkDir = notdec::getWorkDirOpt()) {
+    std::error_code EC;
+    auto Path = join(*WorkDir, kMallocWrappersFile.str());
+    llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+    if (EC) {
+      llvm::errs() << "Warning: cannot write " << kMallocWrappersFile << ": "
+                   << EC.message() << "\n";
+      return;
+    }
+
+    Out << "# Generic malloc wrappers detected before SCC partitioning\n";
+    if (Rows.empty()) {
+      Out << "No generic malloc wrappers detected.\n";
+      return;
+    }
+    for (const auto &[WrapperName, AllocName] : Rows) {
+      Out << WrapperName << "\t" << AllocName << "\n";
+    }
   }
 }
 

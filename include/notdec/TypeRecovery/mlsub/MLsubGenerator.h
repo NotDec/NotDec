@@ -496,6 +496,9 @@ class MLsubRecovery {
   std::string MergeEvalDir;
   std::shared_ptr<MergePolicyEval> MergeEval;
   bool EnableStructPtrLoadStoreMerge = false;
+  // Generic allocator wrappers must become SCC summary boundaries before
+  // prepareSCC(), otherwise callers and the wrapper body share one monotype SCC.
+  std::set<llvm::Function *> DetectedMallocWrappers;
   llvm::json::Value SummaryOverrideDoc = nullptr;
   std::set<llvm::Function *> SummaryOverrideFuncs;
   llvm::json::Value SignatureOverrideDoc = nullptr;
@@ -548,6 +551,7 @@ public:
   void validateExtraConstraintsFile(llvm::Module &M, const char *Path,
                                     llvm::StringRef ModuleSHA256Hex);
   void emitTRInputArtifacts(llvm::Module &M, llvm::StringRef OutputPath);
+  void detectMallocWrappers(llvm::Module &M);
   const llvm::json::Value *getExtraConstraintsSpec(
       const llvm::Function &Func) const;
   const llvm::json::Value *getSummaryOverrideSpec(
