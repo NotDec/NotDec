@@ -3573,12 +3573,25 @@ void MLsubRecovery::bottomUpPhase() {
   }
 }
 
-void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
-                                    unsigned PointerSizeBytes,
+void ConstraintsGenerator::genTypes(TypeBuilderContext &TBCtx,
                                     bool SolveGlobals) {
   binarysub::TypeSimplifier Ts;
   using binarysub::PolarVar;
   SnapshotContraVariantValues = ContraVariantValues;
+  // Late merge policies can leave V2N entries pointing at variables that now
+  // forward to a representative through mergedInto.  Normalize here so the final
+  // solve roots, eval grouping, and HType lowering all use the same root.
+  std::vector<std::pair<SimpleType, SimpleType>> ResolvedV2NMerges;
+  ResolvedV2NMerges.reserve(V2N.rev().size());
+  for (const auto &Ent : V2N.rev()) {
+    auto Resolved = binarysub::resolve_variable(Ent.first);
+    if (Resolved && Resolved.get() != Ent.first.get()) {
+      ResolvedV2NMerges.push_back({Ent.first, Resolved});
+    }
+  }
+  for (const auto &[From, To] : ResolvedV2NMerges) {
+    V2N.merge(From, To);
+  }
   std::set<PolarVar> Tys;
   for (auto &Ent : V2N) {
     if (!Ent.second->isVariableState()) {
@@ -3600,8 +3613,8 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
   const auto &Res = BulkResult.types;
 
-  // Create TypeBuilder context and builder.
-  TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, notdec::getWorkDirOpt());
+  // Create a short-lived builder over the shared context.  The context keeps
+  // record/type caches for the whole module-level HType build stage.
   TypeBuilder TB(TBCtx);
 
   auto convertSolvedType = [&](SimpleType Ty, bool Pos,
@@ -3735,12 +3748,13 @@ void MLsubRecovery::topDownPhase() {
   if (!HCtx) {
     HCtx = std::make_shared<ast::HTypeContext>();
   }
+  TypeBuilderContext TBCtx(*HCtx, Mod.getDataLayout().getPointerSize(),
+                           notdec::getWorkDirOpt());
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
     // 尝试运行简化算法，保存到ValueTypes里面。
     // solve memory if ind == 0
-    Data.Generator->genTypes(*HCtx, Mod.getDataLayout().getPointerSize(),
-                             Ind == 0);
+    Data.Generator->genTypes(TBCtx, Ind == 0);
   }
   if (MergeEval) {
     MergeEval->finish(AG);

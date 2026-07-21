@@ -153,3 +153,21 @@ baseline:
 ## 结论
 
 这个策略先默认开启保留。fortune 没有 wrong merge，但 SimpleType root 级别的 DebugInfo fragmentation 仍是 18；下一步应该把函数边界和返回值的等式候选单独做成更保守的策略，并把 eval 指标拆成 SimpleType root 和最终 HType/UType 两层。
+
+## 2026-07-21 后续修正
+
+本次修正了两个和最终类型生成相关的问题：
+
+- `external/binarysub/include/binarysub/TypeBuilder.h:19` 的 `TypeBuilderContext` 新增 `TypeCache` 和 `ExactRecordLayoutDecls`，让短生命周期 `TypeBuilder` 共享本轮 HType 生成缓存。
+- `external/binarysub/src/TypeBuilder.cpp:538` 的 `getStructOrNull()`、`:588` 的 `findExactRecordLayout()`、`:599` 的 `rememberExactRecordLayout()`、`:989` 的 `convert()` 改为读写 `TypeBuilderContext` 上的共享缓存。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:54` 前置声明 `TypeBuilderContext`，`:228` 将 `ConstraintsGenerator::genTypes()` 改为接收共享 context。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3576` 的 `ConstraintsGenerator::genTypes()` 入口先对 `V2N` root 调 `binarysub::resolve_variable()`，把已经 `mergedInto` 的旧 SimpleType root 合回 representative，再构造最终 `Tys`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3748` 的 `MLsubRecovery::topDownPhase()` 在 SCC 循环外创建一个共享 `TypeBuilderContext`。
+
+验证：
+
+- `cmake --build ./build --target notdec -j4`：通过。仅保留原有 unused-variable warning。
+
+判断：
+
+- 这个修正只处理“SimpleType 已经 merge，但 V2N 还保存旧 root”的情况；`v140/v179` 这类 SimpleType 本身没合并的问题仍属于后续合并策略覆盖范围。

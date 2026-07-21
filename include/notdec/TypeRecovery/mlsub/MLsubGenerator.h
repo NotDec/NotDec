@@ -51,6 +51,7 @@ namespace notdec::mlsub {
 using binarysub::SimpleType;
 
 struct ConstraintsGenerator;
+struct TypeBuilderContext;
 
 struct RecordedLoad {
   ExtValuePtr Addr;
@@ -224,8 +225,7 @@ struct ConstraintsGenerator {
                    << Merged << " pair(s)\n";
     }
   }
-  void genTypes(ast::HTypeContext &HCtx, unsigned PointerSizeBytes,
-                bool SolveGlobals = false);
+  void genTypes(TypeBuilderContext &TBCtx, bool SolveGlobals = false);
   void releaseBinarysubState();
 
   SimpleType convertSimpleType(ExtValuePtr Val);
