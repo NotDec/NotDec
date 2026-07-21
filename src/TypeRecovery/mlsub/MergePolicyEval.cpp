@@ -57,6 +57,16 @@ struct BadUnionRecord {
   std::string Evidence;
 };
 
+struct FragmentedValueRecord {
+  std::string Value;
+  std::string Source;
+  std::string DebugType;
+};
+
+using FragmentedComponentMap =
+    std::map<std::string, std::map<std::string,
+                                   std::vector<FragmentedValueRecord>>>;
+
 struct TruthSet {
   std::map<std::string, std::string> SamplesByType;
 };
@@ -539,6 +549,48 @@ struct MergePolicyEval::Impl {
     }
   }
 
+  void writeFragmentedTypes(const FragmentedComponentMap &TypeComponents) const {
+    std::error_code EC;
+    llvm::raw_fd_ostream Out(
+        llvm2c::join(OutputDir, "fragmented_types.jsonl"), EC,
+        llvm::sys::fs::OF_Text);
+    if (EC) {
+      llvm::errs() << "Warning: failed to write fragmented_types.jsonl: "
+                   << EC.message() << "\n";
+      return;
+    }
+
+    for (const auto &TypeEnt : TypeComponents) {
+      if (TypeEnt.second.size() <= 1) {
+        continue;
+      }
+
+      llvm::json::Array Components;
+      for (const auto &Comp : TypeEnt.second) {
+        auto Records = Comp.second;
+        std::sort(Records.begin(), Records.end(),
+                  [](const auto &LHS, const auto &RHS) {
+                    return LHS.Value < RHS.Value;
+                  });
+
+        llvm::json::Array Values;
+        for (const auto &Rec : Records) {
+          Values.push_back(llvm::json::Object{{"value", Rec.Value},
+                                              {"source", Rec.Source},
+                                              {"debug_type", Rec.DebugType}});
+        }
+        Components.push_back(llvm::json::Object{
+            {"root", Comp.first},
+            {"count", static_cast<int64_t>(Comp.second.size())},
+            {"values", std::move(Values)}});
+      }
+
+      llvm::json::Object Obj{{"type", TypeEnt.first},
+                             {"components", std::move(Components)}};
+      Out << llvm::formatv("{0}", llvm::json::Value(std::move(Obj))) << "\n";
+    }
+  }
+
   void finish(const AllGraphs &AG) {
     std::map<binarysub::SimpleType, std::vector<ExtValuePtr>,
              binarysub::SimpleTypePointerLess>
@@ -567,6 +619,7 @@ struct MergePolicyEval::Impl {
     std::uint64_t PollutedComponents = 0;
     std::uint64_t ExtraTypes = 0;
     std::map<std::string, std::map<std::string, std::uint64_t>> TypeComponents;
+    FragmentedComponentMap TypeComponentValues;
 
     for (const auto &Component : Components) {
       std::set<std::string> TruthTypes;
@@ -578,6 +631,10 @@ struct MergePolicyEval::Impl {
         }
         TruthTypes.insert(Oracle->StrictKey);
         TypeComponents[Oracle->StrictKey][RootKey] += 1;
+        TypeComponentValues[Oracle->StrictKey][RootKey].push_back(
+            FragmentedValueRecord{.Value = toStableString(Val),
+                                  .Source = Oracle->Source,
+                                  .DebugType = Oracle->Pretty});
       }
       if (TruthTypes.size() > 1) {
         ++PollutedComponents;
@@ -614,6 +671,7 @@ struct MergePolicyEval::Impl {
     }
 
     writeBadUnions();
+    writeFragmentedTypes(TypeComponentValues);
 
     llvm::json::Object Summary{
         {"coverage",

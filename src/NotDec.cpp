@@ -94,8 +94,8 @@ static cl::opt<std::string> mergeEvalDir(
 static cl::opt<bool> mergeStructPtrLoadStore(
     "merge-struct-ptr-load-store",
     cl::desc("Merge load/store target variables when both look like struct "
-             "pointers. Experimental and disabled by default."),
-    cl::init(false), cl::cat(NotdecCat));
+             "pointers. Enabled by default; pass=false disables it."),
+    cl::init(true), cl::cat(NotdecCat));
 
 static cl::list<std::string> primitiveSemanticLatticeFiles(
     "primitive-semantic-lattice",

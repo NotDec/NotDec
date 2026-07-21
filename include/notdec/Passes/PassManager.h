@@ -132,11 +132,6 @@ struct DecompileConfig {
                       "(tr-level >= 2).\n";
       std::abort();
     }
-    if (Opts.mergeStructPtrLoadStore && EffectiveLevel < 2) {
-      llvm::errs() << "Error: --merge-struct-ptr-load-store requires type "
-                      "recovery (tr-level >= 2).\n";
-      std::abort();
-    }
     PE.build_passes(EffectiveLevel, EmitTRInputIR, FrozenTRInputIR,
                     HTypeDumpPath, Opts.mergeEvalDir,
                     Opts.mergeStructPtrLoadStore);
