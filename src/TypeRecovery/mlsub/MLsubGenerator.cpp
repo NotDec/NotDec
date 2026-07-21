@@ -127,11 +127,6 @@ std::optional<uint64_t> parseConstantFieldOffset(llvm::StringRef FieldName) {
   return Offset;
 }
 
-bool isStructFieldEvidence(llvm::StringRef FieldName) {
-  auto Offset = parseConstantFieldOffset(FieldName);
-  return Offset && *Offset >= 4;
-}
-
 std::optional<OffsetRange> matchPNDiffOffsetRange(llvm::Value *I) {
   assert(I->getType()->isIntegerTy());
   if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(I)) {
@@ -2743,30 +2738,244 @@ bool ConstraintsGenerator::configureConstraintContext(
   return HasHook;
 }
 
-bool ConstraintsGenerator::hasStructPointerEvidence(SimpleType Ty) const {
-  Ty = binarysub::resolve_variable(Ty);
-  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
-  if (Var == nullptr || Var->size != PointerSize) {
+bool ConstraintsGenerator::tryMergeVariablesForPolicy(
+    llvm::StringRef Policy, SimpleType From, SimpleType Into,
+    const std::string &TraceDetail) {
+  From = binarysub::resolve_variable(From);
+  Into = binarysub::resolve_variable(Into);
+  auto *FromVar = From ? From->getAsVariableState() : nullptr;
+  auto *IntoVar = Into ? Into->getAsVariableState() : nullptr;
+  if (FromVar == nullptr || IntoVar == nullptr || From.get() == Into.get()) {
+    return false;
+  }
+  if (FromVar->level != IntoVar->level || FromVar->size != IntoVar->size) {
     return false;
   }
 
-  auto HasStructField = [](const std::vector<SimpleType> &Bounds) {
+  maybeUnifyPNDiffTypeVariablePair(From, Into);
+  binarysub::ConstraintContext Context;
+  binarysub::ConstraintContext *ContextPtr =
+      configureConstraintContext(Context) ? &Context : nullptr;
+  auto Result = binarysub::merge_variable_into(
+      From, Into,
+      [this](const SimpleType &Lhs, const SimpleType &Rhs) {
+        maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
+        observeOldMemoryTypeEdge(Lhs, Rhs);
+      },
+      ContextPtr);
+  if (!Result) {
+    emitPointerAnalysisTrace("[merge-policy:" + Policy.str() +
+                             ":skip] from=" + binarysub::debug_string(From) +
+                             " into=" + binarysub::debug_string(Into) +
+                             " reason=" + Result.error().msg +
+                             " detail=" + TraceDetail);
+    return false;
+  }
+
+  std::vector<std::pair<SimpleType, std::vector<ExtValuePtr>>> RootsToMove;
+  for (const auto &Ent : V2N.rev()) {
+    auto Root = binarysub::resolve_variable(Ent.first);
+    if (Root && Root.get() == From.get()) {
+      RootsToMove.push_back({Ent.first, Ent.second});
+    }
+  }
+  std::vector<ExtValuePtr> MovedValues;
+  for (const auto &[_, Values] : RootsToMove) {
+    MovedValues.insert(MovedValues.end(), Values.begin(), Values.end());
+  }
+
+  emitMergeTrace(Policy, From, Into, MovedValues);
+  if (MergeEval) {
+    MergeEval->observeValueMapMerge(From, Into, MovedValues);
+  }
+  for (const auto &[Root, _] : RootsToMove) {
+    V2N.merge(Root, Into);
+  }
+  emitPointerAnalysisTrace("[merge-policy:" + Policy.str() +
+                           "] from=" + binarysub::debug_string(From) +
+                           " into=" + binarysub::debug_string(Into) +
+                           " detail=" + TraceDetail);
+  return true;
+}
+
+std::size_t ConstraintsGenerator::applyReturnValueMergePolicy() {
+  std::size_t Merged = 0;
+  std::set<std::pair<const binarysub::TypeNode *, const binarysub::TypeNode *>>
+      Seen;
+
+  for (const auto &Candidate : ReturnValueMergeCandidates) {
+    auto From = binarysub::resolve_variable(Candidate.Operand);
+    auto Into = binarysub::resolve_variable(Candidate.FunctionReturn);
+    if (!From || !Into || From.get() == Into.get()) {
+      continue;
+    }
+    if (!Seen.insert({From.get(), Into.get()}).second) {
+      continue;
+    }
+
+    auto *Func = Candidate.Return ? Candidate.Return->getFunction() : nullptr;
+    std::string Detail = "func=";
+    Detail += Func && Func->hasName() ? Func->getName().str() : "<unknown>";
+    if (Candidate.Return != nullptr) {
+      Detail += " ret=";
+      Detail += toStableString(ExtValuePtr{Candidate.Return});
+    }
+    if (tryMergeVariablesForPolicy("return-value", From, Into, Detail)) {
+      ++Merged;
+    }
+  }
+
+  return Merged;
+}
+
+std::optional<std::vector<ConstraintsGenerator::StructFieldSlice>>
+ConstraintsGenerator::collectOneLevelStructFieldSlices(SimpleType Ty) const {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->size != PointerSize) {
+    return std::nullopt;
+  }
+
+  std::set<StructFieldSlice> Slices;
+  auto CollectBounds = [&](const std::vector<SimpleType> &Bounds) {
     for (const auto &Bound : Bounds) {
       auto ResolvedBound = binarysub::resolve_variable(Bound);
       auto *Mem = ResolvedBound ? ResolvedBound->getAsTMemObject() : nullptr;
       if (Mem == nullptr) {
         continue;
       }
-      for (const auto &[FieldName, _] : Mem->fields) {
-        if (isStructFieldEvidence(FieldName)) {
-          return true;
+      for (const auto &[FieldName, FieldTy] : Mem->fields) {
+        auto Offset = parseConstantFieldOffset(FieldName);
+        if (!Offset || *Offset < 4) {
+          continue;
         }
+        auto ResolvedFieldTy = binarysub::resolve_variable(FieldTy);
+        if (!ResolvedFieldTy) {
+          continue;
+        }
+        auto BitSize = binarysub::get_size(ResolvedFieldTy);
+        if (BitSize == 0 || BitSize % 8 != 0) {
+          continue;
+        }
+        Slices.insert(StructFieldSlice{
+            .Offset = *Offset, .SizeBytes = static_cast<uint64_t>(BitSize / 8)});
       }
     }
-    return false;
   };
 
-  return HasStructField(Var->lowerBounds) || HasStructField(Var->upperBounds);
+  CollectBounds(Var->lowerBounds);
+  CollectBounds(Var->upperBounds);
+  if (Slices.empty()) {
+    return std::nullopt;
+  }
+  return std::vector<StructFieldSlice>(Slices.begin(), Slices.end());
+}
+
+bool ConstraintsGenerator::hasCompatibleStructFieldSlices(SimpleType LHS,
+                                                          SimpleType RHS) const {
+  auto Left = collectOneLevelStructFieldSlices(LHS);
+  auto Right = collectOneLevelStructFieldSlices(RHS);
+  if (!Left || !Right) {
+    return false;
+  }
+
+  for (const auto &L : *Left) {
+    for (const auto &R : *Right) {
+      auto LEnd = L.Offset + L.SizeBytes;
+      auto REnd = R.Offset + R.SizeBytes;
+      bool Overlap = std::max(L.Offset, R.Offset) < std::min(LEnd, REnd);
+      bool SameSlice = L.Offset == R.Offset && L.SizeBytes == R.SizeBytes;
+      if (Overlap && !SameSlice) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool ConstraintsGenerator::hasStructPointerEvidence(SimpleType Ty) const {
+  return collectOneLevelStructFieldSlices(Ty).has_value();
+}
+
+void ConstraintsGenerator::recordCallArgStructPtrMergeCandidate(
+    llvm::CallBase &Call, llvm::Function &Target, unsigned ArgIndex,
+    SimpleType ActualArg, SimpleType FormalArg) {
+  if (ActualArg == nullptr || FormalArg == nullptr) {
+    return;
+  }
+  CallArgStructPtrMergeCandidates.push_back(CallArgStructPtrMergeCandidate{
+      .Call = &Call,
+      .Target = &Target,
+      .ArgIndex = ArgIndex,
+      .ActualArg = ActualArg,
+      .FormalArg = FormalArg});
+}
+
+void ConstraintsGenerator::recordCallArgStructPtrMergeCandidates(
+    llvm::CallBase &Call, llvm::Function &Target, SimpleType ActualFunc,
+    SimpleType FormalFunc) {
+  auto ActualTy = binarysub::resolve_variable(ActualFunc);
+  auto FormalTy = binarysub::resolve_variable(FormalFunc);
+  auto *Actual = ActualTy ? ActualTy->getAsTFunction() : nullptr;
+  auto *Formal = FormalTy ? FormalTy->getAsTFunction() : nullptr;
+  if (Actual == nullptr || Formal == nullptr) {
+    return;
+  }
+  auto Count = std::min(Actual->args.size(), Formal->args.size());
+  for (unsigned I = 0; I < Count; ++I) {
+    recordCallArgStructPtrMergeCandidate(Call, Target, I, Actual->args[I],
+                                         Formal->args[I]);
+  }
+}
+
+std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
+  std::size_t Merged = 0;
+  while (true) {
+    bool Changed = false;
+    std::set<std::pair<const binarysub::TypeNode *,
+                       const binarysub::TypeNode *>>
+        Seen;
+    for (const auto &Candidate : CallArgStructPtrMergeCandidates) {
+      auto Actual = binarysub::resolve_variable(Candidate.ActualArg);
+      auto Formal = binarysub::resolve_variable(Candidate.FormalArg);
+      auto *ActualVar = Actual ? Actual->getAsVariableState() : nullptr;
+      auto *FormalVar = Formal ? Formal->getAsVariableState() : nullptr;
+      if (ActualVar == nullptr || FormalVar == nullptr ||
+          Actual.get() == Formal.get()) {
+        continue;
+      }
+      if (ActualVar->level != FormalVar->level ||
+          ActualVar->size != FormalVar->size ||
+          ActualVar->size != PointerSize) {
+        continue;
+      }
+      if (!Seen.insert({Actual.get(), Formal.get()}).second) {
+        continue;
+      }
+      if (!hasCompatibleStructFieldSlices(Actual, Formal)) {
+        continue;
+      }
+
+      std::string Detail = "call=";
+      Detail += Candidate.Call ? toStableString(ExtValuePtr{Candidate.Call})
+                               : "<unknown>";
+      Detail += " target=";
+      Detail += Candidate.Target && Candidate.Target->hasName()
+                    ? Candidate.Target->getName().str()
+                    : "<unknown>";
+      Detail += " arg=" + std::to_string(Candidate.ArgIndex);
+      if (!tryMergeVariablesForPolicy("call-arg-struct-ptr", Actual, Formal,
+                                      Detail)) {
+        continue;
+      }
+      ++Merged;
+      Changed = true;
+      break;
+    }
+    if (!Changed) {
+      return Merged;
+    }
+  }
 }
 
 std::vector<ConstraintsGenerator::LoadStoreStructPtrMergeCandidate>
@@ -3944,6 +4153,17 @@ void MLsubRecovery::bottomUpPhase() {
       assert(TData.level >= Data.level);
       auto InsFunc = PolyScheme.instantiate(Data.level);
       Data.Generator->addSubtype(InsFunc, Ent.second);
+      Data.Generator->recordCallArgStructPtrMergeCandidates(*Ent.first, *F,
+                                                            Ent.second,
+                                                            InsFunc);
+    }
+    auto PostSummaryMerged =
+        Data.Generator->applyCallArgStructPtrMergePolicy();
+    if (PostSummaryMerged != 0) {
+      llvm::errs()
+          << "Info: post-summary call arg/formal struct pointer merge policy "
+             "merged "
+          << PostSummaryMerged << " pair(s)\n";
     }
     Data.Generator->unhandledCalls.clear();
   }
@@ -6461,6 +6681,12 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     if (cg.SCCs.count(Target)) {
       auto F = cg.getNodeOrNull(Func);
       cg.addSubtype(F, ActualFunc);
+      for (unsigned ArgIndex = 0;
+           ArgIndex < Args.size() && ArgIndex < Func->arg_size(); ++ArgIndex) {
+        auto Formal = cg.getNodeOrNull(Func->getArg(ArgIndex));
+        cg.recordCallArgStructPtrMergeCandidate(I, *Func, ArgIndex,
+                                                Args[ArgIndex], Formal);
+      }
     } else {
       // create and save to CallToInstance map. instance with summary later
       auto It = cg.unhandledCalls.insert({&I, ActualFunc});
@@ -6482,6 +6708,9 @@ void ConstraintsGenerator::MLsubVisitor::visitReturnInst(ReturnInst &I) {
   auto Dst = cg.getNodeOrNull(ReturnValue{.Func = I.getFunction()});
   // src is a subtype of dest
   cg.addSubtype(Src, Dst);
+  cg.ReturnValueMergeCandidates.push_back(
+      ConstraintsGenerator::ReturnValueMergeCandidate{
+          .Return = &I, .Operand = Src, .FunctionReturn = Dst});
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitPHINode(PHINode &I) {

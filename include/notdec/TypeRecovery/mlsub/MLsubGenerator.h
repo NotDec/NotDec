@@ -12,6 +12,7 @@
 #include <ostream>
 #include <set>
 #include <string>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -127,6 +128,15 @@ struct ConstraintsGenerator {
   // PNDiff only stores opaque handles.  The real ExtValuePtr objects stay here
   // so LLVM and llvm2c details do not leak into the PNDiff module.
   std::map<ExtValuePtr, std::unique_ptr<ExtValuePtr>> PNDiffValueHandles;
+  // Late merge candidates.  They are collected while visiting IR, then applied
+  // after pointer/type evidence has been generated so the policy can stay
+  // conservative.
+  struct ReturnValueMergeCandidate {
+    llvm::ReturnInst *Return = nullptr;
+    SimpleType Operand = nullptr;
+    SimpleType FunctionReturn = nullptr;
+  };
+  std::vector<ReturnValueMergeCandidate> ReturnValueMergeCandidates;
   bool EnablePNDiffTypeVariableClosureUnification = true;
   std::ostream *TraceStream = nullptr;
   PointerAnalysisMode PAMode = PointerAnalysisMode::Original;
@@ -143,10 +153,48 @@ struct ConstraintsGenerator {
     unsigned AccessSize = 0;
   };
 
+  // One-level struct field evidence on a pointer-sized variable.  We only use
+  // direct record fields on the variable bounds and never recurse into field
+  // types here.
+  struct StructFieldSlice {
+    uint64_t Offset = 0;
+    uint64_t SizeBytes = 0;
+    bool operator<(const StructFieldSlice &Other) const {
+      return std::tie(Offset, SizeBytes) <
+             std::tie(Other.Offset, Other.SizeBytes);
+    }
+  };
+
+  struct CallArgStructPtrMergeCandidate {
+    llvm::CallBase *Call = nullptr;
+    llvm::Function *Target = nullptr;
+    unsigned ArgIndex = 0;
+    SimpleType ActualArg = nullptr;
+    SimpleType FormalArg = nullptr;
+  };
+  std::vector<CallArgStructPtrMergeCandidate> CallArgStructPtrMergeCandidates;
+
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
   bool configureConstraintContext(binarysub::ConstraintContext &Context);
+  bool tryMergeVariablesForPolicy(llvm::StringRef Policy, SimpleType From,
+                                  SimpleType Into,
+                                  const std::string &TraceDetail);
+  std::size_t applyReturnValueMergePolicy();
+  void recordCallArgStructPtrMergeCandidate(llvm::CallBase &Call,
+                                            llvm::Function &Target,
+                                            unsigned ArgIndex,
+                                            SimpleType ActualArg,
+                                            SimpleType FormalArg);
+  void recordCallArgStructPtrMergeCandidates(llvm::CallBase &Call,
+                                             llvm::Function &Target,
+                                             SimpleType ActualFunc,
+                                             SimpleType FormalFunc);
+  std::optional<std::vector<StructFieldSlice>>
+  collectOneLevelStructFieldSlices(SimpleType Ty) const;
+  bool hasCompatibleStructFieldSlices(SimpleType LHS, SimpleType RHS) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;
+  std::size_t applyCallArgStructPtrMergePolicy();
   std::vector<LoadStoreStructPtrMergeCandidate>
   collectStructPtrLoadStoreMergeCandidates() const;
   std::size_t applyStructPtrLoadStoreMergePolicy();
@@ -217,6 +265,16 @@ struct ConstraintsGenerator {
     if (isPointerAnalysisEnabled()) {
       PA.solve();
       flushPointerDerivedTypeConstraints();
+    }
+    {
+      auto Merged = applyReturnValueMergePolicy();
+      llvm::errs() << "Info: return value merge policy merged " << Merged
+                   << " pair(s)\n";
+    }
+    {
+      auto Merged = applyCallArgStructPtrMergePolicy();
+      llvm::errs() << "Info: call arg/formal struct pointer merge policy merged "
+                   << Merged << " pair(s)\n";
     }
     if (EnableStructPtrLoadStoreMerge) {
       auto Merged = applyStructPtrLoadStoreMergePolicy();
