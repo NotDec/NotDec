@@ -3573,7 +3573,8 @@ void MLsubRecovery::bottomUpPhase() {
   }
 }
 
-void ConstraintsGenerator::genTypes(TypeBuilderContext &TBCtx,
+void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
+                                    unsigned PointerSizeBytes,
                                     bool SolveGlobals) {
   binarysub::TypeSimplifier Ts;
   using binarysub::PolarVar;
@@ -3613,8 +3614,9 @@ void ConstraintsGenerator::genTypes(TypeBuilderContext &TBCtx,
   auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
   const auto &Res = BulkResult.types;
 
-  // Create a short-lived builder over the shared context.  The context keeps
-  // record/type caches for the whole module-level HType build stage.
+  // Create TypeBuilder context and builder.  Keep this SCC-local until cross-SCC
+  // type sharing has a dedicated design.
+  TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, notdec::getWorkDirOpt());
   TypeBuilder TB(TBCtx);
 
   auto convertSolvedType = [&](SimpleType Ty, bool Pos,
@@ -3748,13 +3750,12 @@ void MLsubRecovery::topDownPhase() {
   if (!HCtx) {
     HCtx = std::make_shared<ast::HTypeContext>();
   }
-  TypeBuilderContext TBCtx(*HCtx, Mod.getDataLayout().getPointerSize(),
-                           notdec::getWorkDirOpt());
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
     // 尝试运行简化算法，保存到ValueTypes里面。
     // solve memory if ind == 0
-    Data.Generator->genTypes(TBCtx, Ind == 0);
+    Data.Generator->genTypes(*HCtx, Mod.getDataLayout().getPointerSize(),
+                             Ind == 0);
   }
   if (MergeEval) {
     MergeEval->finish(AG);

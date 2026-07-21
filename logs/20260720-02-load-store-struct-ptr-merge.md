@@ -156,13 +156,11 @@ baseline:
 
 ## 2026-07-21 后续修正
 
-本次修正了两个和最终类型生成相关的问题：
+本次只保留最终求解前的 root 规整，不做跨 SCC HType cache 共享：
 
-- `external/binarysub/include/binarysub/TypeBuilder.h:19` 的 `TypeBuilderContext` 新增 `TypeCache` 和 `ExactRecordLayoutDecls`，让短生命周期 `TypeBuilder` 共享本轮 HType 生成缓存。
-- `external/binarysub/src/TypeBuilder.cpp:538` 的 `getStructOrNull()`、`:588` 的 `findExactRecordLayout()`、`:599` 的 `rememberExactRecordLayout()`、`:989` 的 `convert()` 改为读写 `TypeBuilderContext` 上的共享缓存。
-- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:54` 前置声明 `TypeBuilderContext`，`:228` 将 `ConstraintsGenerator::genTypes()` 改为接收共享 context。
 - `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3576` 的 `ConstraintsGenerator::genTypes()` 入口先对 `V2N` root 调 `binarysub::resolve_variable()`，把已经 `mergedInto` 的旧 SimpleType root 合回 representative，再构造最终 `Tys`。
-- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3748` 的 `MLsubRecovery::topDownPhase()` 在 SCC 循环外创建一个共享 `TypeBuilderContext`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3616` 仍在每个 SCC 的 `genTypes()` 内创建 SCC-local `TypeBuilderContext` 和 `TypeBuilder`，不跨 SCC 共享结构体 decl/cache。
+- `external/binarysub` 中曾经把 `TypeBuilder` cache 提升到 `TypeBuilderContext` 的提交已经撤回，避免在跨 SCC 类型关系没设计清楚前复用 HType 结构。
 
 验证：
 
