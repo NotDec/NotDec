@@ -203,6 +203,10 @@ struct ConstraintsGenerator {
                                                 SimpleType FormalFunc);
   std::optional<std::vector<StructFieldSlice>>
   collectOneLevelStructFieldSlices(SimpleType Ty) const;
+  // Field record entries only prove an address.  The slice width must come from
+  // real direct load/store evidence on that field address.
+  std::optional<uint64_t>
+  collectMaxDirectFieldAccessSizeBytes(SimpleType FieldAddrTy) const;
   bool hasNonConflictingStructFieldSlices(SimpleType LHS, SimpleType RHS,
                                           bool RequireEvidence) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;

@@ -7,7 +7,7 @@
 [+] @isFloat => lower=(void (*)(f32))* ; upper=(void (*)(f32))*
 [+] @isInt => lower=(void (*)(top:32))* ; upper=(void (*)(bottom:32))*
 [+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
-[+] @pass => lower=('l:32 (*)('l:32))* ; upper=(top:32 (*)(bottom:32))*
+[+] @pass => lower=('m:32 (*)('m:32))* ; upper=(top:32 (*)(bottom:32))*
 [+] @ptrFloat => lower=('f:32 (*)('f:32 & ptr<load=f32, store=void, psize=32>))* ; upper=(top:32 (*)(bottom:32))*
 [+] @ptrInt => lower=('i:32 (*)('i:32 & ptr<load=void, store=void, psize=32>))* ; upper=(top:32 (*)(bottom:32))*
 [+] const(i32 0)@main::%bb.if_false.i0:0 => lower=bottom:32 ; upper=top:32

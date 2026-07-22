@@ -181,3 +181,50 @@ timeout 900s ./build/bin/notdec /tmp/notdec-fortune-subsets-20260721/fd_main_cha
 - 实现效果：6/10。接口层已经防止后续漏传 polarity，但没有消除 `new_fp` 的 128-bit direct pointer 残留。
 - 复杂度：4/10。改动集中在 binarysub compact type 构造和 simplify polarity 传递。
 - 维护成本：3/10。以后新增 compact type 构造点必须显式选择 polarity，调用点会更啰嗦，但更不容易静默漏 folding。
+
+## 2026-07-22 实现记录：字段 slice 宽度只来自 load/store
+
+本轮修正 `collectOneLevelStructFieldSlices()` 的字段宽度来源。record field 只说明某个 offset 有字段地址，不再用字段地址节点本身的 `get_size()` 当 slice size；slice size 改为扫描该字段地址的一层 direct `PtrLoad` / `PtrStore` 访问宽度。同一 offset 出现多个 access size 时取最大值。
+
+改动：
+
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:206` 增加注释，明确 record field 只证明地址，宽度必须来自真实 load/store。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:208` 声明 `collectMaxDirectFieldAccessSizeBytes()`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2871` 修改 `collectOneLevelStructFieldSlices()`，把 `std::set<StructFieldSlice>` 改成 `offset -> max size` 聚合。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2896` 不再调用 `binarysub::get_size(FieldTy)`，改为调用新 helper；没有 load/store 证据的纯 GEP 字段地址不生成 slice。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2920` 实现 `collectMaxDirectFieldAccessSizeBytes()`，只扫描字段地址本身和一层 lower/upper bounds 上的 direct load/store，不递归进字段类型。
+
+验证：
+
+```bash
+cmake --build ./build --target notdec -j4
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+RUN_DIR=/tmp/notdec-fortune-field-slice-size-20260722-073331
+/usr/bin/time -f 'elapsed=%e maxrss=%M' timeout 900s ./build/bin/notdec \
+  /sn640/NotDec-Exp/Bench2/source-ir/ir/fortune/fortune.ll \
+  -o "$RUN_DIR/out.ll" --tr-level=2 -g --work-dir="$RUN_DIR/work" \
+  --dump-htypes="$RUN_DIR/fortune.htypes.txt" --merge-eval-dir="$RUN_DIR/eval"
+```
+
+结果：
+
+- 构建通过，只剩已有 MLsub visitor unused variable warning。
+- `notdec.type_recovery.llvm_ir.tr_level_2` 通过；同步更新 4 个 HType golden。主要变化是之前被假字段冲突挡住的返回值类型现在能合上。
+- fortune 通过，`elapsed=250.98`，`maxrss=3575600`，`SCC count=19`。
+- eval：`bad_unions=0`、`polluted_components=0`、`fragmented_types=2`、`fragmented_nodes=16`、`merged_nodes=57`。
+- `get_tbl::%tbl` / `%str_numstr` 在 `ValueTypes.txt` 里不再携带 record slice，说明纯 GEP 地址没有再被当作 8 字节字段片段。
+
+输出文件：
+
+- `/tmp/notdec-fortune-field-slice-size-20260722-073331/work/ValueTypes.txt`
+- `/tmp/notdec-fortune-field-slice-size-20260722-073331/work/ValueHTypes.txt`
+- `/tmp/notdec-fortune-field-slice-size-20260722-073331/fortune.htypes.txt`
+- `/tmp/notdec-fortune-field-slice-size-20260722-073331/eval/merge-eval-summary.json`
+- `/tmp/notdec-fortune-field-slice-size-20260722-073331/eval/fragmented_types.jsonl`
+- `/tmp/notdec-fortune-field-slice-size-20260722-073331/eval/bad_unions.jsonl`
+
+评分：
+
+- 实现效果：8/10。直接修掉字段地址宽度误判，fortune 没有新增错误合并。
+- 复杂度：2/10。只加一个一层扫描 helper，调用点集中。
+- 维护成本：2/10。后续字段兼容策略继续复用这个 helper 即可。

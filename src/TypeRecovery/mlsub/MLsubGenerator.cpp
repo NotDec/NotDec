@@ -2876,7 +2876,7 @@ ConstraintsGenerator::collectOneLevelStructFieldSlices(SimpleType Ty) const {
     return std::nullopt;
   }
 
-  std::set<StructFieldSlice> Slices;
+  std::map<uint64_t, uint64_t> MaxSizeByOffset;
   auto CollectBounds = [&](const std::vector<SimpleType> &Bounds) {
     for (const auto &Bound : Bounds) {
       auto ResolvedBound = binarysub::resolve_variable(Bound);
@@ -2893,22 +2893,67 @@ ConstraintsGenerator::collectOneLevelStructFieldSlices(SimpleType Ty) const {
         if (!ResolvedFieldTy) {
           continue;
         }
-        auto BitSize = binarysub::get_size(ResolvedFieldTy);
-        if (BitSize == 0 || BitSize % 8 != 0) {
+        auto SizeBytes =
+            collectMaxDirectFieldAccessSizeBytes(ResolvedFieldTy);
+        if (!SizeBytes) {
           continue;
         }
-        Slices.insert(StructFieldSlice{
-            .Offset = *Offset, .SizeBytes = static_cast<uint64_t>(BitSize / 8)});
+        auto &CurrentMax = MaxSizeByOffset[*Offset];
+        CurrentMax = std::max(CurrentMax, *SizeBytes);
       }
     }
   };
 
   CollectBounds(Var->lowerBounds);
   CollectBounds(Var->upperBounds);
-  if (Slices.empty()) {
+  if (MaxSizeByOffset.empty()) {
     return std::nullopt;
   }
-  return std::vector<StructFieldSlice>(Slices.begin(), Slices.end());
+  std::vector<StructFieldSlice> Slices;
+  Slices.reserve(MaxSizeByOffset.size());
+  for (const auto &[Offset, SizeBytes] : MaxSizeByOffset) {
+    Slices.push_back(StructFieldSlice{.Offset = Offset, .SizeBytes = SizeBytes});
+  }
+  return Slices;
+}
+
+std::optional<uint64_t>
+ConstraintsGenerator::collectMaxDirectFieldAccessSizeBytes(
+    SimpleType FieldAddrTy) const {
+  uint64_t MaxBits = 0;
+  auto CollectAccessSize = [&](SimpleType Ty) {
+    Ty = binarysub::resolve_variable(Ty);
+    if (!Ty) {
+      return;
+    }
+    auto Consider = [&](const binarysub::AccessType *Access) {
+      if (Access == nullptr || Access->Size == 0 || Access->Size % 8 != 0) {
+        return;
+      }
+      MaxBits = std::max<uint64_t>(MaxBits, Access->Size);
+    };
+    Consider(Ty->getAsPtrLoad());
+    Consider(Ty->getAsPtrStore());
+  };
+
+  FieldAddrTy = binarysub::resolve_variable(FieldAddrTy);
+  CollectAccessSize(FieldAddrTy);
+
+  auto *Var = FieldAddrTy ? FieldAddrTy->getAsVariableState() : nullptr;
+  if (Var != nullptr) {
+    auto CollectBounds = [&](const std::vector<SimpleType> &Bounds) {
+      for (const auto &Bound : Bounds) {
+        CollectAccessSize(Bound);
+      }
+    };
+    CollectBounds(Var->lowerBounds);
+    CollectBounds(Var->upperBounds);
+  }
+
+  if (MaxBits == 0) {
+    return std::nullopt;
+  }
+  return MaxBits / 8;
 }
 
 bool ConstraintsGenerator::hasNonConflictingStructFieldSlices(
