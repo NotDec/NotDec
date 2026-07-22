@@ -168,6 +168,19 @@ struct ConstraintsGenerator {
     }
   };
 
+  // Follow-up merge after two owner struct pointers are merged.  If both owners
+  // have a struct-pointer member at the same offset, the member nodes should be
+  // considered the same recursive field entry as well.
+  struct StructFieldFollowupMergeCandidate {
+    SimpleType FromOwner = nullptr;
+    SimpleType IntoOwner = nullptr;
+    uint64_t Offset = 0;
+    SimpleType FromFieldTarget = nullptr;
+    SimpleType IntoFieldTarget = nullptr;
+  };
+  std::vector<StructFieldFollowupMergeCandidate>
+      StructFieldFollowupMergeCandidates;
+
   struct CallArgStructPtrMergeCandidate {
     llvm::CallBase *Call = nullptr;
     llvm::Function *Target = nullptr;
@@ -207,6 +220,18 @@ struct ConstraintsGenerator {
   // real direct load/store evidence on that field address.
   std::optional<uint64_t>
   collectMaxDirectFieldAccessSizeBytes(SimpleType FieldAddrTy) const;
+  // Only direct loads/stores on the field address prove the field content.
+  // Record fields by themselves only prove that an address exists.
+  std::vector<SimpleType>
+  collectDirectStructPointerAccessTargets(SimpleType FieldAddrTy) const;
+  // After an owner merge, multiple targets at one offset are the recursive field
+  // entries we may need to merge next.
+  std::map<uint64_t, std::vector<SimpleType>>
+  collectOneLevelStructPtrFieldTargetGroups(SimpleType Ty) const;
+  std::vector<StructFieldFollowupMergeCandidate>
+  collectStructPtrFieldFollowupMergeCandidatesForMergedOwner(
+      SimpleType Owner) const;
+  std::size_t applyStructPtrFieldFollowupMergePolicy();
   bool hasNonConflictingStructFieldSlices(SimpleType LHS, SimpleType RHS,
                                           bool RequireEvidence) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;
@@ -295,6 +320,11 @@ struct ConstraintsGenerator {
     if (EnableStructPtrLoadStoreMerge) {
       auto Merged = applyStructPtrLoadStoreMergePolicy();
       llvm::errs() << "Info: load/store struct pointer merge policy merged "
+                   << Merged << " pair(s)\n";
+    }
+    {
+      auto Merged = applyStructPtrFieldFollowupMergePolicy();
+      llvm::errs() << "Info: struct pointer field follow-up merge policy merged "
                    << Merged << " pair(s)\n";
     }
   }

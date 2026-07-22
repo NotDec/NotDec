@@ -2813,6 +2813,11 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
   for (const auto &[Root, _] : RootsToMove) {
     V2N.merge(Root, Into);
   }
+  auto FieldFollowups =
+      collectStructPtrFieldFollowupMergeCandidatesForMergedOwner(Into);
+  StructFieldFollowupMergeCandidates.insert(
+      StructFieldFollowupMergeCandidates.end(), FieldFollowups.begin(),
+      FieldFollowups.end());
   emitPointerAnalysisTrace("[merge-policy:" + Policy.str() +
                            "] from=" + binarysub::debug_string(From) +
                            " into=" + binarysub::debug_string(Into) +
@@ -2954,6 +2959,218 @@ ConstraintsGenerator::collectMaxDirectFieldAccessSizeBytes(
     return std::nullopt;
   }
   return MaxBits / 8;
+}
+
+std::vector<SimpleType>
+ConstraintsGenerator::collectDirectStructPointerAccessTargets(
+    SimpleType FieldAddrTy) const {
+  std::vector<SimpleType> Targets;
+  std::set<const binarysub::TypeNode *> Seen;
+
+  auto ConsiderAccess = [&](const binarysub::AccessType *Access) {
+    if (Access == nullptr || Access->Size != PointerSize) {
+      return;
+    }
+    auto Target = binarysub::resolve_variable(Access->to);
+    auto *TargetVar = Target ? Target->getAsVariableState() : nullptr;
+    if (TargetVar == nullptr || TargetVar->size != PointerSize) {
+      return;
+    }
+    if (!hasStructPointerEvidence(Target)) {
+      return;
+    }
+    if (Seen.insert(Target.get()).second) {
+      Targets.push_back(Target);
+    }
+  };
+
+  auto CollectAccesses = [&](SimpleType Ty) {
+    Ty = binarysub::resolve_variable(Ty);
+    if (!Ty) {
+      return;
+    }
+    ConsiderAccess(Ty->getAsPtrLoad());
+    ConsiderAccess(Ty->getAsPtrStore());
+  };
+
+  FieldAddrTy = binarysub::resolve_variable(FieldAddrTy);
+  CollectAccesses(FieldAddrTy);
+
+  auto *Var = FieldAddrTy ? FieldAddrTy->getAsVariableState() : nullptr;
+  if (Var != nullptr) {
+    for (const auto &Bound : Var->lowerBounds) {
+      CollectAccesses(Bound);
+    }
+    for (const auto &Bound : Var->upperBounds) {
+      CollectAccesses(Bound);
+    }
+  }
+
+  return Targets;
+}
+
+std::map<uint64_t, std::vector<SimpleType>>
+ConstraintsGenerator::collectOneLevelStructPtrFieldTargetGroups(
+    SimpleType Ty) const {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->size != PointerSize) {
+    return {};
+  }
+
+  std::map<uint64_t, std::vector<SimpleType>> TargetsByOffset;
+  auto CollectBounds = [&](const std::vector<SimpleType> &Bounds) {
+    for (const auto &Bound : Bounds) {
+      auto ResolvedBound = binarysub::resolve_variable(Bound);
+      auto *Mem = ResolvedBound ? ResolvedBound->getAsTMemObject() : nullptr;
+      if (Mem == nullptr) {
+        continue;
+      }
+      for (const auto &[FieldName, FieldTy] : Mem->fields) {
+        auto Offset = parseConstantFieldOffset(FieldName);
+        if (!Offset || *Offset < 4) {
+          continue;
+        }
+        auto Targets = collectDirectStructPointerAccessTargets(FieldTy);
+        auto &Slot = TargetsByOffset[*Offset];
+        for (const auto &Target : Targets) {
+          auto Resolved = binarysub::resolve_variable(Target);
+          if (!Resolved) {
+            continue;
+          }
+          bool AlreadySeen =
+              std::any_of(Slot.begin(), Slot.end(),
+                          [&](const SimpleType &Existing) {
+                            auto ExistingResolved =
+                                binarysub::resolve_variable(Existing);
+                            return ExistingResolved &&
+                                   ExistingResolved.get() == Resolved.get();
+                          });
+          if (!AlreadySeen) {
+            Slot.push_back(Resolved);
+          }
+        }
+      }
+    }
+  };
+
+  CollectBounds(Var->lowerBounds);
+  CollectBounds(Var->upperBounds);
+  for (auto &[_, Targets] : TargetsByOffset) {
+    std::sort(Targets.begin(), Targets.end(),
+              [](const SimpleType &LHS, const SimpleType &RHS) {
+                auto L = binarysub::resolve_variable(LHS);
+                auto R = binarysub::resolve_variable(RHS);
+                auto *LV = L ? L->getAsVariableState() : nullptr;
+                auto *RV = R ? R->getAsVariableState() : nullptr;
+                if (LV != nullptr && RV != nullptr && LV->id != RV->id) {
+                  return LV->id < RV->id;
+                }
+                return L.get() < R.get();
+              });
+  }
+  return TargetsByOffset;
+}
+
+std::vector<ConstraintsGenerator::StructFieldFollowupMergeCandidate>
+ConstraintsGenerator::collectStructPtrFieldFollowupMergeCandidatesForMergedOwner(
+    SimpleType Owner) const {
+  std::vector<StructFieldFollowupMergeCandidate> Candidates;
+  Owner = binarysub::resolve_variable(Owner);
+  auto TargetGroups = collectOneLevelStructPtrFieldTargetGroups(Owner);
+  std::set<std::tuple<const binarysub::TypeNode *,
+                      const binarysub::TypeNode *, uint64_t>>
+      Seen;
+
+  for (const auto &[Offset, Targets] : TargetGroups) {
+    if (Targets.size() < 2) {
+      continue;
+    }
+    for (std::size_t I = 0; I < Targets.size(); ++I) {
+      for (std::size_t J = I + 1; J < Targets.size(); ++J) {
+        auto LHS = binarysub::resolve_variable(Targets[I]);
+        auto RHS = binarysub::resolve_variable(Targets[J]);
+        auto *LHSVar = LHS ? LHS->getAsVariableState() : nullptr;
+        auto *RHSVar = RHS ? RHS->getAsVariableState() : nullptr;
+        if (LHSVar == nullptr || RHSVar == nullptr || LHS.get() == RHS.get()) {
+          continue;
+        }
+        if (LHSVar->level != RHSVar->level || LHSVar->size != RHSVar->size ||
+            LHSVar->size != PointerSize) {
+          continue;
+        }
+        if (!hasNonConflictingStructFieldSlices(LHS, RHS,
+                                                /*RequireEvidence=*/true)) {
+          continue;
+        }
+
+        auto FromTarget = LHSVar->id <= RHSVar->id ? RHS : LHS;
+        auto IntoTarget = LHSVar->id <= RHSVar->id ? LHS : RHS;
+        if (!Seen.insert({FromTarget.get(), IntoTarget.get(), Offset}).second) {
+          continue;
+        }
+        Candidates.push_back(StructFieldFollowupMergeCandidate{
+            .FromOwner = Owner,
+            .IntoOwner = Owner,
+            .Offset = Offset,
+            .FromFieldTarget = FromTarget,
+            .IntoFieldTarget = IntoTarget});
+      }
+    }
+  }
+  return Candidates;
+}
+
+std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
+  std::size_t Merged = 0;
+  while (true) {
+    bool Changed = false;
+    std::set<std::tuple<const binarysub::TypeNode *,
+                        const binarysub::TypeNode *, uint64_t>>
+        Seen;
+    for (const auto &Candidate : StructFieldFollowupMergeCandidates) {
+      auto FromTarget = binarysub::resolve_variable(Candidate.FromFieldTarget);
+      auto IntoTarget = binarysub::resolve_variable(Candidate.IntoFieldTarget);
+      auto *FromTargetVar =
+          FromTarget ? FromTarget->getAsVariableState() : nullptr;
+      auto *IntoTargetVar =
+          IntoTarget ? IntoTarget->getAsVariableState() : nullptr;
+      if (FromTargetVar == nullptr || IntoTargetVar == nullptr ||
+          FromTarget.get() == IntoTarget.get()) {
+        continue;
+      }
+      if (FromTargetVar->level != IntoTargetVar->level ||
+          FromTargetVar->size != IntoTargetVar->size ||
+          FromTargetVar->size != PointerSize) {
+        continue;
+      }
+      if (!Seen.insert({FromTarget.get(), IntoTarget.get(), Candidate.Offset})
+               .second) {
+        continue;
+      }
+      if (!hasNonConflictingStructFieldSlices(FromTarget, IntoTarget,
+                                              /*RequireEvidence=*/true)) {
+        continue;
+      }
+      std::string Detail = "owner-from=";
+      Detail += binarysub::debug_string(
+          binarysub::resolve_variable(Candidate.FromOwner));
+      Detail += " owner-into=";
+      Detail += binarysub::debug_string(
+          binarysub::resolve_variable(Candidate.IntoOwner));
+      Detail += " offset=" + std::to_string(Candidate.Offset);
+      if (!tryMergeVariablesForPolicy("struct-field-followup", FromTarget,
+                                      IntoTarget, Detail)) {
+        continue;
+      }
+      ++Merged;
+      Changed = true;
+      break;
+    }
+    if (!Changed) {
+      return Merged;
+    }
+  }
 }
 
 bool ConstraintsGenerator::hasNonConflictingStructFieldSlices(
@@ -3212,6 +3429,11 @@ std::size_t ConstraintsGenerator::applyStructPtrLoadStoreMergePolicy() {
 
       ++Merged;
       Changed = true;
+      auto FieldFollowups =
+          collectStructPtrFieldFollowupMergeCandidatesForMergedOwner(Into);
+      StructFieldFollowupMergeCandidates.insert(
+          StructFieldFollowupMergeCandidates.end(), FieldFollowups.begin(),
+          FieldFollowups.end());
       emitPointerAnalysisTrace(
           "[merge-policy:load-store-struct-ptr] ptr=" +
           binarysub::debug_string(Candidate.Pointer) +
@@ -4337,6 +4559,14 @@ void MLsubRecovery::bottomUpPhase() {
       llvm::errs()
           << "Info: post-summary return value merge policy merged "
           << PostSummaryReturnMerged << " pair(s)\n";
+    }
+    auto PostSummaryFieldFollowupMerged =
+        Data.Generator->applyStructPtrFieldFollowupMergePolicy();
+    if (PostSummaryFieldFollowupMerged != 0) {
+      llvm::errs()
+          << "Info: post-summary struct pointer field follow-up merge policy "
+             "merged "
+          << PostSummaryFieldFollowupMerged << " pair(s)\n";
     }
     Data.Generator->unhandledCalls.clear();
   }
