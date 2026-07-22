@@ -133,8 +133,11 @@ struct ConstraintsGenerator {
   // conservative.
   struct ReturnValueMergeCandidate {
     llvm::ReturnInst *Return = nullptr;
+    llvm::CallBase *Call = nullptr;
+    llvm::Function *Target = nullptr;
     SimpleType Operand = nullptr;
     SimpleType FunctionReturn = nullptr;
+    bool RequireStructFieldCompatibility = false;
   };
   std::vector<ReturnValueMergeCandidate> ReturnValueMergeCandidates;
   bool EnablePNDiffTypeVariableClosureUnification = true;
@@ -190,9 +193,18 @@ struct ConstraintsGenerator {
                                              llvm::Function &Target,
                                              SimpleType ActualFunc,
                                              SimpleType FormalFunc);
+  void recordCallReturnStructPtrMergeCandidate(llvm::CallBase &Call,
+                                               llvm::Function &Target,
+                                               SimpleType ActualRet,
+                                               SimpleType FormalRet);
+  void recordCallReturnStructPtrMergeCandidates(llvm::CallBase &Call,
+                                                llvm::Function &Target,
+                                                SimpleType ActualFunc,
+                                                SimpleType FormalFunc);
   std::optional<std::vector<StructFieldSlice>>
   collectOneLevelStructFieldSlices(SimpleType Ty) const;
-  bool hasCompatibleStructFieldSlices(SimpleType LHS, SimpleType RHS) const;
+  bool hasNonConflictingStructFieldSlices(SimpleType LHS, SimpleType RHS,
+                                          bool RequireEvidence) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;
   std::size_t applyCallArgStructPtrMergePolicy();
   std::vector<LoadStoreStructPtrMergeCandidate>
@@ -557,6 +569,10 @@ class MLsubRecovery {
   // Generic allocator wrappers must become SCC summary boundaries before
   // prepareSCC(), otherwise callers and the wrapper body share one monotype SCC.
   std::set<llvm::Function *> DetectedMallocWrappers;
+  // C/POSIX buffer APIs reuse one declaration for many unrelated caller buffers.
+  // Mark them polymorphic before SCC partitioning so each callsite gets fresh
+  // argument variables instead of sharing one `read::arg1`-style node.
+  std::set<llvm::Function *> DetectedPolymorphicBufferFunctions;
   llvm::json::Value SummaryOverrideDoc = nullptr;
   std::set<llvm::Function *> SummaryOverrideFuncs;
   llvm::json::Value SignatureOverrideDoc = nullptr;
@@ -610,6 +626,7 @@ public:
                                     llvm::StringRef ModuleSHA256Hex);
   void emitTRInputArtifacts(llvm::Module &M, llvm::StringRef OutputPath);
   void detectMallocWrappers(llvm::Module &M);
+  void markBuiltinPolymorphicBufferFunctions(llvm::Module &M);
   const llvm::json::Value *getExtraConstraintsSpec(
       const llvm::Function &Func) const;
   const llvm::json::Value *getSummaryOverrideSpec(

@@ -79,6 +79,28 @@ constexpr llvm::StringLiteral kPNDiffAnnotatedFile = "03-pndiff-final.ll";
 constexpr llvm::StringLiteral kBinarysubTraceFile = "binarysub-trace.log";
 constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
 constexpr llvm::StringLiteral kMallocWrappersFile = "MallocWrappers.txt";
+constexpr llvm::StringLiteral kPolymorphicBufferFunctionsFile =
+    "PolymorphicBufferFunctions.txt";
+
+bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
+  static constexpr llvm::StringLiteral Names[] = {
+      "read",          "write",          "pread",          "pwrite",
+      "pread64",       "pwrite64",       "fread",          "fwrite",
+      "fgets",         "fputs",          "gets",           "getline",
+      "getdelim",      "recv",           "recvfrom",       "send",
+      "sendto",        "memcpy",         "memmove",        "memset",
+      "bzero",         "strcpy",         "strncpy",        "strcat",
+      "strncat",       "sprintf",        "snprintf",       "vsprintf",
+      "vsnprintf",     "__memcpy_chk",   "__memmove_chk",  "__memset_chk",
+      "__strcpy_chk",  "__strncpy_chk",  "__strcat_chk",   "__strncat_chk",
+      "__sprintf_chk", "__snprintf_chk", "__vsprintf_chk", "__vsnprintf_chk"};
+  for (auto Candidate : Names) {
+    if (Candidate == Name) {
+      return true;
+    }
+  }
+  return false;
+}
 
 bool envFlagEnabled(llvm::StringRef Name) {
   auto *Value = std::getenv(Name.data());
@@ -2812,15 +2834,33 @@ std::size_t ConstraintsGenerator::applyReturnValueMergePolicy() {
     if (!Seen.insert({From.get(), Into.get()}).second) {
       continue;
     }
+    if (Candidate.RequireStructFieldCompatibility &&
+        !hasNonConflictingStructFieldSlices(From, Into,
+                                            /*RequireEvidence=*/true)) {
+      continue;
+    }
 
     auto *Func = Candidate.Return ? Candidate.Return->getFunction() : nullptr;
-    std::string Detail = "func=";
-    Detail += Func && Func->hasName() ? Func->getName().str() : "<unknown>";
+    std::string Detail;
+    if (Candidate.Call != nullptr) {
+      Detail = "call=";
+      Detail += toStableString(ExtValuePtr{Candidate.Call});
+      Detail += " target=";
+      Detail += Candidate.Target && Candidate.Target->hasName()
+                    ? Candidate.Target->getName().str()
+                    : "<unknown>";
+    } else {
+      Detail = "func=";
+      Detail += Func && Func->hasName() ? Func->getName().str() : "<unknown>";
+    }
     if (Candidate.Return != nullptr) {
       Detail += " ret=";
       Detail += toStableString(ExtValuePtr{Candidate.Return});
     }
-    if (tryMergeVariablesForPolicy("return-value", From, Into, Detail)) {
+    auto Policy = Candidate.RequireStructFieldCompatibility
+                      ? "call-return-struct-ptr"
+                      : "return-value";
+    if (tryMergeVariablesForPolicy(Policy, From, Into, Detail)) {
       ++Merged;
     }
   }
@@ -2871,12 +2911,15 @@ ConstraintsGenerator::collectOneLevelStructFieldSlices(SimpleType Ty) const {
   return std::vector<StructFieldSlice>(Slices.begin(), Slices.end());
 }
 
-bool ConstraintsGenerator::hasCompatibleStructFieldSlices(SimpleType LHS,
-                                                          SimpleType RHS) const {
+bool ConstraintsGenerator::hasNonConflictingStructFieldSlices(
+    SimpleType LHS, SimpleType RHS, bool RequireEvidence) const {
   auto Left = collectOneLevelStructFieldSlices(LHS);
   auto Right = collectOneLevelStructFieldSlices(RHS);
-  if (!Left || !Right) {
+  if (RequireEvidence && !Left && !Right) {
     return false;
+  }
+  if (!Left || !Right) {
+    return true;
   }
 
   for (const auto &L : *Left) {
@@ -2928,6 +2971,35 @@ void ConstraintsGenerator::recordCallArgStructPtrMergeCandidates(
   }
 }
 
+void ConstraintsGenerator::recordCallReturnStructPtrMergeCandidate(
+    llvm::CallBase &Call, llvm::Function &Target, SimpleType ActualRet,
+    SimpleType FormalRet) {
+  if (ActualRet == nullptr || FormalRet == nullptr) {
+    return;
+  }
+  ReturnValueMergeCandidates.push_back(ReturnValueMergeCandidate{
+      .Call = &Call,
+      .Target = &Target,
+      .Operand = ActualRet,
+      .FunctionReturn = FormalRet,
+      .RequireStructFieldCompatibility = true});
+}
+
+void ConstraintsGenerator::recordCallReturnStructPtrMergeCandidates(
+    llvm::CallBase &Call, llvm::Function &Target, SimpleType ActualFunc,
+    SimpleType FormalFunc) {
+  auto ActualTy = binarysub::resolve_variable(ActualFunc);
+  auto FormalTy = binarysub::resolve_variable(FormalFunc);
+  auto *Actual = ActualTy ? ActualTy->getAsTFunction() : nullptr;
+  auto *Formal = FormalTy ? FormalTy->getAsTFunction() : nullptr;
+  if (Actual == nullptr || Formal == nullptr || Actual->result == nullptr ||
+      Formal->result == nullptr) {
+    return;
+  }
+  recordCallReturnStructPtrMergeCandidate(Call, Target, Actual->result,
+                                          Formal->result);
+}
+
 std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
   std::size_t Merged = 0;
   while (true) {
@@ -2952,7 +3024,8 @@ std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
       if (!Seen.insert({Actual.get(), Formal.get()}).second) {
         continue;
       }
-      if (!hasCompatibleStructFieldSlices(Actual, Formal)) {
+      if (!hasNonConflictingStructFieldSlices(Actual, Formal,
+                                             /*RequireEvidence=*/true)) {
         continue;
       }
 
@@ -3573,6 +3646,7 @@ void MLsubRecovery::run() {
   }
 
   detectMallocWrappers(M);
+  markBuiltinPolymorphicBufferFunctions(M);
 
   CallGraphAnalysis Ana;
   CallG = std::make_unique<CallGraph>(Ana.run(M, MAM));
@@ -3731,6 +3805,52 @@ void MLsubRecovery::detectMallocWrappers(llvm::Module &M) {
     }
     for (const auto &[WrapperName, AllocName] : Rows) {
       Out << WrapperName << "\t" << AllocName << "\n";
+    }
+  }
+}
+
+void MLsubRecovery::markBuiltinPolymorphicBufferFunctions(llvm::Module &M) {
+  DetectedPolymorphicBufferFunctions.clear();
+  std::vector<std::string> Rows;
+
+  for (auto &F : M) {
+    if (!F.isDeclaration() || !F.hasName()) {
+      continue;
+    }
+    if (!isBuiltinPolymorphicBufferFunctionName(F.getName())) {
+      continue;
+    }
+
+    // These APIs copy bytes between caller-owned buffers. A single declaration
+    // node would otherwise force unrelated buffers from different callsites to
+    // share one formal argument type.
+    F.setMetadata(KIND_MLSUB_POLYMORPHIC_FUNCTION,
+                  llvm::MDNode::get(F.getContext(), {}));
+    DetectedPolymorphicBufferFunctions.insert(&F);
+    Rows.push_back(F.getName().str());
+    llvm::errs() << "Info: builtin polymorphic buffer function: "
+                 << F.getName() << "\n";
+  }
+
+  if (auto WorkDir = notdec::getWorkDirOpt()) {
+    std::error_code EC;
+    auto Path = join(*WorkDir, kPolymorphicBufferFunctionsFile.str());
+    llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+    if (EC) {
+      llvm::errs() << "Warning: cannot write "
+                   << kPolymorphicBufferFunctionsFile << ": "
+                   << EC.message() << "\n";
+      return;
+    }
+
+    Out << "# Builtin buffer functions marked polymorphic before SCC "
+           "partitioning\n";
+    if (Rows.empty()) {
+      Out << "No builtin polymorphic buffer functions detected.\n";
+      return;
+    }
+    for (const auto &Name : Rows) {
+      Out << Name << "\n";
     }
   }
 }
@@ -4156,6 +4276,8 @@ void MLsubRecovery::bottomUpPhase() {
       Data.Generator->recordCallArgStructPtrMergeCandidates(*Ent.first, *F,
                                                             Ent.second,
                                                             InsFunc);
+      Data.Generator->recordCallReturnStructPtrMergeCandidates(
+          *Ent.first, *F, Ent.second, InsFunc);
     }
     auto PostSummaryMerged =
         Data.Generator->applyCallArgStructPtrMergePolicy();
@@ -4164,6 +4286,12 @@ void MLsubRecovery::bottomUpPhase() {
           << "Info: post-summary call arg/formal struct pointer merge policy "
              "merged "
           << PostSummaryMerged << " pair(s)\n";
+    }
+    auto PostSummaryReturnMerged = Data.Generator->applyReturnValueMergePolicy();
+    if (PostSummaryReturnMerged != 0) {
+      llvm::errs()
+          << "Info: post-summary return value merge policy merged "
+          << PostSummaryReturnMerged << " pair(s)\n";
     }
     Data.Generator->unhandledCalls.clear();
   }
@@ -6686,6 +6814,10 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
         auto Formal = cg.getNodeOrNull(Func->getArg(ArgIndex));
         cg.recordCallArgStructPtrMergeCandidate(I, *Func, ArgIndex,
                                                 Args[ArgIndex], Formal);
+      }
+      if (Ret != nullptr && !Func->getReturnType()->isAggregateType()) {
+        auto FormalRet = cg.getNodeOrNull(ReturnValue{.Func = Func});
+        cg.recordCallReturnStructPtrMergeCandidate(I, *Func, Ret, FormalRet);
       }
     } else {
       // create and save to CallToInstance map. instance with summary later
