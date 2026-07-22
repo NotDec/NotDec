@@ -129,3 +129,55 @@ timeout 900s ./build/bin/notdec /tmp/notdec-fortune-subsets-20260721/fd_main_cha
 - 实现效果：7/10。修掉了 `read::arg1` 这类外部 buffer declaration 污染，错误合并仍为 0；但性能仍然偏高。
 - 复杂度：2/10。只是声明级自动 metadata 和一个 workdir 列表。
 - 维护成本：3/10。后续如果要扩展 API 名单，只改一个内置列表；风险是过度标记真实项目里的同名外部声明，但限定了 declaration，影响可控。
+
+## 2026-07-22 实现记录：CompactType 构造强制传 polarity
+
+本轮把 binarysub 的 `CompactType` 构造入口从 `std::optional<bool> foldPolarity` 改成必传 `bool pol`。这样以后类似 `go1` 重建 compact type 时漏传 polarity，会直接变成编译错误，而不是静默跳过 `{record} + Ptr` folding。
+
+改动：
+
+- `external/binarysub/include/binarysub/binarysub.h:426` 修改 `CompactTypeArena::make()`，第一个参数改为必传 `bool pol`。
+- `external/binarysub/include/binarysub/binarysub.h:547` 修改 `make_compact_type()`，第一个参数改为必传 `bool pol`。
+- `external/binarysub/include/binarysub/binarysub.h:674` 修改 `TypeSimplifier::makeCompactType()`，第一个参数改为必传 `bool pol`。
+- `external/binarysub/include/binarysub/binarysub.h:733` 修改 `applySimplificationPlan()` 和 `simplifyType()`，把 root polarity 显式传入。
+- `external/binarysub/src/binarysub.cpp:639` 修改 `CompactTypeArena::make()` 实现，直接用 `pol` 做 offset 0 direct pointer folding。
+- `external/binarysub/src/binarysub.cpp:1492` 修改 `TypeSimplifier::makeCompactType()` 实现，把 `pol` 传到 arena。
+- `external/binarysub/src/binarysub.cpp:1524` 修改 `canonicalizeType()` 里的局部 `make_compact` helper，要求传入当前 polarity。
+- `external/binarysub/src/binarysub.cpp:1735` 修正 `go1` 递归重建 `CompactType` 时传入当前 `pol`。
+- `external/binarysub/src/binarysub.cpp:2104` 修改 `applySimplificationPlan()`，递归重建时 record/load 继续用当前 polarity，function arg/store 用反 polarity。
+- `external/binarysub/src/binarysub.cpp:2717` 和 `external/binarysub/src/binarysub.cpp:2828` 分别在 bulk/single simplify 中把 root polarity 传给 `simplifyType()`。
+- `external/binarysub/src/binarysub-test.cpp:598`、`:1419`、`:1427`、`:1435` 更新测试，显式传正/负 polarity。
+
+验证：
+
+```bash
+cmake --build ./build --target binarysub TypeBuilderTest -j4
+./build/binarysub
+./build/bin/TypeBuilderTest
+cmake --build ./build --target notdec -j4
+timeout 900s ./build/bin/notdec /tmp/notdec-fortune-subsets-20260721/fd_main_chain.ll \
+  -o /tmp/notdec-fortune-pol-required-out-2.ll --tr-level=2 -g \
+  --work-dir=/tmp/notdec-fortune-work-20260722-pol-required-2 \
+  --merge-eval-dir=/tmp/notdec-merge-eval-fortune-20260722-pol-required-2
+```
+
+结果：
+
+- `binarysub` 自测通过。
+- `TypeBuilderTest` 6 个测试通过。
+- `notdec` 构建通过，只剩已有 MLsub visitor unused variable warning。
+- fortune fd 子集跑完，`bad_unions = 0`，`polluted_components = 0`，`fragmented_nodes = 15`。
+- `read::arg1` 仍为 `top:64`，buffer declaration 污染没有回退。
+- `new_fp::<ret>` 仍有 `{...} & Ptr<...>` 残留。原因不是漏传 `pol`，而是 `external/binarysub/src/binarysub.cpp:647` 的 folding 还有 `*psize <= pointer_size` 条件；该值这里是 `psize=128`，所以仍不会折进 offset 0 字段。本轮没有放宽这个语义。
+
+输出文件：
+
+- `/tmp/notdec-fortune-work-20260722-pol-required-2/ValueTypes.txt`
+- `/tmp/notdec-fortune-work-20260722-pol-required-2/ValueHTypes.txt`
+- `/tmp/notdec-merge-eval-fortune-20260722-pol-required-2/merge-eval-summary.json`
+
+评分：
+
+- 实现效果：6/10。接口层已经防止后续漏传 polarity，但没有消除 `new_fp` 的 128-bit direct pointer 残留。
+- 复杂度：4/10。改动集中在 binarysub compact type 构造和 simplify polarity 传递。
+- 维护成本：3/10。以后新增 compact type 构造点必须显式选择 polarity，调用点会更啰嗦，但更不容易静默漏 folding。
