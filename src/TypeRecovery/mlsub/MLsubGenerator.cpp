@@ -3211,7 +3211,7 @@ ConstraintsGenerator::explainStructFieldSliceCompatibilityFailure(
   auto Left = collectOneLevelStructFieldSlices(LHS);
   auto Right = collectOneLevelStructFieldSlices(RHS);
   if (RequireEvidence && !Left && !Right) {
-    return "missing-evidence lhs=<none> rhs=<none>";
+    return "missing-struct-evidence lhs=<none> rhs=<none>";
   }
   if (!Left || !Right) {
     return std::nullopt;
