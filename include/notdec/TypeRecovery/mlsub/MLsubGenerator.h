@@ -234,6 +234,9 @@ struct ConstraintsGenerator {
   std::size_t applyStructPtrFieldFollowupMergePolicy();
   bool hasNonConflictingStructFieldSlices(SimpleType LHS, SimpleType RHS,
                                           bool RequireEvidence) const;
+  std::optional<std::string>
+  explainStructFieldSliceCompatibilityFailure(SimpleType LHS, SimpleType RHS,
+                                              bool RequireEvidence) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;
   std::size_t applyCallArgStructPtrMergePolicy();
   std::vector<LoadStoreStructPtrMergeCandidate>
@@ -351,6 +354,7 @@ struct ConstraintsGenerator {
                       ExtValuePtr Target, const SimpleType &Ty);
   void emitMergeTrace(llvm::StringRef Event, SimpleType From, SimpleType To,
                       llvm::ArrayRef<ExtValuePtr> MovedValues);
+  void emitTypeRecoveryTrace(const std::string &Message);
   void emitPointerAnalysisTrace(const std::string &Message);
   PNIValue getPNIValue(const ExtValuePtr &Val);
   const ExtValuePtr &getPNIExtValue(PNIValue Val) const;

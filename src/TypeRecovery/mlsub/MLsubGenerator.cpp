@@ -2704,6 +2704,13 @@ void ConstraintsGenerator::emitMergeTrace(llvm::StringRef Event, SimpleType From
   binarysub::binarysub_trace(OS.str());
 }
 
+void ConstraintsGenerator::emitTypeRecoveryTrace(const std::string &Message) {
+  if (TraceStream == nullptr) {
+    return;
+  }
+  binarysub::binarysub_trace(Message);
+}
+
 SimpleType
 MemoryAccessRecords::getOrCreateLocType(ConstraintsGenerator &CG,
                                         const MemoryLocKey &Loc) {
@@ -2786,11 +2793,11 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
       },
       ContextPtr);
   if (!Result) {
-    emitPointerAnalysisTrace("[merge-policy:" + Policy.str() +
-                             ":skip] from=" + binarysub::debug_string(From) +
-                             " into=" + binarysub::debug_string(Into) +
-                             " reason=" + Result.error().msg +
-                             " detail=" + TraceDetail);
+    emitTypeRecoveryTrace("[merge-policy:" + Policy.str() +
+                          ":skip] from=" + binarysub::debug_string(From) +
+                          " into=" + binarysub::debug_string(Into) +
+                          " reason=" + Result.error().msg +
+                          " detail=" + TraceDetail);
     return false;
   }
 
@@ -2818,10 +2825,10 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
   StructFieldFollowupMergeCandidates.insert(
       StructFieldFollowupMergeCandidates.end(), FieldFollowups.begin(),
       FieldFollowups.end());
-  emitPointerAnalysisTrace("[merge-policy:" + Policy.str() +
-                           "] from=" + binarysub::debug_string(From) +
-                           " into=" + binarysub::debug_string(Into) +
-                           " detail=" + TraceDetail);
+  emitTypeRecoveryTrace("[merge-policy:" + Policy.str() +
+                        "] from=" + binarysub::debug_string(From) +
+                        " into=" + binarysub::debug_string(Into) +
+                        " detail=" + TraceDetail);
   return true;
 }
 
@@ -3175,13 +3182,39 @@ std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
 
 bool ConstraintsGenerator::hasNonConflictingStructFieldSlices(
     SimpleType LHS, SimpleType RHS, bool RequireEvidence) const {
+  return !explainStructFieldSliceCompatibilityFailure(LHS, RHS,
+                                                      RequireEvidence)
+              .has_value();
+}
+
+static std::string formatStructFieldSlicesForTrace(
+    const std::optional<std::vector<ConstraintsGenerator::StructFieldSlice>>
+        &Slices) {
+  if (!Slices) {
+    return "<none>";
+  }
+  std::ostringstream OS;
+  OS << "[";
+  for (std::size_t I = 0; I < Slices->size(); ++I) {
+    if (I != 0) {
+      OS << ",";
+    }
+    OS << "@" << (*Slices)[I].Offset << ":" << (*Slices)[I].SizeBytes;
+  }
+  OS << "]";
+  return OS.str();
+}
+
+std::optional<std::string>
+ConstraintsGenerator::explainStructFieldSliceCompatibilityFailure(
+    SimpleType LHS, SimpleType RHS, bool RequireEvidence) const {
   auto Left = collectOneLevelStructFieldSlices(LHS);
   auto Right = collectOneLevelStructFieldSlices(RHS);
   if (RequireEvidence && !Left && !Right) {
-    return false;
+    return "missing-evidence lhs=<none> rhs=<none>";
   }
   if (!Left || !Right) {
-    return true;
+    return std::nullopt;
   }
 
   for (const auto &L : *Left) {
@@ -3191,29 +3224,65 @@ bool ConstraintsGenerator::hasNonConflictingStructFieldSlices(
       bool Overlap = std::max(L.Offset, R.Offset) < std::min(LEnd, REnd);
       bool SameSlice = L.Offset == R.Offset && L.SizeBytes == R.SizeBytes;
       if (Overlap && !SameSlice) {
-        return false;
+        std::ostringstream OS;
+        OS << "overlap-conflict lhs=@" << L.Offset << ":" << L.SizeBytes
+           << " rhs=@" << R.Offset << ":" << R.SizeBytes
+           << " lhs-slices=" << formatStructFieldSlicesForTrace(Left)
+           << " rhs-slices=" << formatStructFieldSlicesForTrace(Right);
+        return OS.str();
       }
     }
   }
-  return true;
+  return std::nullopt;
 }
 
 bool ConstraintsGenerator::hasStructPointerEvidence(SimpleType Ty) const {
   return collectOneLevelStructFieldSlices(Ty).has_value();
 }
 
+static std::string
+formatCallArgStructPtrMergeCandidateDetail(
+    const ConstraintsGenerator::CallArgStructPtrMergeCandidate &Candidate) {
+  std::string Detail = "call=";
+  Detail += Candidate.Call ? toStableString(ExtValuePtr{Candidate.Call})
+                           : "<unknown>";
+  Detail += " target=";
+  Detail += Candidate.Target && Candidate.Target->hasName()
+                ? Candidate.Target->getName().str()
+                : "<unknown>";
+  Detail += " arg=" + std::to_string(Candidate.ArgIndex);
+  return Detail;
+}
+
+static std::string formatSimpleTypeForTrace(SimpleType Ty) {
+  Ty = binarysub::resolve_variable(Ty);
+  return Ty ? binarysub::debug_string(Ty) : "<null>";
+}
+
 void ConstraintsGenerator::recordCallArgStructPtrMergeCandidate(
     llvm::CallBase &Call, llvm::Function &Target, unsigned ArgIndex,
     SimpleType ActualArg, SimpleType FormalArg) {
-  if (ActualArg == nullptr || FormalArg == nullptr) {
-    return;
-  }
-  CallArgStructPtrMergeCandidates.push_back(CallArgStructPtrMergeCandidate{
+  CallArgStructPtrMergeCandidate Candidate{
       .Call = &Call,
       .Target = &Target,
       .ArgIndex = ArgIndex,
       .ActualArg = ActualArg,
-      .FormalArg = FormalArg});
+      .FormalArg = FormalArg};
+  if (ActualArg == nullptr || FormalArg == nullptr) {
+    emitTypeRecoveryTrace(
+        "[merge-policy:call-arg-struct-ptr:candidate-skip] " +
+        formatCallArgStructPtrMergeCandidateDetail(Candidate) +
+        " reason=null-actual-or-formal actual=" +
+        formatSimpleTypeForTrace(ActualArg) +
+        " formal=" + formatSimpleTypeForTrace(FormalArg));
+    return;
+  }
+  CallArgStructPtrMergeCandidates.push_back(Candidate);
+  emitTypeRecoveryTrace(
+      "[merge-policy:call-arg-struct-ptr:candidate] " +
+      formatCallArgStructPtrMergeCandidateDetail(Candidate) +
+      " actual=" + formatSimpleTypeForTrace(ActualArg) +
+      " formal=" + formatSimpleTypeForTrace(FormalArg));
 }
 
 void ConstraintsGenerator::recordCallArgStructPtrMergeCandidates(
@@ -3274,31 +3343,39 @@ std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
       auto Formal = binarysub::resolve_variable(Candidate.FormalArg);
       auto *ActualVar = Actual ? Actual->getAsVariableState() : nullptr;
       auto *FormalVar = Formal ? Formal->getAsVariableState() : nullptr;
-      if (ActualVar == nullptr || FormalVar == nullptr ||
-          Actual.get() == Formal.get()) {
+      auto Detail = formatCallArgStructPtrMergeCandidateDetail(Candidate);
+      auto EmitSkip = [&](llvm::StringRef Reason,
+                          const std::string &Extra = "") {
+        emitTypeRecoveryTrace(
+            "[merge-policy:call-arg-struct-ptr:skip] " + Detail +
+            " reason=" + Reason.str() +
+            " actual=" + formatSimpleTypeForTrace(Actual) +
+            " formal=" + formatSimpleTypeForTrace(Formal) + Extra);
+      };
+      if (ActualVar == nullptr || FormalVar == nullptr) {
+        EmitSkip("non-variable");
+        continue;
+      }
+      if (Actual.get() == Formal.get()) {
+        EmitSkip("same-root");
         continue;
       }
       if (ActualVar->level != FormalVar->level ||
           ActualVar->size != FormalVar->size ||
           ActualVar->size != PointerSize) {
+        EmitSkip("level-size-mismatch");
         continue;
       }
       if (!Seen.insert({Actual.get(), Formal.get()}).second) {
+        EmitSkip("duplicate");
         continue;
       }
-      if (!hasNonConflictingStructFieldSlices(Actual, Formal,
-                                             /*RequireEvidence=*/true)) {
+      if (auto Failure = explainStructFieldSliceCompatibilityFailure(
+              Actual, Formal, /*RequireEvidence=*/true)) {
+        EmitSkip("field-slice-incompatible", " detail=" + *Failure);
         continue;
       }
 
-      std::string Detail = "call=";
-      Detail += Candidate.Call ? toStableString(ExtValuePtr{Candidate.Call})
-                               : "<unknown>";
-      Detail += " target=";
-      Detail += Candidate.Target && Candidate.Target->hasName()
-                    ? Candidate.Target->getName().str()
-                    : "<unknown>";
-      Detail += " arg=" + std::to_string(Candidate.ArgIndex);
       if (!tryMergeVariablesForPolicy("call-arg-struct-ptr", Actual, Formal,
                                       Detail)) {
         continue;
