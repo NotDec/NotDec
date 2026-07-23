@@ -36,6 +36,7 @@
 #include <llvm/Transforms/Scalar/LoopRotation.h>
 #include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
 #include <llvm/Transforms/Scalar/SCCP.h>
+#include <llvm/Transforms/Scalar/Scalarizer.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
@@ -313,6 +314,13 @@ void PassEnv::add_pre_type_recovery_passes() {
 }
 
 void PassEnv::add_type_recovery_passes(int level) {
+  ScalarizerPassOptions ScalarizerOptions;
+  ScalarizerOptions.ScalarizeLoadStore = true;
+  // MLsub reasons about scalar memory fields.  Source/native IR may still carry
+  // SLP-created vector loads and stores, which otherwise look like one wide
+  // field access and block struct-pointer merge policies.
+  MPM.addPass(
+      createModuleToFunctionPassAdaptor(ScalarizerPass(ScalarizerOptions)));
   MPM.addPass(mlsub::MLsubRecoveryMain(*TR));
 
   // level 3 with additional optimization and cleanup.
