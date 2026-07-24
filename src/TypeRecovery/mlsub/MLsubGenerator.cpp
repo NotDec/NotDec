@@ -5083,9 +5083,11 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     Raw.Level = std::max(BaseLevel, Raw.UserLevelLowerBound);
   }
 
-  // Phase 2: collapse the maximal same-level regions. We union along same-level
-  // edges only; after that, inter-group edges always go from lower to higher
-  // levels, so the merged graph remains a DAG.
+  // Phase 2: collapse SCC groups for each generator. Level 0 is monomorphic
+  // module scope, so globals can connect functions even when optimization has
+  // removed the call edge. Keep all level-0 raw SCCs in one generator. Higher
+  // levels still only merge along same-level call edges to preserve polymorphic
+  // summary boundaries.
   std::vector<std::size_t> Parent(RawSCCs.size());
   for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
     Parent[RawIndex] = RawIndex;
@@ -5119,6 +5121,17 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
         Union(RawIndex, SuccIndex);
       }
     }
+  }
+  std::optional<std::size_t> LevelZeroRoot;
+  for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
+    if (RawSCCs[RawIndex].Level != 0) {
+      continue;
+    }
+    if (!LevelZeroRoot) {
+      LevelZeroRoot = RawIndex;
+      continue;
+    }
+    Union(*LevelZeroRoot, RawIndex);
   }
 
   struct GroupInfo {

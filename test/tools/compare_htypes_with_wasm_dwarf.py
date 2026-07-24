@@ -15,7 +15,7 @@ TYPE_BOUNDS_LINE_RE = re.compile(
     r"^\[([+-])\]\s+(.+?)\s+=>\s+lower=(.+?)\s+;\s+upper=(.+)$"
 )
 FIELD_LINE_RE = re.compile(
-    r"^\s*(.+?)\s+([A-Za-z0-9_]+);\s*(?:/\*\s*at offset:\s*([0-9-]+)\s*\*/)?\s*$"
+    r"^\s*(.+?)\s+([A-Za-z0-9_]+);\s*(?:/\*\s*(?:recursive body\s+)?at offset:\s*([0-9-]+)\s*\*/)?\s*$"
 )
 ADDR_KEY_RE = re.compile(r"^addr\(0x([0-9a-fA-F]+)\)$")
 
@@ -134,7 +134,7 @@ def parse_type_expr(raw: str) -> dict:
             "raw": text,
         }
 
-    if re.fullmatch(r"struct_[A-Za-z0-9_]+", text):
+    if re.fullmatch(r"(?:struct|rec)_[A-Za-z0-9_]+", text):
         return {"kind": "record_ref", "name": text, "raw": text}
 
     width = primitive_width(text)
@@ -394,6 +394,28 @@ class Comparator:
         self.truth = truth
         self.htypes = htypes
         self.config = config
+
+    def unwrap_recursive_decl(self, decl_name: str) -> str:
+        # HType may print a recursive binder as rec_N { struct_M field_0; }.
+        # For layout checks, compare against the body record at offset 0.
+        seen: set[str] = set()
+        while decl_name.startswith("rec_") and decl_name not in seen:
+            seen.add(decl_name)
+            decl = self.htypes.decls.get(decl_name)
+            if decl is None or len(decl.fields) != 1:
+                break
+            field = decl.fields[0]
+            if field.offset_bytes != 0:
+                break
+            expr = field.expr
+            if expr["kind"] == "record_ref":
+                decl_name = expr["name"]
+                continue
+            if expr["kind"] == "pointer_ref" and expr["to"]["kind"] == "record_ref":
+                decl_name = expr["to"]["name"]
+                continue
+            break
+        return decl_name
 
     def compare_root(self, root: dict) -> dict:
         binding_key = str(root.get("binding", root.get("truth", "")))
@@ -707,6 +729,7 @@ class Comparator:
         if truth_record is None:
             return [f"{path}: missing truth record definition {truth_record_ref['name']}"], []
 
+        recovered_decl_name = self.unwrap_recursive_decl(recovered_decl_name)
         recovered_decl = self.htypes.decls.get(recovered_decl_name)
         if recovered_decl is None:
             return [f"{path}: missing recovered decl {recovered_decl_name}"], []
