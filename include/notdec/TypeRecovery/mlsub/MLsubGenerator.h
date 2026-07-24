@@ -125,6 +125,10 @@ struct ConstraintsGenerator {
   std::map<std::uint32_t, std::set<ExtValuePtr>> OriginalVariableSources;
   std::map<std::pair<llvm::CallBase *, unsigned>, SimpleType>
       AggregateCallReturnSlots;
+  // Values produced by ptradd/GEP-like arithmetic are field or element
+  // addresses. They must not be merged back into the base object by the
+  // value-flow policy.
+  std::set<ExtValuePtr> PointerDerivedValues;
   // PNDiff only stores opaque handles.  The real ExtValuePtr objects stay here
   // so LLVM and llvm2c details do not leak into the PNDiff module.
   std::map<ExtValuePtr, std::unique_ptr<ExtValuePtr>> PNDiffValueHandles;
@@ -197,6 +201,15 @@ struct ConstraintsGenerator {
                                   SimpleType Into,
                                   const std::string &TraceDetail);
   std::size_t applyReturnValueMergePolicy();
+  const ExtValuePtr *getVariableExternalValue(SimpleType Ty) const;
+  void attachExternalValueHandle(SimpleType Ty, const ExtValuePtr &Val);
+  bool hasPointerDerivedValue(SimpleType Ty) const;
+  bool isPointerDerivedValueFlow(llvm::Value *Value,
+                                 std::set<const llvm::Value *> &Visited) const;
+  bool hasPointerDerivedIncomingValue(SimpleType Ty) const;
+  bool isStructPtrValueFlowTarget(SimpleType Ty) const;
+  bool isStructPtrValueFlowSource(SimpleType Ty) const;
+  std::size_t applyStructPtrValueFlowMergePolicy();
   void recordCallArgStructPtrMergeCandidate(llvm::CallBase &Call,
                                             llvm::Function &Target,
                                             unsigned ArgIndex,
@@ -336,6 +349,18 @@ struct ConstraintsGenerator {
       auto Merged = applyStructPtrFieldFollowupMergePolicy();
       llvm::errs() << "Info: struct pointer field follow-up merge policy merged "
                    << Merged << " pair(s)\n";
+    }
+    {
+      auto Merged = applyStructPtrValueFlowMergePolicy();
+      llvm::errs() << "Info: struct pointer value-flow merge policy merged "
+                   << Merged << " pair(s)\n";
+      if (Merged != 0) {
+        auto FollowupMerged = applyStructPtrFieldFollowupMergePolicy();
+        llvm::errs()
+            << "Info: post-value-flow struct pointer field follow-up merge "
+               "policy merged "
+            << FollowupMerged << " pair(s)\n";
+      }
     }
   }
   void genTypes(ast::HTypeContext &HCtx, unsigned PointerSizeBytes,
@@ -487,6 +512,7 @@ struct ConstraintsGenerator {
   void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off) {
     auto BaseNode = getOrInsertNode(basePtr);
     auto ResultNode = getOrInsertNode(result);
+    PointerDerivedValues.insert(result);
     unifyPNIValues(basePtr, result);
     // Negative offsets can appear in pointer arithmetic, but they are not safe
     // to materialize as object fields. Keep the P/N relation and skip the field.

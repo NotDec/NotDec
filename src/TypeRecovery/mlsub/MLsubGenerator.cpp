@@ -61,6 +61,9 @@ static bool isEVMModule(const llvm::Module &M);
 
 namespace {
 
+static_assert(sizeof(ExtValuePtr) > 2 * sizeof(void *),
+              "ExtValuePtr became small enough to revisit inline value handles");
+
 struct PolyPolicyConfig {
   std::set<std::string> PolyFuncs;
   std::map<std::string, unsigned int> LevelOverrides;
@@ -2780,6 +2783,20 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
   if (FromVar->level != IntoVar->level || FromVar->size != IntoVar->size) {
     return false;
   }
+  auto IsValueFlowHandle = [](void *Handle) {
+    if (Handle == nullptr) {
+      return false;
+    }
+    const auto *Val = static_cast<const ExtValuePtr *>(Handle);
+    auto *LLVMValue = std::get_if<llvm::Value *>(Val);
+    return LLVMValue != nullptr && *LLVMValue != nullptr &&
+           llvm::isa<llvm::PHINode, llvm::SelectInst>(*LLVMValue);
+  };
+  void *PreferredValueFlowHandle = nullptr;
+  if (IsValueFlowHandle(FromVar->externalHandle) &&
+      !IsValueFlowHandle(IntoVar->externalHandle)) {
+    PreferredValueFlowHandle = FromVar->externalHandle;
+  }
 
   maybeUnifyPNDiffTypeVariablePair(From, Into);
   binarysub::ConstraintContext Context;
@@ -2799,6 +2816,9 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
                           " reason=" + Result.error().msg +
                           " detail=" + TraceDetail);
     return false;
+  }
+  if (PreferredValueFlowHandle != nullptr) {
+    IntoVar->externalHandle = PreferredValueFlowHandle;
   }
 
   std::vector<std::pair<SimpleType, std::vector<ExtValuePtr>>> RootsToMove;
@@ -2878,6 +2898,214 @@ std::size_t ConstraintsGenerator::applyReturnValueMergePolicy() {
   }
 
   return Merged;
+}
+
+const ExtValuePtr *
+ConstraintsGenerator::getVariableExternalValue(SimpleType Ty) const {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->externalHandle == nullptr) {
+    return nullptr;
+  }
+  return static_cast<const ExtValuePtr *>(Var->externalHandle);
+}
+
+void ConstraintsGenerator::attachExternalValueHandle(SimpleType Ty,
+                                                     const ExtValuePtr &Val) {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->externalHandle != nullptr) {
+    return;
+  }
+  Var->externalHandle = getPNIValue(Val);
+}
+
+bool ConstraintsGenerator::hasPointerDerivedValue(SimpleType Ty) const {
+  Ty = binarysub::resolve_variable(Ty);
+  if (!Ty) {
+    return false;
+  }
+  if (const auto *Val = getVariableExternalValue(Ty);
+      Val != nullptr && PointerDerivedValues.count(*Val) != 0) {
+    return true;
+  }
+  // V2N.rev() can still contain old SimpleType keys until late normalization.
+  // Scan the forward map and compare resolved roots, otherwise ptradd aliases
+  // can be missed after policy merges.
+  for (const auto &[Val, Node] : V2N) {
+    auto Root = binarysub::resolve_variable(Node);
+    if (Root && Root.get() == Ty.get() &&
+        PointerDerivedValues.count(Val) != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ConstraintsGenerator::isPointerDerivedValueFlow(
+    llvm::Value *Value, std::set<const llvm::Value *> &Visited) const {
+  if (Value == nullptr || !Visited.insert(Value).second) {
+    return false;
+  }
+  if (!llvm::isa<llvm::Constant>(Value) || llvm::isa<llvm::GlobalValue>(Value)) {
+    if (PointerDerivedValues.count(ExtValuePtr{Value}) != 0) {
+      return true;
+    }
+  }
+
+  // Only follow value-forwarding nodes.  This keeps the rule local to PHI/select
+  // flow and avoids rebuilding a separate identity-flow candidate list.
+  if (auto *PN = llvm::dyn_cast<llvm::PHINode>(Value)) {
+    for (auto &Incoming : PN->incoming_values()) {
+      if (isPointerDerivedValueFlow(Incoming.get(), Visited)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (auto *Sel = llvm::dyn_cast<llvm::SelectInst>(Value)) {
+    return isPointerDerivedValueFlow(Sel->getTrueValue(), Visited) ||
+           isPointerDerivedValueFlow(Sel->getFalseValue(), Visited);
+  }
+  if (auto *Cast = llvm::dyn_cast<llvm::CastInst>(Value)) {
+    return isPointerDerivedValueFlow(Cast->getOperand(0), Visited);
+  }
+  return false;
+}
+
+bool ConstraintsGenerator::hasPointerDerivedIncomingValue(SimpleType Ty) const {
+  const auto *Val = getVariableExternalValue(Ty);
+  if (Val == nullptr) {
+    return false;
+  }
+  auto *LLVMValue = std::get_if<llvm::Value *>(Val);
+  if (LLVMValue == nullptr || *LLVMValue == nullptr) {
+    return false;
+  }
+  if (!llvm::isa<llvm::PHINode, llvm::SelectInst>(*LLVMValue)) {
+    return false;
+  }
+  std::set<const llvm::Value *> Visited;
+  return isPointerDerivedValueFlow(*LLVMValue, Visited);
+}
+
+bool ConstraintsGenerator::isStructPtrValueFlowTarget(SimpleType Ty) const {
+  const auto *Val = getVariableExternalValue(Ty);
+  if (Val == nullptr) {
+    return false;
+  }
+  auto *LLVMValue = std::get_if<llvm::Value *>(Val);
+  if (LLVMValue == nullptr || *LLVMValue == nullptr) {
+    return false;
+  }
+  return llvm::isa<llvm::PHINode, llvm::SelectInst>(*LLVMValue);
+}
+
+bool ConstraintsGenerator::isStructPtrValueFlowSource(SimpleType Ty) const {
+  if (hasPointerDerivedValue(Ty)) {
+    return false;
+  }
+  const auto *Val = getVariableExternalValue(Ty);
+  if (Val == nullptr) {
+    return false;
+  }
+  auto *LLVMValue = std::get_if<llvm::Value *>(Val);
+  if (LLVMValue == nullptr || *LLVMValue == nullptr) {
+    return false;
+  }
+  // A GEP/ptradd value is a field or element address, not the same object as the
+  // PHI/select result. Merging it into the base pointer collapses real layout.
+  return !llvm::isa<llvm::GEPOperator>(*LLVMValue);
+}
+
+std::size_t ConstraintsGenerator::applyStructPtrValueFlowMergePolicy() {
+  std::size_t Merged = 0;
+  while (true) {
+    std::vector<SimpleType> Targets;
+    std::set<const binarysub::TypeNode *> SeenTargets;
+    for (const auto &[_, Node] : V2N) {
+      auto Target = binarysub::resolve_variable(Node);
+      auto *TargetVar = Target ? Target->getAsVariableState() : nullptr;
+      if (TargetVar == nullptr || TargetVar->size != PointerSize ||
+          !isStructPtrValueFlowTarget(Target)) {
+        continue;
+      }
+      if (SeenTargets.insert(Target.get()).second) {
+        Targets.push_back(Target);
+      }
+    }
+
+    bool Changed = false;
+    std::set<std::pair<const binarysub::TypeNode *,
+                       const binarysub::TypeNode *>>
+        SeenPairs;
+    for (const auto &Target : Targets) {
+      auto ResolvedTarget = binarysub::resolve_variable(Target);
+      auto *TargetVar =
+          ResolvedTarget ? ResolvedTarget->getAsVariableState() : nullptr;
+      if (TargetVar == nullptr || TargetVar->size != PointerSize) {
+        continue;
+      }
+      if (hasPointerDerivedValue(ResolvedTarget) ||
+          hasPointerDerivedIncomingValue(ResolvedTarget)) {
+        continue;
+      }
+      const auto *TargetVal = getVariableExternalValue(ResolvedTarget);
+      std::string TargetName =
+          TargetVal != nullptr ? toStableString(*TargetVal) : "<unknown>";
+
+      for (const auto &Lower : TargetVar->lowerBounds) {
+        auto Source = binarysub::resolve_variable(Lower);
+        auto *SourceVar = Source ? Source->getAsVariableState() : nullptr;
+        if (SourceVar == nullptr || Source.get() == ResolvedTarget.get()) {
+          continue;
+        }
+        if (SourceVar->level != TargetVar->level ||
+            SourceVar->size != TargetVar->size ||
+            SourceVar->size != PointerSize) {
+          continue;
+        }
+        if (!isStructPtrValueFlowSource(Source) ||
+            !hasStructPointerEvidence(Source) ||
+            !hasStructPointerEvidence(ResolvedTarget)) {
+          continue;
+        }
+        if (!SeenPairs.insert({Source.get(), ResolvedTarget.get()}).second) {
+          continue;
+        }
+        if (auto Failure = explainStructFieldSliceCompatibilityFailure(
+                Source, ResolvedTarget, /*RequireEvidence=*/true)) {
+          emitTypeRecoveryTrace(
+              "[merge-policy:struct-ptr-value-flow:skip] source=" +
+              binarysub::debug_string(Source) +
+              " target=" + binarysub::debug_string(ResolvedTarget) +
+              " reason=field-slice-incompatible detail=" + *Failure +
+              " target-value=" + TargetName);
+          continue;
+        }
+
+        const auto *SourceVal = getVariableExternalValue(Source);
+        std::string Detail = "target-value=" + TargetName;
+        Detail += " source-value=";
+        Detail += SourceVal != nullptr ? toStableString(*SourceVal) : "<unknown>";
+        if (!tryMergeVariablesForPolicy("struct-ptr-value-flow", Source,
+                                        ResolvedTarget, Detail)) {
+          continue;
+        }
+
+        ++Merged;
+        Changed = true;
+        break;
+      }
+      if (Changed) {
+        break;
+      }
+    }
+
+    if (!Changed) {
+      return Merged;
+    }
+  }
 }
 
 std::optional<std::vector<ConstraintsGenerator::StructFieldSlice>>
@@ -3899,6 +4127,7 @@ SimpleType ConstraintsGenerator::createNode(ExtValuePtr Val) {
     std::abort();
   }
   if (auto *VS = N->getAsVariableState()) {
+    attachExternalValueHandle(N, Val);
     OriginalVariableSources[VS->id].insert(Val);
   }
   if (MergeEval) {
@@ -3923,6 +4152,7 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
   assert(Ty != nullptr);
   auto N = getNodeOrNull(Val);
   if (N == Ty) {
+    attachExternalValueHandle(Ty, Val);
     emitRemapTrace("remap-alias", Val, Target, Ty);
     remapPNINode(Val, Target);
     addPointerCopy(Val, Target);
@@ -3936,6 +4166,7 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
                  << toString(Val) << "\n";
     std::abort();
   }
+  attachExternalValueHandle(Ty, Val);
   emitRemapTrace("remap", Val, Target, Ty);
   if (MergeEval) {
     MergeEval->observeValueNode(Val, Ty);
