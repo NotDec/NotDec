@@ -3390,9 +3390,96 @@ std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
   }
 }
 
-std::vector<ConstraintsGenerator::LoadStoreStructPtrMergeCandidate>
+std::vector<ConstraintsGenerator::StructPtrSlotMergeCandidate>
+ConstraintsGenerator::collectStructPtrSameAccessKindMergeCandidates(
+    bool CollectLoads) const {
+  std::vector<StructPtrSlotMergeCandidate> Candidates;
+  std::set<std::tuple<const binarysub::TypeNode *, const binarysub::TypeNode *,
+                      const binarysub::TypeNode *, unsigned>>
+      Seen;
+
+  for (const auto &[_, Node] : V2N) {
+    auto Ptr = binarysub::resolve_variable(Node);
+    auto *PtrVar = Ptr ? Ptr->getAsVariableState() : nullptr;
+    if (PtrVar == nullptr) {
+      continue;
+    }
+
+    std::vector<std::pair<SimpleType, unsigned>> Accesses;
+    for (const auto &Bound : PtrVar->upperBounds) {
+      if (CollectLoads) {
+        auto *Load = Bound ? Bound->getAsPtrLoad() : nullptr;
+        if (Load != nullptr) {
+          Accesses.push_back({Load->to, Load->Size});
+        }
+      } else {
+        auto *Store = Bound ? Bound->getAsPtrStore() : nullptr;
+        if (Store != nullptr) {
+          Accesses.push_back({Store->to, Store->Size});
+        }
+      }
+    }
+
+    for (std::size_t I = 0; I < Accesses.size(); ++I) {
+      for (std::size_t J = I + 1; J < Accesses.size(); ++J) {
+        if (Accesses[I].second != Accesses[J].second) {
+          continue;
+        }
+        auto FirstTarget = binarysub::resolve_variable(Accesses[I].first);
+        auto SecondTarget = binarysub::resolve_variable(Accesses[J].first);
+        auto *FirstVar =
+            FirstTarget ? FirstTarget->getAsVariableState() : nullptr;
+        auto *SecondVar =
+            SecondTarget ? SecondTarget->getAsVariableState() : nullptr;
+        if (FirstVar == nullptr || SecondVar == nullptr ||
+            FirstTarget.get() == SecondTarget.get()) {
+          continue;
+        }
+        if (FirstVar->level != SecondVar->level ||
+            FirstVar->size != SecondVar->size ||
+            FirstVar->size != PointerSize) {
+          continue;
+        }
+        if (!hasStructPointerEvidence(FirstTarget) ||
+            !hasStructPointerEvidence(SecondTarget)) {
+          continue;
+        }
+
+        const auto *First = FirstTarget.get();
+        const auto *Second = SecondTarget.get();
+        if (Second < First) {
+          std::swap(First, Second);
+        }
+        auto Key =
+            std::make_tuple(Ptr.get(), First, Second, Accesses[I].second);
+        if (!Seen.insert(Key).second) {
+          continue;
+        }
+        Candidates.push_back(StructPtrSlotMergeCandidate{
+            .Pointer = Ptr,
+            .FromTarget = FirstTarget,
+            .IntoTarget = SecondTarget,
+            .AccessSize = Accesses[I].second});
+      }
+    }
+  }
+
+  return Candidates;
+}
+
+std::vector<ConstraintsGenerator::StructPtrSlotMergeCandidate>
+ConstraintsGenerator::collectStructPtrSameLoadMergeCandidates() const {
+  return collectStructPtrSameAccessKindMergeCandidates(/*CollectLoads=*/true);
+}
+
+std::vector<ConstraintsGenerator::StructPtrSlotMergeCandidate>
+ConstraintsGenerator::collectStructPtrSameStoreMergeCandidates() const {
+  return collectStructPtrSameAccessKindMergeCandidates(/*CollectLoads=*/false);
+}
+
+std::vector<ConstraintsGenerator::StructPtrSlotMergeCandidate>
 ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
-  std::vector<LoadStoreStructPtrMergeCandidate> Candidates;
+  std::vector<StructPtrSlotMergeCandidate> Candidates;
   std::set<std::tuple<const binarysub::TypeNode *, const binarysub::TypeNode *,
                       const binarysub::TypeNode *, unsigned>>
       Seen;
@@ -3443,10 +3530,10 @@ ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
         if (!Seen.insert(Key).second) {
           continue;
         }
-        Candidates.push_back(LoadStoreStructPtrMergeCandidate{
+        Candidates.push_back(StructPtrSlotMergeCandidate{
             .Pointer = Ptr,
-            .LoadTarget = LoadTarget,
-            .StoreTarget = StoreTarget,
+            .FromTarget = LoadTarget,
+            .IntoTarget = StoreTarget,
             .AccessSize = Load->Size});
       }
     }
@@ -3455,74 +3542,65 @@ ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
   return Candidates;
 }
 
-std::size_t ConstraintsGenerator::applyStructPtrLoadStoreMergePolicy() {
+std::size_t
+ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) {
   std::size_t Merged = 0;
   while (true) {
     bool Changed = false;
-    auto Candidates = collectStructPtrLoadStoreMergeCandidates();
+    std::vector<StructPtrSlotMergeCandidate> Candidates;
+    if (Policy == "load-load-struct-ptr") {
+      Candidates = collectStructPtrSameLoadMergeCandidates();
+    } else if (Policy == "store-store-struct-ptr") {
+      Candidates = collectStructPtrSameStoreMergeCandidates();
+    } else {
+      Candidates = collectStructPtrLoadStoreMergeCandidates();
+    }
+
     for (const auto &Candidate : Candidates) {
-      auto LoadTarget = binarysub::resolve_variable(Candidate.LoadTarget);
-      auto StoreTarget = binarysub::resolve_variable(Candidate.StoreTarget);
-      auto *LoadVar = LoadTarget ? LoadTarget->getAsVariableState() : nullptr;
-      auto *StoreVar =
-          StoreTarget ? StoreTarget->getAsVariableState() : nullptr;
-      if (LoadVar == nullptr || StoreVar == nullptr ||
-          LoadTarget.get() == StoreTarget.get()) {
+      auto FirstTarget = binarysub::resolve_variable(Candidate.FromTarget);
+      auto SecondTarget = binarysub::resolve_variable(Candidate.IntoTarget);
+      auto *FirstVar =
+          FirstTarget ? FirstTarget->getAsVariableState() : nullptr;
+      auto *SecondVar =
+          SecondTarget ? SecondTarget->getAsVariableState() : nullptr;
+      if (FirstVar == nullptr || SecondVar == nullptr ||
+          FirstTarget.get() == SecondTarget.get()) {
         continue;
       }
-      if (LoadVar->level != StoreVar->level ||
-          LoadVar->size != StoreVar->size || LoadVar->size != PointerSize) {
+      if (FirstVar->level != SecondVar->level ||
+          FirstVar->size != SecondVar->size || FirstVar->size != PointerSize) {
         continue;
       }
-      if (!hasStructPointerEvidence(LoadTarget) ||
-          !hasStructPointerEvidence(StoreTarget)) {
+      if (!hasStructPointerEvidence(FirstTarget) ||
+          !hasStructPointerEvidence(SecondTarget)) {
         continue;
       }
 
-      auto From = LoadVar->id <= StoreVar->id ? StoreTarget : LoadTarget;
-      auto Into = LoadVar->id <= StoreVar->id ? LoadTarget : StoreTarget;
-      emitMergeTrace("load-store-struct-ptr", From, Into, {});
-      maybeUnifyPNDiffTypeVariablePair(From, Into);
-
-      binarysub::ConstraintContext Context;
-      binarysub::ConstraintContext *ContextPtr =
-          configureConstraintContext(Context) ? &Context : nullptr;
-      auto Result = binarysub::merge_variable_into(
-          From, Into,
-          [this](const SimpleType &Lhs, const SimpleType &Rhs) {
-            maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
-            observeOldMemoryTypeEdge(Lhs, Rhs);
-          },
-          ContextPtr);
-      if (!Result) {
-        emitPointerAnalysisTrace(
-            "[merge-policy:load-store-struct-ptr:skip] ptr=" +
-            binarysub::debug_string(Candidate.Pointer) +
-            " load=" + binarysub::debug_string(LoadTarget) +
-            " store=" + binarysub::debug_string(StoreTarget) +
-            " reason=" + Result.error().msg);
+      auto From = FirstVar->id <= SecondVar->id ? SecondTarget : FirstTarget;
+      auto Into = FirstVar->id <= SecondVar->id ? FirstTarget : SecondTarget;
+      std::string Detail = "ptr=";
+      Detail += binarysub::debug_string(Candidate.Pointer);
+      Detail += " size=" + std::to_string(Candidate.AccessSize);
+      if (!tryMergeVariablesForPolicy(Policy, From, Into, Detail)) {
         continue;
       }
 
       ++Merged;
       Changed = true;
-      auto FieldFollowups =
-          collectStructPtrFieldFollowupMergeCandidatesForMergedOwner(Into);
-      StructFieldFollowupMergeCandidates.insert(
-          StructFieldFollowupMergeCandidates.end(), FieldFollowups.begin(),
-          FieldFollowups.end());
-      emitPointerAnalysisTrace(
-          "[merge-policy:load-store-struct-ptr] ptr=" +
-          binarysub::debug_string(Candidate.Pointer) +
-          " from=" + binarysub::debug_string(From) +
-          " into=" + binarysub::debug_string(Into) +
-          " size=" + std::to_string(Candidate.AccessSize));
       break;
     }
     if (!Changed) {
       return Merged;
     }
   }
+}
+
+std::size_t ConstraintsGenerator::applyStructPtrLoadStoreMergePolicy() {
+  std::size_t Merged = 0;
+  Merged += applyStructPtrSlotMergeCandidates("load-load-struct-ptr");
+  Merged += applyStructPtrSlotMergeCandidates("store-store-struct-ptr");
+  Merged += applyStructPtrSlotMergeCandidates("load-store-struct-ptr");
+  return Merged;
 }
 
 void ConstraintsGenerator::recordLoad(ExtValuePtr Addr, SimpleType ResultTy,

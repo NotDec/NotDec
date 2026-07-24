@@ -146,13 +146,13 @@ struct ConstraintsGenerator {
   std::shared_ptr<MergePolicyEval> MergeEval;
   bool EnableStructPtrLoadStoreMerge = false;
 
-  // A load/store pair on the same pointer variable.  The policy only merges
-  // LoadTarget and StoreTarget after both targets already look like struct
-  // pointers, so scalar pointers and byte buffers stay separate.
-  struct LoadStoreStructPtrMergeCandidate {
+  // Pair of struct-pointer contents stored in the same pointer slot.  The
+  // policy only merges targets after both already look like struct pointers, so
+  // scalar pointers and byte buffers stay separate.
+  struct StructPtrSlotMergeCandidate {
     SimpleType Pointer;
-    SimpleType LoadTarget;
-    SimpleType StoreTarget;
+    SimpleType FromTarget;
+    SimpleType IntoTarget;
     unsigned AccessSize = 0;
   };
 
@@ -239,8 +239,15 @@ struct ConstraintsGenerator {
                                               bool RequireEvidence) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;
   std::size_t applyCallArgStructPtrMergePolicy();
-  std::vector<LoadStoreStructPtrMergeCandidate>
+  std::vector<StructPtrSlotMergeCandidate>
+  collectStructPtrSameAccessKindMergeCandidates(bool CollectLoads) const;
+  std::vector<StructPtrSlotMergeCandidate>
+  collectStructPtrSameLoadMergeCandidates() const;
+  std::vector<StructPtrSlotMergeCandidate>
+  collectStructPtrSameStoreMergeCandidates() const;
+  std::vector<StructPtrSlotMergeCandidate>
   collectStructPtrLoadStoreMergeCandidates() const;
+  std::size_t applyStructPtrSlotMergeCandidates(llvm::StringRef Policy);
   std::size_t applyStructPtrLoadStoreMergePolicy();
 
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
@@ -322,7 +329,7 @@ struct ConstraintsGenerator {
     }
     if (EnableStructPtrLoadStoreMerge) {
       auto Merged = applyStructPtrLoadStoreMergePolicy();
-      llvm::errs() << "Info: load/store struct pointer merge policy merged "
+      llvm::errs() << "Info: struct pointer slot merge policy merged "
                    << Merged << " pair(s)\n";
     }
     {
