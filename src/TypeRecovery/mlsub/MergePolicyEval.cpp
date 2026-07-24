@@ -11,6 +11,7 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
@@ -301,6 +302,46 @@ struct MergePolicyEval::Impl {
     OracleByValue.insert_or_assign(Val, makeOracleType(Ty, std::move(Source)));
   }
 
+  bool recordGlobalPointerSlotContentOracle(const llvm::GlobalVariable &GV,
+                                            llvm::DIType *Ty,
+                                            llvm::StringRef Name) {
+    bool Recorded = false;
+    auto makeGlobalSlotSource = [&](llvm::StringRef Kind) {
+      std::string Source = "global ";
+      Source += Name.str();
+      Source += " ";
+      Source += Kind.str();
+      return Source;
+    };
+    for (const llvm::User *ConstUser : GV.users()) {
+      auto *User = const_cast<llvm::User *>(ConstUser);
+      if (auto *Load = llvm::dyn_cast<llvm::LoadInst>(User)) {
+        if (Load->getPointerOperand() != &GV) {
+          continue;
+        }
+        ExtValuePtr Val{Load};
+        if (!hasPointerSizedLLVMType(Val, PointerSize)) {
+          continue;
+        }
+        recordOracle(Val, Ty, makeGlobalSlotSource("load"));
+        Recorded = true;
+        continue;
+      }
+
+      auto *Store = llvm::dyn_cast<llvm::StoreInst>(User);
+      if (Store == nullptr || Store->getPointerOperand() != &GV) {
+        continue;
+      }
+      auto Val = getExtValuePtr(Store->getValueOperand(), Store, 0);
+      if (!hasPointerSizedLLVMType(Val, PointerSize)) {
+        continue;
+      }
+      recordOracle(Val, Ty, makeGlobalSlotSource("store"));
+      Recorded = true;
+    }
+    return Recorded;
+  }
+
   void collectGlobalDebugInfo() {
     for (const llvm::GlobalVariable &GV : M.globals()) {
       auto *Dbg = llvm::dyn_cast_or_null<llvm::DIGlobalVariableExpression>(
@@ -312,6 +353,15 @@ struct MergePolicyEval::Impl {
       auto *Var = Dbg->getVariable();
       std::string Source = "global ";
       Source += Var->getName().str();
+      // A source-level `T *g` is an LLVM global slot whose value is `T *`.
+      // The global address itself is closer to `T **`, so strict struct-pointer
+      // oracle samples should attach to direct slot loads/stores instead.
+      if (GV.getValueType()->isPointerTy() &&
+          getStrictStructPointerKey(Var->getType()).has_value()) {
+        recordGlobalPointerSlotContentOracle(GV, Var->getType(),
+                                             Var->getName());
+        continue;
+      }
       recordOracle(ExtValuePtr{const_cast<llvm::GlobalVariable *>(&GV)},
                    Var->getType(), std::move(Source));
     }
