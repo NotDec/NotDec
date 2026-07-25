@@ -297,6 +297,39 @@ cmake --build ./build --target all
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --work-dir=/tmp/notdec-work
 ```
 
+### 源码级 IR 的 DebugInfo 合并策略评估
+
+`--merge-eval-dir=<dir>` 是专门给带 DebugInfo 的源码级 LLVM IR 用的评估链路。
+它不会改变普通类型恢复输出，主要用于评估节点合并策略：根据 LLVM DebugInfo 收集
+`struct*` 这类有 ground truth 的值，类型推理结束后检查同一 DebugInfo 类型的节点是否
+合得够多，以及有没有把不同 DebugInfo 类型错误合并。
+
+典型 fortune 命令：
+
+```bash
+/usr/bin/time -v ./build/bin/notdec \
+  /sn640/NotDec-Exp/Bench2/source-ir/ir/fortune/fortune.ll \
+  --tr-level=2 \
+  --merge-struct-ptr-load-store \
+  -g --work-dir=/tmp/notdec-source-fortune-work \
+  --merge-eval-dir=/tmp/notdec-source-fortune-eval \
+  -o /tmp/notdec-source-fortune-out.ll
+```
+
+主要输出：
+
+- `merge-eval-summary.json`：汇总 coverage、wrong merge、fragmentation、performance。
+- `DebugInfoValueTypes.txt`：DebugInfo oracle，类似 HType txt，列出每个有类型值的
+  DebugInfo 类型和 strict 类型。
+- `fragmented_types.jsonl`：同一 DebugInfo strict 类型分散在多个 SimpleType root 的情况。
+- `bad_unions.jsonl`：不同 DebugInfo strict 类型被合到同一个 component 的错例。
+
+常看的指标：
+
+- `wrong_merge.bad_unions` / `polluted_components`：是否有错误合并，优先级最高。
+- `fragmentation.fragmented_nodes` / `fragmented_types`：同类型节点是否还分散。
+- `performance.wall_ms` / `peak_rss_mb`：类型恢复加评估链路的耗时和峰值内存。
+
 ## 9. 测试
 
 测试布局和 oracle 细节以 `test/README.md` 为准；这里仅保留当前最常用入口。
