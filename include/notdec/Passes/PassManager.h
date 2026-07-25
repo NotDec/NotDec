@@ -86,7 +86,7 @@ struct PassEnv {
   }
 
   void add_pre_type_recovery_passes();
-  void add_type_recovery_passes(int level);
+  void add_type_recovery_passes(int level, bool SplitFreePhi = true);
   void build_passes(int level, bool stopBeforeTypeRecovery = false,
                     bool frozenTRInputIR = false,
                     llvm::StringRef HTypeDumpPath = "",
