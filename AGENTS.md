@@ -28,40 +28,18 @@ Before implementing:
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-## 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
 # 项目规范
 
-1. 调试可以使用 `debugmcp`，也可以直接用 `gdb`。建议从 `launch.json` 里的
-   `dec` 配置入手；启动时必须显式选择具体配置，并先把参数改到当前要反编译的
-   IR。
-2. 代码一定要多写注释，特别是新引入的数据结构前，说明背后的设计理念。
-3. 工作流程：收到需求 -> 思考后告诉用户打算怎么更改 -> 讨论一致后再开始实现。复杂代码修改实现完后再写文档到 `logs/`；简单文档修改、注释修改、错别字修正不需要写日志。
+1. 代码一定要多写注释，特别是新引入的数据结构前，说明背后的设计理念。
+1. 工作流程：收到需求 -> 思考后告诉用户打算怎么更改 -> 讨论一致后再开始实现。复杂代码修改实现完后再写文档到 `logs/`；简单文档修改、注释修改、错别字修正不需要写日志。
    实现完计划并完成验证后，默认必须直接提交，不要停在未提交状态；涉及 submodule 时，先在 submodule 内提交，再提交顶层指针和日志。
    如果只是文档修改，并且前一个 commit 也是同一模块的文档-only 修改，优先用 amend 合并到前一个 commit，必要时同步修改 commit message，减少零碎提交。
-4. 写修改日志时，必须明确指出修改了哪个文件的哪一行，涉及哪些函数。
-5. 尽量复用并改进之前的日志，最好每个功能都单独一个日志。
-6. plan日志重点写问题背景、目标、期望效果、大致技术路线、风险和判断标准，要让没有上下文的人也能看懂；不要过早写成具体实现清单、命令清单或行号清单。实现记录才需要明确写修改了哪个文件的哪一行、涉及哪些函数、验证命令和结果。只有复杂代码修改需要从实现效果、复杂度（增加其他人对项目的理解成本）、后期维护成本三个角度评分，并思考有没有更好的方案。
+1. 写修改日志时，必须明确指出修改了哪个文件的哪一行，涉及哪些函数。
+1. 尽量复用并改进之前的日志，最好每个功能都单独一个日志。
+1. plan日志重点写问题背景、目标、期望效果、大致技术路线、风险和判断标准，要让没有上下文的人也能看懂；不要过早写成具体实现清单、命令清单或行号清单。实现记录才需要明确写修改了哪个文件的哪一行、涉及哪些函数、验证命令和结果。只有复杂代码修改需要从实现效果、复杂度（增加其他人对项目的理解成本）、后期维护成本三个角度评分，并思考有没有更好的方案。
    `logs/` 下的 plan 文档顶部必须先保留本次用户的原始 prompt，然后再写背景、目标、路线、风险和判断标准。
-7. 如果当前的任务是对之前的plan日志的实现，则不需要单独创建日志，而是将实现情况写入之前的计划日志，比如将计划的步骤在标题中标记为已完成，记录实现细节，以及调整计划时考虑不全而实现时有所改变的部分。同时也不要使得日志文件过于冗长，简洁一些，包括语言风格上，以及没有真正实现，或者试错的思路都尽量简写。
-8. evm2llvm 的 PHI 修复不能退回旧的 slot 模式 + mem2reg 思路。遇到 `PHIIncoming`
-   语义问题时，要优先确认真实 CFG/SSA 语义，或者修复 Gigahorse 侧导出；如果问题复杂，
-   先记录和归类，不要用 slot fallback 掩盖问题。
-9. Goal编写规范：Goal按照一下的三段格式编写：第一段 “基于 logs/xxx.md的规划进行”（启动goal前必须先生成对应规划文档）。第二段：使用200字左右描述当前用什么技术路线处理什么问题。第三段是固定内容，必须放这个原话：遇到了不确定的技术路线选择或计划里明显没有考虑到的事情时暂停goal。样例如下：
+1. 如果当前的任务是对之前的plan日志的实现，则不需要单独创建日志，而是将实现情况写入之前的计划日志，比如将计划的步骤在标题中标记为已完成，记录实现细节，以及调整计划时考虑不全而实现时有所改变的部分。同时也不要使得日志文件过于冗长，简洁一些，包括语言风格上，以及没有真正实现，或者试错的思路都尽量简写。
+1. Goal编写规范：Goal按照一下的三段格式编写：第一段 “基于 logs/xxx.md的规划进行”（启动goal前必须先生成对应规划文档）。第二段：使用200字左右描述当前用什么技术路线处理什么问题。第三段是固定内容，必须放这个原话：遇到了不确定的技术路线选择或计划里明显没有考虑到的事情时暂停goal。样例如下：
 ```
 基于logs/20260623-01-sailr-angr-completion-plan.md基于完善SAILR的复刻，继续补齐 shared structuring 语义。
 
@@ -69,7 +47,6 @@ The test: Every changed line should trace directly to the user's request.
 
 遇到了不确定的技术路线选择或计划里明显没有考虑到的事情时暂停goal。
 ```
-
 
 ## 1. Git 与 external/ 子模块
 
