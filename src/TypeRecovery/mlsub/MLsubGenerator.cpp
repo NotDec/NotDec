@@ -2948,6 +2948,20 @@ llvm::Function *ConstraintsGenerator::getExtValueFunction(
   return nullptr;
 }
 
+static bool hasTypedPointerExternalValue(const ExtValuePtr &Val) {
+  llvm::Type *Ty = nullptr;
+  if (auto *V = std::get_if<llvm::Value *>(&Val)) {
+    Ty = *V == nullptr ? nullptr : (*V)->getType();
+  } else if (auto *Ret = std::get_if<ReturnValue>(&Val)) {
+    Ty = Ret->Func == nullptr ? nullptr : Ret->Func->getReturnType();
+  } else if (auto *Stack = std::get_if<StackObject>(&Val)) {
+    Ty = Stack->Allocator == nullptr ? nullptr : Stack->Allocator->getType();
+  } else if (auto *Heap = std::get_if<HeapObject>(&Val)) {
+    Ty = Heap->Allocator == nullptr ? nullptr : Heap->Allocator->getType();
+  }
+  return Ty != nullptr && (Ty->isPointerTy() || Ty->isFunctionTy());
+}
+
 llvm::Function *
 ConstraintsGenerator::getVariableOwningFunction(SimpleType Ty) const {
   const auto *Val = getVariableExternalValue(Ty);
@@ -3402,6 +3416,12 @@ bool ConstraintsGenerator::hasPointerLikeEvidence(SimpleType Ty) const {
   auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
   if (Var == nullptr || Var->size != PointerSize) {
     return false;
+  }
+
+  if (const auto *Val = getVariableExternalValue(Ty)) {
+    if (hasTypedPointerExternalValue(*Val)) {
+      return true;
+    }
   }
 
   // Keep this shallow.  The same-function policy only needs to reject ordinary

@@ -80,3 +80,29 @@
 - 实现效果：7/10。能补上“证据晚到”导致错过的部分 merge，同时避免 wasm32 普通整数被过度合并。
 - 复杂度：4/10。多了一个浅层 pointer-like 门槛，但仍只扫描直接 bounds，不引入新状态。
 - 维护成本：3/10。规则仍集中在 `MLsubGenerator` 的 merge policy 附近，后续如果要收窄条件也好改。
+
+# 2026-07-25 追加：typed pointer 外部值作为 pointer-like evidence
+
+## 背景
+
+前一版 pointer-like 门槛避免了 wasm32 上普通 `i32` 被卷入结构体，但也挡住了 `pick_child::%retval.0` 这种本身是 LLVM `ptr` 的 PHI。它的 incoming `%fp.*` 已经是 `rec_3135*`，但 return root 仍是 `top:64`，导致 `pick_child::<ret>` 继续碎片化。
+
+## 实现
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2951`：新增 `hasTypedPointerExternalValue()`，只认 LLVM `ptr`/function typed 的 `llvm::Value*`、函数返回、stack/heap object，不把 pointer-sized integer 当指针。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3421`：`hasPointerLikeEvidence()` 先检查变量挂载的外部值类型，再回退到原来的直接 bound 扫描。
+
+## 验证
+
+- 构建：`cmake --build ./build --target notdec -j4` 通过。
+- 回归：`ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure` 通过。
+- 回归：`ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-failure` 通过，16.12s。
+- fortune：`/tmp/notdec-fortune-typed-pointer-evidence-20260725-a` 跑通，`elapsed=27.38`，`maxrss=1198520 KB`。
+- fortune eval：`fragmented_nodes=6`，`fragmented_types=2`，`bad_unions=0`，`merged_nodes=167`，`representative_nodes=2257`，`wall_ms=25977`，`peak_rss_mb=1170`。
+- `pick_child::%retval.0` 和 `pick_child::<ret>` 都恢复为 `rec_3135*`，进入 `struct:fd*` 的大 root。
+
+## 成本
+
+- 实现效果：8/10。补回 `pick_child` 返回值链路，同时保留 wasm32 性能保护。
+- 复杂度：3/10。只是在已有 pointer-like 判断前增加一层 typed pointer 快速判断。
+- 维护成本：3/10。逻辑仍集中在 merge policy 的 evidence 判断里。
