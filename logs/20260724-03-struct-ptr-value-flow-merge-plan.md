@@ -42,3 +42,41 @@
 - 对比 `/tmp/notdec-fortune-level0-scc-20260724-b/eval/merge-eval-summary.json`：`fragmented_nodes` 从 17 降到 8，`bad_unions` 保持 0。
 - 本次 fortune：`merged_nodes=145`，`representative_nodes=2279`，`wall_ms=19948`，`peak_rss_mb=1194`。
 - `/usr/bin/time -v` 实测 fortune wall time 21.24s，最大 RSS 1,222,732 KB。
+
+# 2026-07-25 追加：一边有 struct evidence 即可触发
+
+## 本次 prompt
+
+现在 same-function subtype merge 要求两边都有 struct evidence，这个应该是实现有问题，改成只需要一边有struct evidence试试。另外，有没有新增了struct evidence的hook回调，此时也需要对新增了struct evidence的节点做分析，可能也会暴露新的merge机会
+
+## 实现
+
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:206`：新增 `onVariableNonVarBoundAdded()` 声明，用来接 solver 侧新增非变量 bound 的回调。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:250`：新增 `hasPointerLikeEvidence()` 声明，用来区分普通 pointer-size 整数和真正有指针使用证据的节点。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2768`：`configureConstraintContext()` 继续设置 `shouldMergeSameLevelVarVar`，并新增 `Context.onVariableNonVarBoundAdded`。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2974`：`shouldMergeSameFunctionStructPtrSubtype()` 从“两边都有 struct evidence”改为“至少一边有 struct evidence，且两边都有浅层 pointer-like evidence”。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:2991`：新增 `onVariableNonVarBoundAdded()`，当某个变量刚拿到非变量 bound 并呈现 pointer-like evidence 时，只扫描它直接的 lower/upper 变量 bound，复用 same-function subtype policy 入队 merge。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3400`：新增 `hasPointerLikeEvidence()`，只看直接 lower/upper bound 是否含 `TMemObject` 或 `TFunction`，不递归。
+- `test/type-recovery/llvm-ir/expected/tr-level-2/09_OffsetLoop.htypes`：更新数组化后的 HType 期望。
+- `test/type-recovery/llvm-ir/expected/tr-level-2/21_PointerAnalysisBranchingFieldCycle.htypes`：更新同函数结构指针数据流合并后的递归类型期望。
+
+## 判断
+
+- `09_OffsetLoop` 的变化来自 `%p1 -> %p2 = %p1 + 4` 循环写，被合并后正规化成 `top:32[]*`，比两个 offset-4 record 更贴近数组访问。
+- `21_PointerAnalysisBranchingFieldCycle` 的变化是多个同函数递归指针入口合到 `rec_34*`，符合这条策略的目标。
+- 纯“一边有 struct evidence”在 `fortune.o3.wasm.ll` 上把普通 `i32` 数据流卷进结构体，RSS 到约 55GB 后中止，所以最终加了 pointer-like 门槛。
+- fortune 的 `struct:fd*` 剩余碎片从 8 降到 7，主 global 传递链仍在同一个大 root；`bad_unions=0`。
+
+## 验证
+
+- 构建：`cmake --build ./build --target notdec -j4` 通过。
+- 回归：`ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure` 通过。
+- 回归：`ctest --test-dir build -R notdec.type_recovery.realworld.tr_level_2 --output-on-failure` 通过，15.78s。
+- fortune：`/tmp/notdec-fortune-one-sided-pointergate-20260725-a` 跑通，`elapsed=27.21`，`maxrss=1200100 KB`。
+- fortune eval：`fragmented_nodes=7`，`fragmented_types=2`，`bad_unions=0`，`merged_nodes=160`，`representative_nodes=2264`，`wall_ms=25826`，`peak_rss_mb=1171`。
+
+## 成本
+
+- 实现效果：7/10。能补上“证据晚到”导致错过的部分 merge，同时避免 wasm32 普通整数被过度合并。
+- 复杂度：4/10。多了一个浅层 pointer-like 门槛，但仍只扫描直接 bounds，不引入新状态。
+- 维护成本：3/10。规则仍集中在 `MLsubGenerator` 的 merge policy 附近，后续如果要收窄条件也好改。

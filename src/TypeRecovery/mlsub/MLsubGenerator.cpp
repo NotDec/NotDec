@@ -2765,6 +2765,13 @@ bool ConstraintsGenerator::configureConstraintContext(
       -> binarysub::expected<bool, binarysub::Error> {
     return shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
   };
+  Context.onVariableNonVarBoundAdded =
+      [this](const SimpleType &Var, const SimpleType &Bound,
+             binarysub::BoundPolarity Polarity,
+             const binarysub::EnqueueMergeFn &EnqueueMerge)
+      -> binarysub::expected<void, binarysub::Error> {
+    return onVariableNonVarBoundAdded(Var, Bound, Polarity, EnqueueMerge);
+  };
   if (MergeEval) {
     Context.onVariableMerged =
         [Eval = MergeEval](const binarysub::MergeEvent &Event) {
@@ -2964,7 +2971,12 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
       LHSVar->size != PointerSize) {
     return false;
   }
-  if (!hasStructPointerEvidence(LHS) || !hasStructPointerEvidence(RHS)) {
+  bool LHSHasStructEvidence = hasStructPointerEvidence(LHS);
+  bool RHSHasStructEvidence = hasStructPointerEvidence(RHS);
+  if (!LHSHasStructEvidence && !RHSHasStructEvidence) {
+    return false;
+  }
+  if (!hasPointerLikeEvidence(LHS) || !hasPointerLikeEvidence(RHS)) {
     return false;
   }
 
@@ -2974,6 +2986,55 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
     return false;
   }
   return true;
+}
+
+binarysub::expected<void, binarysub::Error>
+ConstraintsGenerator::onVariableNonVarBoundAdded(
+    SimpleType Var, SimpleType Bound, binarysub::BoundPolarity,
+    const binarysub::EnqueueMergeFn &EnqueueMerge) const {
+  Var = binarysub::resolve_variable(Var);
+  auto *VarState = Var ? Var->getAsVariableState() : nullptr;
+  if (VarState == nullptr || VarState->size != PointerSize ||
+      Bound == nullptr || Bound->isVariableState() ||
+      !hasPointerLikeEvidence(Var)) {
+    return binarysub::expected<void, binarysub::Error>{};
+  }
+
+  // A node can get pointer/struct evidence after the variable-variable edge was
+  // already processed. Re-check only direct variable bounds here; recursive
+  // follow-up is handled by the normal merge policy after a merge happens.
+  auto TryQueue =
+      [&](SimpleType Other) -> binarysub::expected<void, binarysub::Error> {
+    Other = binarysub::resolve_variable(Other);
+    auto *OtherState = Other ? Other->getAsVariableState() : nullptr;
+    if (OtherState == nullptr || Other.get() == Var.get()) {
+      return binarysub::expected<void, binarysub::Error>{};
+    }
+    auto ShouldMerge = shouldMergeSameFunctionStructPtrSubtype(Var, Other);
+    if (!ShouldMerge) {
+      return binarysub::unexpected<binarysub::Error>(ShouldMerge.error());
+    }
+    if (!ShouldMerge.value()) {
+      return binarysub::expected<void, binarysub::Error>{};
+    }
+
+    auto From = VarState->id <= OtherState->id ? Other : Var;
+    auto Into = VarState->id <= OtherState->id ? Var : Other;
+    EnqueueMerge(From, Into);
+    return binarysub::expected<void, binarysub::Error>{};
+  };
+
+  for (const auto &Lower : VarState->lowerBounds) {
+    if (auto Result = TryQueue(Lower); !Result) {
+      return Result;
+    }
+  }
+  for (const auto &Upper : VarState->upperBounds) {
+    if (auto Result = TryQueue(Upper); !Result) {
+      return Result;
+    }
+  }
+  return binarysub::expected<void, binarysub::Error>{};
 }
 
 std::optional<std::vector<ConstraintsGenerator::StructFieldSlice>>
@@ -3334,6 +3395,34 @@ ConstraintsGenerator::explainStructFieldSliceCompatibilityFailure(
 
 bool ConstraintsGenerator::hasStructPointerEvidence(SimpleType Ty) const {
   return collectOneLevelStructFieldSlices(Ty).has_value();
+}
+
+bool ConstraintsGenerator::hasPointerLikeEvidence(SimpleType Ty) const {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->size != PointerSize) {
+    return false;
+  }
+
+  // Keep this shallow.  The same-function policy only needs to reject ordinary
+  // pointer-sized integers; struct evidence is checked by the caller.
+  auto IsPointerLikeBound = [](SimpleType Bound) {
+    Bound = binarysub::resolve_variable(Bound);
+    return Bound && (Bound->getAsTMemObject() != nullptr ||
+                     Bound->getAsTFunction() != nullptr);
+  };
+
+  for (const auto &Lower : Var->lowerBounds) {
+    if (IsPointerLikeBound(Lower)) {
+      return true;
+    }
+  }
+  for (const auto &Upper : Var->upperBounds) {
+    if (IsPointerLikeBound(Upper)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static std::string

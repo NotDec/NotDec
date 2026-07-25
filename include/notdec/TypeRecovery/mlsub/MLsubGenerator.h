@@ -203,6 +203,9 @@ struct ConstraintsGenerator {
   llvm::Function *getVariableOwningFunction(SimpleType Ty) const;
   binarysub::expected<bool, binarysub::Error>
   shouldMergeSameFunctionStructPtrSubtype(SimpleType LHS, SimpleType RHS) const;
+  binarysub::expected<void, binarysub::Error> onVariableNonVarBoundAdded(
+      SimpleType Var, SimpleType Bound, binarysub::BoundPolarity Polarity,
+      const binarysub::EnqueueMergeFn &EnqueueMerge) const;
   void recordCallArgStructPtrMergeCandidate(llvm::CallBase &Call,
                                             llvm::Function &Target,
                                             unsigned ArgIndex,
@@ -244,6 +247,7 @@ struct ConstraintsGenerator {
   explainStructFieldSliceCompatibilityFailure(SimpleType LHS, SimpleType RHS,
                                               bool RequireEvidence) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;
+  bool hasPointerLikeEvidence(SimpleType Ty) const;
   std::size_t applyCallArgStructPtrMergePolicy();
   std::vector<StructPtrSlotMergeCandidate>
   collectStructPtrSameAccessKindMergeCandidates(bool CollectLoads) const;
