@@ -2759,13 +2759,17 @@ void ConstraintsGenerator::observeOldMemoryTypeEdge(const SimpleType &Lhs,
 
 bool ConstraintsGenerator::configureConstraintContext(
     binarysub::ConstraintContext &Context) {
-  bool HasHook = false;
+  bool HasHook = true;
+  Context.shouldMergeSameLevelVarVar =
+      [this](const SimpleType &LHS, const SimpleType &RHS)
+      -> binarysub::expected<bool, binarysub::Error> {
+    return shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
+  };
   if (MergeEval) {
     Context.onVariableMerged =
         [Eval = MergeEval](const binarysub::MergeEvent &Event) {
           Eval->observeVariableMerged(Event);
         };
-    HasHook = true;
   }
   return HasHook;
 }
@@ -2946,39 +2950,30 @@ ConstraintsGenerator::getVariableOwningFunction(SimpleType Ty) const {
   return getExtValueFunction(*Val);
 }
 
-void ConstraintsGenerator::maybeMergeSameFunctionStructPtrSubtype(
-    SimpleType LHS, SimpleType RHS) {
+binarysub::expected<bool, binarysub::Error>
+ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
+    SimpleType LHS, SimpleType RHS) const {
   LHS = binarysub::resolve_variable(LHS);
   RHS = binarysub::resolve_variable(RHS);
   auto *LHSVar = LHS ? LHS->getAsVariableState() : nullptr;
   auto *RHSVar = RHS ? RHS->getAsVariableState() : nullptr;
   if (LHSVar == nullptr || RHSVar == nullptr || LHS.get() == RHS.get()) {
-    return;
+    return false;
   }
   if (LHSVar->level != RHSVar->level || LHSVar->size != RHSVar->size ||
       LHSVar->size != PointerSize) {
-    return;
+    return false;
   }
   if (!hasStructPointerEvidence(LHS) || !hasStructPointerEvidence(RHS)) {
-    return;
+    return false;
   }
 
   auto *LHSFunc = getVariableOwningFunction(LHS);
   auto *RHSFunc = getVariableOwningFunction(RHS);
   if (LHSFunc == nullptr || RHSFunc == nullptr || LHSFunc != RHSFunc) {
-    return;
+    return false;
   }
-
-  const auto *LHSVal = getVariableExternalValue(LHS);
-  const auto *RHSVal = getVariableExternalValue(RHS);
-  std::string Detail = "func=";
-  Detail += LHSFunc->hasName() ? LHSFunc->getName().str() : "<unknown>";
-  Detail += " lhs-value=";
-  Detail += LHSVal != nullptr ? toStableString(*LHSVal) : "<unknown>";
-  Detail += " rhs-value=";
-  Detail += RHSVal != nullptr ? toStableString(*RHSVal) : "<unknown>";
-  tryMergeVariablesForPolicy("same-function-struct-ptr-subtype", LHS, RHS,
-                             Detail);
+  return true;
 }
 
 std::optional<std::vector<ConstraintsGenerator::StructFieldSlice>>

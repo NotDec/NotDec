@@ -201,7 +201,8 @@ struct ConstraintsGenerator {
   void attachExternalValueHandle(SimpleType Ty, const ExtValuePtr &Val);
   llvm::Function *getExtValueFunction(const ExtValuePtr &Val) const;
   llvm::Function *getVariableOwningFunction(SimpleType Ty) const;
-  void maybeMergeSameFunctionStructPtrSubtype(SimpleType LHS, SimpleType RHS);
+  binarysub::expected<bool, binarysub::Error>
+  shouldMergeSameFunctionStructPtrSubtype(SimpleType LHS, SimpleType RHS) const;
   void recordCallArgStructPtrMergeCandidate(llvm::CallBase &Call,
                                             llvm::Function &Target,
                                             unsigned ArgIndex,
@@ -413,7 +414,6 @@ struct ConstraintsGenerator {
                            observeOldMemoryTypeEdge(Lhs, Rhs);
                          },
                          ContextPtr);
-    maybeMergeSameFunctionStructPtrSubtype(lhs, rhs);
   }
 
   SimpleType addVarSubtype(llvm::Value *Val, SimpleType dtv) {
