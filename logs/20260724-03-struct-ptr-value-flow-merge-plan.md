@@ -106,3 +106,46 @@
 - 实现效果：8/10。补回 `pick_child` 返回值链路，同时保留 wasm32 性能保护。
 - 复杂度：3/10。只是在已有 pointer-like 判断前增加一层 typed pointer 快速判断。
 - 维护成本：3/10。逻辑仍集中在 merge policy 的 evidence 判断里。
+
+# 2026-07-25 计划：定位 pure one-sided evidence 爆炸根因
+
+## 原始 prompt
+
+前一版one-sided evidence内存爆炸可能是有什么额外的bug，接下来按照这个方向探索，看看根本原因到底是什么，而不是采取这种临时的缓解措施。如果真的纯 one-sided evidence有问题也得找出真正的具体问题
+
+## 背景
+
+当前用 pointer-like 门槛挡住了 `fortune.o3.wasm.ll` 的爆内存，但这只是保守保护。纯 one-sided evidence 在 realworld fortune wasm 上 RSS 涨到约 55GB，说明可能有某条 merge policy 把普通值卷进结构体，或者新增 evidence hook 反复暴露过宽 merge 机会。需要定位具体是哪类值、哪条 subtype 边、哪个 hook 触发造成的，而不是只保留门槛。
+
+## 路线
+
+先做临时实验改动，不提交：恢复 pure one-sided 条件，并给 same-function subtype policy 和 `onVariableNonVarBoundAdded()` 增加轻量计数/采样 trace。重点记录参与 merge 的两个变量是否有 struct evidence、是否是 LLVM typed pointer、所属函数、外部值 stable name、直接 bound 摘要和触发来源。然后限时跑 `test/type-recovery/realworld/cases/fortune.o3.wasm.ll`，在内存失控前截取样本，找出最早把普通 `i32` 或非指针值并入结构体的 merge 链。确认后再决定修正点：可能是 evidence 识别过宽、hook 扫描时机不对、SCC level0 过宽、返回/phi 传播误判，或某类 LLVM `ptr`/integer wrapper 没有区分。
+
+## 判断标准
+
+- 能指出至少一个具体错误合并链：函数、值名、两端节点、触发的 subtype/hook 和为什么它不该合并。
+- 能解释 55GB 爆内存是类型递归被错误放宽造成，还是 merge 数量/compact type 递归展开造成。
+- 如果 pure one-sided 本身确实太宽，也要给出具体反例，而不是只说“太宽”。
+- 实验改动只用于定位，最终代码必须干净，不能留下粗暴 tracing 或临时开关。
+
+## 实验结果：函数内 pure one-sided，跨函数禁用
+
+临时实验只恢复函数内 same-function subtype 的 pure one-sided，同时禁用 `applyCallArgStructPtrMergePolicy()` 和 call-site return merge。`fortune.o3.wasm.ll` 在 90 秒限时内跑完：`elapsed=32.30`，`maxrss=2724916 KB`，`Constraint generation done! SCC count:10`。
+
+对比 pure one-sided 且保留跨函数 merge 的实验：90 秒超时，`maxrss=9553428 KB`，并且在 `realloc` 后 `call arg/formal struct pointer merge policy merged 68 pair(s)`；而禁用跨函数后该计数为 0，程序跑完。这个说明爆炸不是函数内 pure one-sided 单独造成的，至少主要放大点在跨函数 actual/formal 或 call-return merge。函数内 pure one-sided 会让更多节点获得结构体证据，然后跨函数策略继续把这些证据沿调用边传播，导致类型图变宽和求解成本上升。
+
+## 追加实验：定位跨函数放大点
+
+临时改动 `src/TypeRecovery/mlsub/MLsubGenerator.cpp` 中 `shouldMergeSameFunctionStructPtrSubtype()`、`onVariableNonVarBoundAdded()`、`applyCallArgStructPtrMergePolicy()`、`applyReturnValueMergePolicy()`，只用于实验，结束后已恢复。
+
+同一 wasm 输入的稳定基线是 `/tmp/notdec-wasm-pointerlike-baseline-20260725-b`：`elapsed=18.23`，`maxrss=1630316 KB`，`Constraint generation done! SCC count:10`。稳定代码在 `realloc` 后只做了 `return value merge=4`、`call arg/formal merge=7`、`field follow-up merge=10`。
+
+只打开 pure one-sided 函数内合并、禁用跨函数 call-arg/call-return 的 trace 结果是 `/tmp/notdec-one-sided-no-cross-trace-20260725-a`：`elapsed=31.35`，`maxrss=2725816 KB`。前 80 个 same-function 候选都集中在 `main`，第一个就是 `main::%bb.loop_entry404.i0`，即 `load i32, ptr inttoptr (i32 2268 to ptr)`，被当成 struct evidence；随后它和同函数内一批 `i32` load、PHI、`malloc(i32 84)` 返回值合并。这说明 no-cross 的 2.7GB 不是死循环，而是函数内 pure one-sided 会把 wasm32 的普通 `i32` 地址值大范围并到结构体链里，导致 `ValueTypes.txt` 变大：稳定基线约 583KB，no-cross trace 约 1.4MB，旧 no-cross 输出约 3.0MB。
+
+只禁 call-return、保留 call-arg 的实验 `/tmp/notdec-one-sided-callarg-only-20260725-a` 90 秒超时，`maxrss=9655108 KB`；这说明 call-arg actual/formal 合并单独就足够触发爆炸。
+
+带 call-arg trace 的实验 `/tmp/notdec-one-sided-callarg-trace-20260725-a/run.log` 在 60 秒超时，`maxrss=6345572 KB`。第一个明显错误入口是：
+
+`main::%bb.brif_next244.i0 -> strchr arg0`，actual 是 `add_file::%bb.loop_entry122.i3`（`%86 = load i32, ptr %85`），formal 是 `strchr::arg0`（`i32 %0`），两边 `actualTypedPtr=0 formalTypedPtr=0`，但都因为已有 offset slice 被判成 struct evidence。后续 `strlen`、`strcmp`、`strncmp`、`stat`、`open`、`opendir`、`perror`、`qsort`、`regexec` 等 libc-like 形参被串起来，常量字符串地址如 `i32 1089`、栈地址如 `%stack_addr -1024` 也被卷入。
+
+当前结论：pure one-sided 本身太宽，根本问题不是 `hasPointerLikeEvidence()` 有 bug，而是 wasm32 里很多真实指针都表现为 `i32`，仅靠“有一边出现 struct field slice”无法区分结构体指针、字符串/buffer 指针、全局地址常量和普通地址整数。跨函数 call-arg policy 是主要放大器；函数内 one-sided 是前置污染源。
