@@ -1983,12 +1983,7 @@ void appendDebugVarOrigins(
 }
 
 std::string formatTypeBuilderRootLabel(ExtValuePtr Value) {
-  std::string Label = toString(Value, true);
-  std::string Stable = toStableString(Value);
-  if (!Stable.empty()) {
-    Label += " [stable=" + Stable + "]";
-  }
-  return Label;
+  return toStableString(Value);
 }
 
 std::string sanitizeTraceText(llvm::StringRef Text) {
