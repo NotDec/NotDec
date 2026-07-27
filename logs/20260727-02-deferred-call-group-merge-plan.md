@@ -1,0 +1,93 @@
+# 用户原始 prompt
+
+> 能不能限制一下，仅分析部分函数作为当前测试用例，不然这个太慢了。我现在需要按照这个方向改进：当前是子类型关系，会在访问到函数调用的时候直接加上，然后有一个双向合并策略会在约束生成后再加上去。当前我希望改成在访问函数调用的时候直接先不加上约束，而是留到后面和双向合并策略同时一起处理。但是也是先增加所有的子类型关系，再处理节点合并。这里可以先commit一下。保持子类型关系增加得不变，但是处理节点合并的时候，改成，对每个参数或返回值，分析是否所有的实参和形参、返回值和真实的返回值之间的结构体布局存在冲突，如果不冲突则全部合并，如果冲突则全部不合并。另外，根据源码，找到ffplay那边是否存在malloc wrapper，有的话得标记为多态，同时关注是否存在socket相关的函数，raw memory read等，如果读入数据结构的话，也得标记为多态。
+
+# 背景
+
+当前同 SCC 的直接调用在 visitor 中立即增加 `formal function <: actual function`，同时记录
+actual/formal 和 return/function-return 的晚期合并候选。约束生成结束后，现有策略逐对判断并合并。
+逐对处理的问题是：同一个形参先与一个兼容实参合并后，后面才发现另一个实参布局冲突时，前面的
+合并已经不能撤销。返回值也有同样问题。
+
+ffplay whole-module IR 有 108 个函数，串行 bottom-up 数分钟仍未完成，不适合每次修改后直接全量
+验证。它的网络输入由动态 libavformat 实现，ffplay 模块没有直接 `socket`、`recv` 或 POSIX
+`read`；模块内仍有 `av_fifo_read/write` 这类裸缓冲区 API，以及多种 FFmpeg allocator API。
+
+# 目标
+
+把直接调用的子类型约束从 instruction visitor 延后到本 SCC 的 IR 约束收集完成之后。子类型方向和
+数量保持不变，并保证所有调用子类型约束先增加，再运行任何调用参数或返回值节点合并。
+
+调用参数按“同一个 formal slot”分组，返回值按“同一个 function-return slot”分组。先检查组内
+formal 和全部 actual/真实 return 的一层结构体字段布局；全部兼容才合并整组，任一冲突则整组不合并。
+多态函数实例的 formal slot 相互独立，不跨 callsite 合并。
+
+从 ffplay 提取少量有 DebugInfo 的函数及其直接依赖，形成快速评估输入。补齐 ffplay 实际使用的
+通用 allocator/裸缓冲区声明的多态标记，避免一个外部声明把无关 callsite 的 buffer 类型串起来。
+
+# 技术路线
+
+同 SCC 调用只在 visitor 中构造 actual function type 并保存待处理调用。visitor 全部结束后，先遍历
+待处理调用增加原来的 subtype，再统一记录参数/返回值候选，最后求解并执行分组合并。跨 SCC 的
+summary instantiate 维持同样顺序：先实例化并增加全部 subtype，再运行分组合并。
+
+分组键使用解析后的 formal root，而不是只用函数名和参数序号。这样普通函数的所有 callsite 会进入
+同一组，真正的多态实例仍各自成组。合并前对组内所有不同 root 做两两字段布局兼容检查；预检查失败
+时只写 skip trace，不改变节点。
+
+ffplay 快速样例优先选 packet queue 和 allocator helper 周边函数，保留 DebugInfo，不把动态 libav
+实现拉进来。外部 API 名单只加入源码中确实承担通用分配或裸字节搬运的声明；带固定结构语义的普通
+FFmpeg API 不因“有 pointer 参数”就一概标成多态。
+
+# 源码审计边界
+
+- 通用 allocator 声明：`av_calloc`、`av_mallocz`、`av_malloc_array`、`av_realloc_array`、
+  `av_fast_malloc`。
+- 裸 FIFO buffer：`av_fifo_read`、`av_fifo_write`；数据元素由 caller 决定，适合作为多态边界。
+- `stream_open` 分配并初始化固定的 `VideoState`，属于 factory，不是通用 malloc wrapper。
+- `get_codecs_sorted`、`grow_array`、`allocate_array_elem` 都带额外容器或 out-parameter 语义，先不放宽
+  现有“纯转发 allocator 结果”的通用 wrapper 检测规则。
+- 当前 ffplay executable IR 没有直接 socket/POSIX raw read；这些发生在动态 libavformat 中。
+
+# 风险
+
+- 若分组只按函数名，会破坏多态实例隔离；必须按 formal root 分组。
+- 字段布局预检查通过后，底层 variable merge 仍可能因其他约束失败。当前 merge API 没有事务，不能
+  在部分执行后回滚；实现需要在测试中覆盖，并把意外失败视为策略错误而不是静默留下半组结果。
+- 把固定类型的外部 API 过度标成多态会丢失有用的跨调用约束，因此名单必须限于真正通用的 allocator
+  和 raw buffer 操作。
+- 裁剪 IR 只能验证策略和 DebugInfo correctness，不能替代 whole-module 性能结论。
+
+# 判断标准
+
+- visitor 不再直接增加同 SCC call subtype；延后阶段增加的 subtype 数量和方向与旧逻辑一致。
+- 同一 formal slot 有多个候选时，兼容组全部合并，含一个冲突时整组零合并。
+- 多态 summary 的不同实例不因分组策略重新合到一起。
+- ffplay 裁剪样例能在可接受时间内产出 merge eval 汇总，且 `bad_unions = 0`。
+- workdir 能列出 ffplay 命中的 allocator/raw buffer 多态声明；不存在的 socket/POSIX read 不伪造记录。
+
+# 实现进度
+
+## 阶段一：调用 subtype 延后（已完成）
+
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h` 的
+  `ConstraintsGenerator` 新增 `DeferredCallConstraint`，分别保存原 subtype 左端、callsite
+  function type 和供 late merge 使用的 formal function type；`run()` 在全部 instruction visitor
+  完成后统一 flush。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp` 新增 `deferCallConstraint()` 和
+  `applyDeferredCallConstraints()`。后者固定执行两遍：第一遍增加所有原有 subtype，第二遍才记录
+  参数和返回值合并候选。
+- `MLsubVisitor::visitCallBase()` 不再直接调用 `addSubtype()`；跨 SCC 的
+  `MLsubRecovery::bottomUpPhase()` 也先完成全部 summary instantiate，再统一 flush。两处 subtype
+  的方向和数量均未改变。
+
+验证：
+
+```bash
+cmake --build ./build --target MLsubGeneratorTest notdec -j8
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure -j8
+./build/bin/MLsubGeneratorTest --gtest_filter=MLsub.PhiNodeCanBeUsedByAnEarlierListedBlock
+```
+
+构建、LLVM IR suite 和 PHI 定向测试通过。完整 `MLsubGeneratorTest` 中两个旧 PNDiff 测试仍用
+LLVM 指针直接查询已经改成 opaque handle 的 `PNIGraph`，在本次修改前即会断言，不属于本阶段回归。

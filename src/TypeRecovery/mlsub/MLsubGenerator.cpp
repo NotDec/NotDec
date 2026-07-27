@@ -3531,6 +3531,37 @@ void ConstraintsGenerator::recordCallReturnStructPtrMergeCandidates(
                                           Formal->result);
 }
 
+void ConstraintsGenerator::deferCallConstraint(
+    llvm::CallBase &Call, llvm::Function &Target, SimpleType SubtypeLHS,
+    SimpleType ActualFunc, SimpleType FormalFunc) {
+  assert(SubtypeLHS != nullptr && ActualFunc != nullptr &&
+         FormalFunc != nullptr);
+  DeferredCallConstraints.push_back(DeferredCallConstraint{
+      .Call = &Call,
+      .Target = &Target,
+      .SubtypeLHS = SubtypeLHS,
+      .ActualFunc = ActualFunc,
+      .FormalFunc = FormalFunc});
+}
+
+void ConstraintsGenerator::applyDeferredCallConstraints() {
+  // Do not interleave subtype generation with candidate recording.  A subtype
+  // added for a later call can add layout evidence to a slot shared with an
+  // earlier call, so every merge policy must see the completed call graph.
+  for (const auto &Deferred : DeferredCallConstraints) {
+    addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
+  }
+  for (const auto &Deferred : DeferredCallConstraints) {
+    recordCallArgStructPtrMergeCandidates(
+        *Deferred.Call, *Deferred.Target, Deferred.ActualFunc,
+        Deferred.FormalFunc);
+    recordCallReturnStructPtrMergeCandidates(
+        *Deferred.Call, *Deferred.Target, Deferred.ActualFunc,
+        Deferred.FormalFunc);
+  }
+  DeferredCallConstraints.clear();
+}
+
 std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
   std::size_t Merged = 0;
   while (true) {
@@ -4875,7 +4906,9 @@ void MLsubRecovery::bottomUpPhase() {
       applyUpperBoundSignatureOverride(*G, *Func, *Spec);
     }
 
-    // create poly schemes and instantiate for unhandled calls.
+    // Create poly schemes and instantiate every unhandled call first.  The
+    // deferred flush below preserves the old subtype relations while ensuring
+    // none of the call-slot merge candidates are recorded early.
     for (auto &Ent : Data.Generator->unhandledCalls) {
       auto F = Ent.first->getCalledFunction();
       auto TargetNode = AG.CG->getOrInsertFunction(F);
@@ -4897,13 +4930,10 @@ void MLsubRecovery::bottomUpPhase() {
       assert(TData.level == static_cast<unsigned int>(TargetLevel));
       assert(TData.level >= Data.level);
       auto InsFunc = PolyScheme.instantiate(Data.level);
-      Data.Generator->addSubtype(InsFunc, Ent.second);
-      Data.Generator->recordCallArgStructPtrMergeCandidates(*Ent.first, *F,
-                                                            Ent.second,
-                                                            InsFunc);
-      Data.Generator->recordCallReturnStructPtrMergeCandidates(
-          *Ent.first, *F, Ent.second, InsFunc);
+      Data.Generator->deferCallConstraint(*Ent.first, *F, InsFunc, Ent.second,
+                                          InsFunc);
     }
+    Data.Generator->applyDeferredCallConstraints();
     auto PostSummaryMerged =
         Data.Generator->applyCallArgStructPtrMergePolicy();
     if (PostSummaryMerged != 0) {
@@ -7454,17 +7484,17 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
     auto ActualFunc = binarysub::make_function(Args, Ret);
     if (cg.SCCs.count(Target)) {
       auto F = cg.getNodeOrNull(Func);
-      cg.addSubtype(F, ActualFunc);
-      for (unsigned ArgIndex = 0;
-           ArgIndex < Args.size() && ArgIndex < Func->arg_size(); ++ArgIndex) {
-        auto Formal = cg.getNodeOrNull(Func->getArg(ArgIndex));
-        cg.recordCallArgStructPtrMergeCandidate(I, *Func, ArgIndex,
-                                                Args[ArgIndex], Formal);
+      std::vector<SimpleType> FormalArgs;
+      FormalArgs.reserve(Func->arg_size());
+      for (auto &Arg : Func->args()) {
+        FormalArgs.push_back(cg.getNodeOrNull(&Arg));
       }
+      SimpleType FormalRet = nullptr;
       if (Ret != nullptr && !Func->getReturnType()->isAggregateType()) {
-        auto FormalRet = cg.getNodeOrNull(ReturnValue{.Func = Func});
-        cg.recordCallReturnStructPtrMergeCandidate(I, *Func, Ret, FormalRet);
+        FormalRet = cg.getNodeOrNull(ReturnValue{.Func = Func});
       }
+      auto FormalFunc = binarysub::make_function(FormalArgs, FormalRet);
+      cg.deferCallConstraint(I, *Func, F, ActualFunc, FormalFunc);
     } else {
       // create and save to CallToInstance map. instance with summary later
       auto It = cg.unhandledCalls.insert({&I, ActualFunc});

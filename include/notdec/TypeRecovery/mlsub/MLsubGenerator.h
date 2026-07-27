@@ -120,6 +120,19 @@ struct ConstraintsGenerator {
   ast::HType *StorageHType = nullptr;
   ast::RecordDecl *StorageDecl = nullptr;
   std::map<llvm::CallBase *, SimpleType> unhandledCalls;
+  // A direct call has two related type shapes: SubtypeLHS is the old left-hand
+  // side of the call subtype constraint, while FormalFunc exposes the formal
+  // argument/return slots used by the later merge policy.  Keeping both lets us
+  // preserve the old subtype relation exactly, but delay every call relation
+  // until instruction visiting has collected all local layout evidence.
+  struct DeferredCallConstraint {
+    llvm::CallBase *Call = nullptr;
+    llvm::Function *Target = nullptr;
+    SimpleType SubtypeLHS = nullptr;
+    SimpleType ActualFunc = nullptr;
+    SimpleType FormalFunc = nullptr;
+  };
+  std::vector<DeferredCallConstraint> DeferredCallConstraints;
   std::set<ExtValuePtr> ContraVariantValues;
   std::set<ExtValuePtr> SnapshotContraVariantValues;
   std::map<std::uint32_t, std::set<ExtValuePtr>> OriginalVariableSources;
@@ -223,6 +236,10 @@ struct ConstraintsGenerator {
                                                 llvm::Function &Target,
                                                 SimpleType ActualFunc,
                                                 SimpleType FormalFunc);
+  void deferCallConstraint(llvm::CallBase &Call, llvm::Function &Target,
+                           SimpleType SubtypeLHS, SimpleType ActualFunc,
+                           SimpleType FormalFunc);
+  void applyDeferredCallConstraints();
   std::optional<std::vector<StructFieldSlice>>
   collectOneLevelStructFieldSlices(SimpleType Ty) const;
   // Field record entries only prove an address.  The slice width must come from
@@ -317,6 +334,7 @@ struct ConstraintsGenerator {
       Visitor.visit(const_cast<llvm::Function *>(Func));
       Visitor.handlePHINodes();
     }
+    applyDeferredCallConstraints();
     for (const llvm::Function *Func1 : SCCs) {
       auto Func = const_cast<llvm::Function *>(Func1);
       auto F = getNodeOrNull(Func);
