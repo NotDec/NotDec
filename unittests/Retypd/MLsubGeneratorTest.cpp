@@ -11,6 +11,8 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -38,6 +40,20 @@ makeMLsubGeneratorForFunctionArgs(llvm::LLVMContext &Ctx,
       "mlsub-test", 32, SCCs, binarysub::make_variable(0, 32));
 }
 
+void addStructLayout(
+    notdec::mlsub::ConstraintsGenerator &CG, binarysub::SimpleType Root,
+    const std::vector<std::pair<unsigned, unsigned>> &OffsetSizeBytes) {
+  std::vector<std::pair<std::string, binarysub::SimpleType>> Fields;
+  for (const auto &[Offset, SizeBytes] : OffsetSizeBytes) {
+    auto FieldAddr = binarysub::make_variable(0, 32);
+    auto FieldValue = binarysub::make_variable(0, SizeBytes * 8);
+    CG.addSubtype(FieldAddr,
+                  binarysub::make_ptr_load(FieldValue, SizeBytes * 8));
+    Fields.push_back({std::to_string(Offset), FieldAddr});
+  }
+  CG.addSubtype(Root, binarysub::make_record(std::move(Fields)));
+}
+
 } // namespace
 
 TEST(MLsub, PNDiffUnifiesRecursiveVariablePairsByDefault) {
@@ -49,8 +65,8 @@ TEST(MLsub, PNDiffUnifiesRecursiveVariablePairsByDefault) {
 
   auto LhsTy = CG.createNode(Arg0);
   auto RhsTy = CG.createNode(Arg1);
-  auto *LhsPNI = &CG.PG.getPNIVar(Arg0);
-  auto *RhsPNI = &CG.PG.getPNIVar(Arg1);
+  auto *LhsPNI = &CG.getPNINode(Arg0);
+  auto *RhsPNI = &CG.getPNINode(Arg1);
 
   EXPECT_NE(LhsPNI, RhsPNI);
 
@@ -60,7 +76,7 @@ TEST(MLsub, PNDiffUnifiesRecursiveVariablePairsByDefault) {
       binarysub::make_function(std::vector<binarysub::SimpleType>{RhsTy},
                                nullptr));
 
-  EXPECT_EQ(&CG.PG.getPNIVar(Arg0), &CG.PG.getPNIVar(Arg1));
+  EXPECT_EQ(&CG.getPNINode(Arg0), &CG.getPNINode(Arg1));
   CG.releaseBinarysubState();
 }
 
@@ -81,7 +97,134 @@ TEST(MLsub, PNDiffRecursiveVariablePairUnificationCanBeDisabled) {
       binarysub::make_function(std::vector<binarysub::SimpleType>{RhsTy},
                                nullptr));
 
-  EXPECT_NE(&CG.PG.getPNIVar(Arg0), &CG.PG.getPNIVar(Arg1));
+  EXPECT_NE(&CG.getPNINode(Arg0), &CG.getPNINode(Arg1));
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, CallArgSlotConflictSkipsEveryMember) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+
+  auto Formal = binarysub::make_variable(0, 32);
+  auto CompatibleActual = binarysub::make_variable(0, 32);
+  auto ConflictingActual = binarysub::make_variable(0, 32);
+  addStructLayout(CG, Formal, {{4, 4}});
+  addStructLayout(CG, CompatibleActual, {{8, 4}});
+  addStructLayout(CG, ConflictingActual, {{4, 8}});
+
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.ArgIndex = 0, .ActualArg = CompatibleActual, .FormalArg = Formal});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.ArgIndex = 0, .ActualArg = ConflictingActual, .FormalArg = Formal});
+
+  EXPECT_EQ(CG.applyCallArgStructPtrMergePolicy(), 0U);
+  EXPECT_NE(binarysub::resolve_variable(Formal).get(),
+            binarysub::resolve_variable(CompatibleActual).get());
+  EXPECT_NE(binarysub::resolve_variable(Formal).get(),
+            binarysub::resolve_variable(ConflictingActual).get());
+  EXPECT_TRUE(CG.CallArgStructPtrMergeCandidates.empty());
+
+  binarysub::release_type_graph(Formal);
+  binarysub::release_type_graph(CompatibleActual);
+  binarysub::release_type_graph(ConflictingActual);
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, ReturnSlotMergesEveryCompatibleMember) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+
+  auto Formal = binarysub::make_variable(0, 32);
+  auto FirstReturn = binarysub::make_variable(0, 32);
+  auto SecondReturn = binarysub::make_variable(0, 32);
+  addStructLayout(CG, Formal, {{4, 4}});
+  addStructLayout(CG, FirstReturn, {{4, 4}});
+  addStructLayout(CG, SecondReturn, {{8, 4}});
+
+  CG.ReturnValueMergeCandidates.push_back(
+      {.Operand = FirstReturn, .FunctionReturn = Formal});
+  CG.ReturnValueMergeCandidates.push_back(
+      {.Operand = SecondReturn, .FunctionReturn = Formal});
+
+  EXPECT_EQ(CG.applyReturnValueMergePolicy(), 2U);
+  EXPECT_EQ(binarysub::resolve_variable(Formal).get(),
+            binarysub::resolve_variable(FirstReturn).get());
+  EXPECT_EQ(binarysub::resolve_variable(Formal).get(),
+            binarysub::resolve_variable(SecondReturn).get());
+  EXPECT_TRUE(CG.ReturnValueMergeCandidates.empty());
+
+  binarysub::release_type_graph(Formal);
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, ReturnSlotConflictSkipsEveryMember) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+
+  auto Formal = binarysub::make_variable(0, 32);
+  auto CompatibleReturn = binarysub::make_variable(0, 32);
+  auto ConflictingReturn = binarysub::make_variable(0, 32);
+  addStructLayout(CG, Formal, {{4, 4}});
+  addStructLayout(CG, CompatibleReturn, {{8, 4}});
+  addStructLayout(CG, ConflictingReturn, {{4, 8}});
+
+  CG.ReturnValueMergeCandidates.push_back(
+      {.Operand = CompatibleReturn, .FunctionReturn = Formal});
+  CG.ReturnValueMergeCandidates.push_back(
+      {.Operand = ConflictingReturn, .FunctionReturn = Formal});
+
+  EXPECT_EQ(CG.applyReturnValueMergePolicy(), 0U);
+  EXPECT_NE(binarysub::resolve_variable(Formal).get(),
+            binarysub::resolve_variable(CompatibleReturn).get());
+  EXPECT_NE(binarysub::resolve_variable(Formal).get(),
+            binarysub::resolve_variable(ConflictingReturn).get());
+  EXPECT_TRUE(CG.ReturnValueMergeCandidates.empty());
+
+  binarysub::release_type_graph(Formal);
+  binarysub::release_type_graph(CompatibleReturn);
+  binarysub::release_type_graph(ConflictingReturn);
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, DifferentFormalSlotsRemainIndependent) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+
+  auto FirstFormal = binarysub::make_variable(0, 32);
+  auto FirstActual = binarysub::make_variable(0, 32);
+  auto SecondFormal = binarysub::make_variable(0, 32);
+  auto SecondActual = binarysub::make_variable(0, 32);
+  addStructLayout(CG, FirstFormal, {{4, 4}});
+  addStructLayout(CG, FirstActual, {{8, 4}});
+  addStructLayout(CG, SecondFormal, {{12, 4}});
+  addStructLayout(CG, SecondActual, {{16, 4}});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.ArgIndex = 0, .ActualArg = FirstActual, .FormalArg = FirstFormal});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.ArgIndex = 0, .ActualArg = SecondActual, .FormalArg = SecondFormal});
+
+  EXPECT_EQ(CG.applyCallArgStructPtrMergePolicy(), 2U);
+  EXPECT_EQ(binarysub::resolve_variable(FirstFormal).get(),
+            binarysub::resolve_variable(FirstActual).get());
+  EXPECT_EQ(binarysub::resolve_variable(SecondFormal).get(),
+            binarysub::resolve_variable(SecondActual).get());
+  EXPECT_NE(binarysub::resolve_variable(FirstFormal).get(),
+            binarysub::resolve_variable(SecondFormal).get());
+
+  binarysub::release_type_graph(FirstFormal);
+  binarysub::release_type_graph(SecondFormal);
   CG.releaseBinarysubState();
 }
 

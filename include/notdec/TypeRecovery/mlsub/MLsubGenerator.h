@@ -150,7 +150,6 @@ struct ConstraintsGenerator {
     llvm::Function *Target = nullptr;
     SimpleType Operand = nullptr;
     SimpleType FunctionReturn = nullptr;
-    bool RequireStructFieldCompatibility = false;
   };
   std::vector<ReturnValueMergeCandidate> ReturnValueMergeCandidates;
   bool EnablePNDiffTypeVariableClosureUnification = true;

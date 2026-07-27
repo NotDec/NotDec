@@ -91,3 +91,73 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 
 构建、LLVM IR suite 和 PHI 定向测试通过。完整 `MLsubGeneratorTest` 中两个旧 PNDiff 测试仍用
 LLVM 指针直接查询已经改成 opaque handle 的 `PNIGraph`，在本次修改前即会断言，不属于本阶段回归。
+
+## 阶段二：按 formal slot 整组判断（已完成）
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3443` 新增
+  `applyGroupedCallSlotMergePolicy()`。分组键是 resolved formal root；先检查组内所有 root 的
+  level/size，再对全部一层字段切片做两两冲突检查。任一冲突只写 group-skip trace，整组不改。
+- 参数和跨 callsite return 继续要求组内至少有一份结构体布局证据，避免把普通标量和只有直接 load
+  的多态值强行单态化。函数体 `ReturnInst` operand 保留原来的无条件 return-root 合并；若组内已有
+  结构体证据，则真实 return 和全部 call return 一起合并。
+- 预检查通过后依次把成员并入 formal root。底层 merge 若仍失败会立即报 fatal error，避免返回带
+  半组修改的结果。每次策略执行后清空已处理候选，跨 SCC summary 阶段只处理新实例。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:89` 的内建多态名单新增 ffplay 实际使用的
+  `av_calloc`、`av_mallocz`、`av_malloc_array`、`av_realloc_array`、`av_fast_malloc`、
+  `av_fifo_read`、`av_fifo_write`。另外加入 `qsort`：它按 element size 解释裸数组并接收多态
+  comparator；不隔离时 comparator formal 的 PNDiff 会被具体函数值改成 `func`，与 qsort summary
+  的 `ptr` 标记冲突。
+- `unittests/Retypd/MLsubGeneratorTest.cpp:104` 起新增参数冲突、返回兼容、返回冲突和不同 formal root
+  隔离测试。两处旧 PNDiff 测试改走 `ConstraintsGenerator::getPNINode()`，完整单测恢复可运行。
+
+## ffplay 裁剪与审计结果
+
+用 LLVM 22 `llvm-extract --recursive` 从完整 ffplay bitcode 提取 6 个函数：
+`packet_queue_flush`、`packet_queue_init`、`packet_queue_put`、`allocate_array_elem`、`grow_array`、
+`get_codecs_sorted`。产物为：
+
+- `/sn640/NotDec-Exp/Bench2/source-ir/ir/ffplay/ffplay-call-merge-small.bc`：92 KiB。
+- `/sn640/NotDec-Exp/Bench2/source-ir/ir/ffplay/ffplay-call-merge-small.ll`：252 KiB，保留 3 个
+  `DICompileUnit` 和 44 个 struct DebugInfo。
+
+源码和 IR 中没有直接 `socket`、`recv*` 或 POSIX `read`，网络读取在动态 libavformat 内。
+`av_read_frame` 写固定 `AVPacket`，`stream_open` 返回固定 `VideoState`，均未标多态。
+`MallocWrappers.txt` 确认没有符合纯转发规则的 malloc wrapper。
+
+最终裁剪评估：
+
+```bash
+./build/bin/notdec \
+  /sn640/NotDec-Exp/Bench2/source-ir/ir/ffplay/ffplay-call-merge-small.ll \
+  --tr-level=2 --merge-struct-ptr-load-store \
+  -g --work-dir=/tmp/notdec-source-ffplay-small-group-r7-work \
+  --merge-eval-dir=/tmp/notdec-source-ffplay-small-group-r7-eval \
+  -o /tmp/notdec-source-ffplay-small-group-r7-out.ll
+```
+
+结果：1.38 秒，峰值 356 MiB；`bad_unions=0`、`polluted_components=0`、
+`fragmented_nodes=3`、`fragmented_types=2`、`merged_nodes=7`。输出 IR 通过 LLVM 22 `opt -passes=verify`。
+本裁剪模块的 `PolymorphicBufferFunctions.txt` 命中 `av_realloc_array`、`av_calloc`、`av_mallocz`、
+`qsort`、`av_fifo_read`、`av_fifo_write`；完整 ffplay 中还声明了名单里的 `av_malloc_array` 和
+`av_fast_malloc`。
+
+## 验证
+
+```bash
+cmake --build ./build --target MLsubGeneratorTest notdec -j8
+./build/bin/MLsubGeneratorTest
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+```
+
+8 个 MLsubGenerator 单测和 LLVM IR 的 21 个类型恢复用例全部通过。sysy suite 当前由 Clang 14
+重新生成的输入与旧 golden 不同；realworld fortune 的 extra-constraint SHA256 锚点与当前 frozen IR
+不一致，两者都在进入本次策略前失败或产生基线差异，未改这些无关文件。
+
+## 评分
+
+- 实现效果：8/10。满足 subtype 全量先加、slot 整组冲突判断和多态实例隔离；裁剪 ffplay 无 wrong
+  merge。全量 ffplay 性能仍未完成测量。
+- 理解成本：6/10。新增一个参数/返回共用的分组 helper，并保留真实 return 与跨调用 return 的既有
+  证据差异，逻辑集中但有一层必要分支。
+- 维护成本：5/10。API 名单需要随新的通用内存库扩充；组内预检查和 fatal invariant 有定向测试，
+  后续改布局规则只需改一个 helper。
