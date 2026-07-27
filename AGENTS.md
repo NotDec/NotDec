@@ -280,6 +280,8 @@ cmake --build ./build --target all
 - `NOTDEC_SUMMARY_OVERRIDE`
 - `NOTDEC_SIGNATURE_OVERRIDE`
 - `NOTDEC_EXTRA_CONSTRAINTS`
+- `NOTDEC_BINARYSUB_THREADS`
+- `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL`
 
 说明：
 
@@ -289,6 +291,14 @@ cmake --build ./build --target all
   - 函数自身签名 upper-bound override，方向是 `F <: OverrideTy`
 - `NOTDEC_EXTRA_CONSTRAINTS`
   - 额外 MLsub / PNDiff 约束，当前与 frozen stage-B IR 工作流配套使用
+- `NOTDEC_BINARYSUB_THREADS`
+  - 控制 binarysub bulk simplify 的线程数；未设置时使用硬件线程数
+  - 需要整个 bulk simplify 单线程时设为 `1`
+- `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL`
+  - oneTBB 构建下默认开启 canonicalize 并行；设为 `0` 时只关闭 canonicalize 并行
+  - 这个开关不控制更早的 bottom-up 约束生成；该阶段当前仍是串行
+  - 需要编译期完全关闭 binarysub oneTBB 时，用
+    `-DNOTDEC_ENABLE_BINARYSUB_PARALLEL=OFF` 重新配置 CMake
 
 典型命令：
 
@@ -307,7 +317,7 @@ cmake --build ./build --target all
 典型 fortune 命令：
 
 ```bash
-/usr/bin/time -v ./build/bin/notdec \
+NOTDEC_BINARYSUB_THREADS=8 /usr/bin/time -v ./build/bin/notdec \
   /sn640/NotDec-Exp/Bench2/source-ir/ir/fortune/fortune.ll \
   --tr-level=2 \
   --merge-struct-ptr-load-store \
@@ -315,6 +325,10 @@ cmake --build ./build --target all
   --merge-eval-dir=/tmp/notdec-source-fortune-eval \
   -o /tmp/notdec-source-fortune-out.ll
 ```
+
+源码级 IR 评估显式固定为 8 线程，避免机器硬件线程数不同导致性能数据不可比。
+canonicalize 默认已经并行，不需要再设置
+`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1`。
 
 主要输出：
 

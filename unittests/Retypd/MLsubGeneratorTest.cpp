@@ -3,7 +3,9 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <llvm/IR/Argument.h>
+#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <map>
@@ -80,6 +82,42 @@ TEST(MLsub, PNDiffRecursiveVariablePairUnificationCanBeDisabled) {
                                nullptr));
 
   EXPECT_NE(&CG.PG.getPNIVar(Arg0), &CG.PG.getPNIVar(Arg1));
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, PhiNodeCanBeUsedByAnEarlierListedBlock) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("phi-block-order-test", Ctx);
+  auto *PtrTy = llvm::PointerType::getUnqual(Ctx);
+  auto *FTy = llvm::FunctionType::get(llvm::Type::getVoidTy(Ctx), {PtrTy},
+                                      false);
+  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "f",
+                                   M.get());
+
+  // LLVM block order does not have to follow control-flow order. Put the
+  // latch before the header so the visitor sees the PHI use before its def.
+  auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", F);
+  auto *Latch = llvm::BasicBlock::Create(Ctx, "latch", F);
+  auto *Header = llvm::BasicBlock::Create(Ctx, "header", F);
+  llvm::IRBuilder<> HeaderBuilder(Header);
+  auto *Phi = HeaderBuilder.CreatePHI(PtrTy, 2, "p");
+  HeaderBuilder.CreateBr(Latch);
+
+  llvm::IRBuilder<> EntryBuilder(Entry);
+  EntryBuilder.CreateBr(Header);
+  llvm::IRBuilder<> LatchBuilder(Latch);
+  LatchBuilder.CreatePtrToInt(Phi, llvm::Type::getInt32Ty(Ctx));
+  LatchBuilder.CreateBr(Header);
+  Phi->addIncoming(F->getArg(0), Entry);
+  Phi->addIncoming(Phi, Latch);
+
+  static std::set<llvm::Function *> SCCs;
+  SCCs.clear();
+  SCCs.insert(F);
+  notdec::mlsub::ConstraintsGenerator CG(
+      "phi-block-order-test", 32, SCCs, binarysub::make_variable(0, 32));
+  CG.run();
+  EXPECT_NE(CG.getNodeOrNull(Phi), nullptr);
   CG.releaseBinarysubState();
 }
 

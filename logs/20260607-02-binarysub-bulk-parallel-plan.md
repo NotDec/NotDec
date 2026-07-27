@@ -1244,6 +1244,13 @@ elapsed=16.13 rss_kb=201808
 - 如果要默认打开 canonicalize 并行，应先在 UType/HType 输出前做递归类型稳定化，把等价但折叠点不同的递归表示归一。
 - 另一条路是 canonicalize 阶段并行预计算，最后按 root 顺序串行提交 recursive/recVars，但这会损失一部分收益。
 
+## 后续更新：canonicalize 默认并行
+
+2026-07-27 已在 binarysub `317b95a` 将 canonicalize 改为 oneTBB 构建下默认并行。
+`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=0` 保留串行退路；线程数仍由
+`NOTDEC_BINARYSUB_THREADS` 控制。两次固定 8 线程的 fortune 输出一致，具体验证记录见
+`logs/20260727-01-canonicalize-default-and-ffplay-source-ir-plan.md`。
+
 # 实现记录：canonicalize 状态数 progress trace
 
 目标：

@@ -7492,7 +7492,10 @@ void ConstraintsGenerator::MLsubVisitor::visitReturnInst(ReturnInst &I) {
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitPHINode(PHINode &I) {
-  cg.createNode(&I);
+  // A predecessor block may appear before the PHI block in the function's
+  // block list. In that case visiting the predecessor has already created
+  // the PHI node through an operand lookup, so reuse it here.
+  cg.getOrInsertNode(&I);
   // Defer constraints generation (and unification) to handlePHINodes
   phiNodes.push_back(&I);
 }
