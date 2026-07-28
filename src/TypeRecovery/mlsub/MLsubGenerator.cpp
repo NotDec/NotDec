@@ -85,6 +85,8 @@ constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
 constexpr llvm::StringLiteral kMallocWrappersFile = "MallocWrappers.txt";
 constexpr llvm::StringLiteral kPolymorphicBufferFunctionsFile =
     "PolymorphicBufferFunctions.txt";
+constexpr llvm::StringLiteral kCallSlotMergeDecisionsFile =
+    "CallSlotMergeDecisions.txt";
 
 bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
   static constexpr llvm::StringLiteral Names[] = {
@@ -1988,6 +1990,60 @@ void appendDebugVarOrigins(
   }
 }
 
+void writeCallSlotMergeDecisions(llvm::StringRef Path, const AllGraphs &AG) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Error printing to " << Path << ", " << EC.message()
+                 << "\n";
+    return;
+  }
+
+  std::size_t Total = 0;
+  std::map<std::string, std::size_t> DecisionCounts;
+  for (const auto &Data : AG.AllSCCs) {
+    if (Data.Generator == nullptr) {
+      continue;
+    }
+    for (const auto &Decision : Data.Generator->CallSlotMergeDecisions) {
+      ++Total;
+      ++DecisionCounts[Decision.Decision];
+    }
+  }
+
+  Out << "# Call slot merge decisions\n\n";
+  Out << "total: " << Total << "\n";
+  for (const auto &[Decision, Count] : DecisionCounts) {
+    Out << Decision << ": " << Count << "\n";
+  }
+  Out << "\n";
+
+  for (const auto &Data : AG.AllSCCs) {
+    if (Data.Generator == nullptr ||
+        Data.Generator->CallSlotMergeDecisions.empty()) {
+      continue;
+    }
+    Out << "## SCC: " << Data.SCCName << "\n\n";
+    std::size_t Index = 0;
+    for (const auto &Decision : Data.Generator->CallSlotMergeDecisions) {
+      Out << "### Decision " << ++Index << "\n";
+      Out << "policy: " << Decision.Policy << "\n";
+      Out << "decision: " << Decision.Decision << "\n";
+      Out << "reason: " << Decision.Reason << "\n";
+      Out << "formal: " << Decision.Formal << "\n";
+      Out << "entries:\n";
+      for (const auto &Entry : Decision.Entries) {
+        Out << "  - " << Entry << "\n";
+      }
+      Out << "roots:\n";
+      for (const auto &Root : Decision.Roots) {
+        Out << "  - " << Root << "\n";
+      }
+      Out << "\n";
+    }
+  }
+}
+
 std::string formatTypeBuilderRootLabel(ExtValuePtr Value) {
   return toStableString(Value);
 }
@@ -3417,6 +3473,22 @@ static std::string formatSimpleTypeForTrace(SimpleType Ty) {
   return Ty ? binarysub::debug_string(Ty) : "<null>";
 }
 
+static std::string formatCallSlotRootSnapshot(ConstraintsGenerator &CG,
+                                              SimpleType Ty) {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr) {
+    return Ty ? binarysub::debug_string(Ty) : "<null>";
+  }
+
+  std::ostringstream OS;
+  OS << "vs#" << Var->id << " level=" << Var->level
+     << " size_bits=" << Var->size << " slices="
+     << formatStructFieldSlicesForTrace(
+            CG.collectOneLevelStructFieldSlices(Ty));
+  return OS.str();
+}
+
 struct CallSlotMergeEntry {
   SimpleType Actual = nullptr;
   SimpleType Formal = nullptr;
@@ -3449,6 +3521,16 @@ static std::size_t applyGroupedCallSlotMergePolicy(
   for (auto &Entry : Entries) {
     auto Formal = binarysub::resolve_variable(Entry.Formal);
     if (!Formal) {
+      CG.CallSlotMergeDecisions.push_back(
+          ConstraintsGenerator::CallSlotMergeDecision{
+              .Policy = Policy.str(),
+              .Decision = "skipped",
+              .Reason = "null-formal",
+              .Formal = "<null>",
+              .Entries = {Entry.Detail + " actual=" +
+                          formatCallSlotRootSnapshot(CG, Entry.Actual)},
+              .Roots = {formatCallSlotRootSnapshot(CG, Entry.Actual) +
+                        " action=skipped"}});
       CG.emitTypeRecoveryTrace(
           "[merge-policy:" + Policy.str() +
           ":group-skip] reason=null-formal detail=" + Entry.Detail);
@@ -3492,6 +3574,23 @@ static std::size_t applyGroupedCallSlotMergePolicy(
       AddRoot(Entry.Actual, !Entry.RequireStructEvidence);
     }
 
+    std::vector<std::string> EntrySnapshots;
+    EntrySnapshots.reserve(Group.Entries.size());
+    for (const auto &Entry : Group.Entries) {
+      EntrySnapshots.push_back(
+          Entry.Detail + " actual=" +
+          formatCallSlotRootSnapshot(CG, Entry.Actual) +
+          " require_struct_evidence=" +
+          (Entry.RequireStructEvidence ? "true" : "false"));
+    }
+    std::vector<std::string> RootSnapshots;
+    RootSnapshots.reserve(Roots.size());
+    for (const auto &Root : Roots) {
+      RootSnapshots.push_back(formatCallSlotRootSnapshot(CG, Root.Type));
+    }
+    const std::string FormalSnapshot =
+        formatCallSlotRootSnapshot(CG, Formal);
+
     std::optional<std::string> Failure;
     if (FormalVar == nullptr) {
       Failure = "non-variable-formal";
@@ -3534,6 +3633,17 @@ static std::size_t applyGroupedCallSlotMergePolicy(
     }
 
     if (Failure) {
+      for (auto &Root : RootSnapshots) {
+        Root += " action=skipped";
+      }
+      CG.CallSlotMergeDecisions.push_back(
+          ConstraintsGenerator::CallSlotMergeDecision{
+              .Policy = Policy.str(),
+              .Decision = "skipped",
+              .Reason = *Failure,
+              .Formal = FormalSnapshot,
+              .Entries = std::move(EntrySnapshots),
+              .Roots = std::move(RootSnapshots)});
       CG.emitTypeRecoveryTrace(
           "[merge-policy:" + Policy.str() + ":group-skip] reason=" +
           *Failure + " formal=" + formatSimpleTypeForTrace(Formal) +
@@ -3541,13 +3651,22 @@ static std::size_t applyGroupedCallSlotMergePolicy(
       continue;
     }
 
+    std::size_t GroupMerged = 0;
+    std::size_t SkippedForEvidence = 0;
+    if (!RootSnapshots.empty()) {
+      RootSnapshots[0] += " action=formal-anchor";
+    }
     for (std::size_t I = 1; I < Roots.size(); ++I) {
       if (!HasStructEvidence && !Roots[I].MergeWithoutStructEvidence) {
+        RootSnapshots[I] +=
+            " action=skipped reason=missing-struct-evidence";
+        ++SkippedForEvidence;
         continue;
       }
       auto From = binarysub::resolve_variable(Roots[I].Type);
       auto Into = binarysub::resolve_variable(Formal);
       if (!From || !Into || From.get() == Into.get()) {
+        RootSnapshots[I] += " action=already-merged";
         continue;
       }
       if (!CG.tryMergeVariablesForPolicy(Policy, From, Into, GroupDetail)) {
@@ -3556,7 +3675,26 @@ static std::size_t applyGroupedCallSlotMergePolicy(
             Policy);
       }
       ++Merged;
+      ++GroupMerged;
+      RootSnapshots[I] += " action=merged-into-formal";
     }
+    std::string Decision = "already-merged";
+    std::string Reason = "all-members-share-formal-root";
+    if (SkippedForEvidence != 0) {
+      Decision = GroupMerged == 0 ? "skipped" : "partial";
+      Reason = "members-missing-struct-evidence";
+    } else if (GroupMerged != 0) {
+      Decision = "merged";
+      Reason = "compatible-layouts";
+    }
+    CG.CallSlotMergeDecisions.push_back(
+        ConstraintsGenerator::CallSlotMergeDecision{
+            .Policy = Policy.str(),
+            .Decision = std::move(Decision),
+            .Reason = std::move(Reason),
+            .Formal = FormalSnapshot,
+            .Entries = std::move(EntrySnapshots),
+            .Roots = std::move(RootSnapshots)});
   }
   return Merged;
 }
@@ -3593,6 +3731,16 @@ void ConstraintsGenerator::recordCallArgStructPtrMergeCandidate(
       .ActualArg = ActualArg,
       .FormalArg = FormalArg};
   if (ActualArg == nullptr || FormalArg == nullptr) {
+    CallSlotMergeDecisions.push_back(CallSlotMergeDecision{
+        .Policy = "call-arg-slot-group",
+        .Decision = "skipped",
+        .Reason = "null-actual-or-formal",
+        .Formal = formatCallSlotRootSnapshot(*this, FormalArg),
+        .Entries = {formatCallArgStructPtrMergeCandidateDetail(Candidate) +
+                    " actual=" +
+                    formatCallSlotRootSnapshot(*this, ActualArg)},
+        .Roots = {formatCallSlotRootSnapshot(*this, ActualArg) +
+                  " action=skipped"}});
     emitTypeRecoveryTrace(
         "[merge-policy:call-arg-struct-ptr:candidate-skip] " +
         formatCallArgStructPtrMergeCandidateDetail(Candidate) +
@@ -3629,14 +3777,24 @@ void ConstraintsGenerator::recordCallArgStructPtrMergeCandidates(
 void ConstraintsGenerator::recordCallReturnStructPtrMergeCandidate(
     llvm::CallBase &Call, llvm::Function &Target, SimpleType ActualRet,
     SimpleType FormalRet) {
+  ReturnValueMergeCandidate Candidate{.Call = &Call,
+                                      .Target = &Target,
+                                      .Operand = ActualRet,
+                                      .FunctionReturn = FormalRet};
   if (ActualRet == nullptr || FormalRet == nullptr) {
+    CallSlotMergeDecisions.push_back(CallSlotMergeDecision{
+        .Policy = "return-slot-group",
+        .Decision = "skipped",
+        .Reason = "null-actual-or-formal",
+        .Formal = formatCallSlotRootSnapshot(*this, FormalRet),
+        .Entries = {formatReturnValueMergeCandidateDetail(Candidate) +
+                    " actual=" +
+                    formatCallSlotRootSnapshot(*this, ActualRet)},
+        .Roots = {formatCallSlotRootSnapshot(*this, ActualRet) +
+                  " action=skipped"}});
     return;
   }
-  ReturnValueMergeCandidates.push_back(ReturnValueMergeCandidate{
-      .Call = &Call,
-      .Target = &Target,
-      .Operand = ActualRet,
-      .FunctionReturn = FormalRet});
+  ReturnValueMergeCandidates.push_back(std::move(Candidate));
 }
 
 void ConstraintsGenerator::recordCallReturnStructPtrMergeCandidates(
@@ -4438,6 +4596,11 @@ void MLsubRecovery::run() {
   bottomUpPhase();
 
   topDownPhase();
+
+  if (WorkDir) {
+    writeCallSlotMergeDecisions(
+        join(*WorkDir, kCallSlotMergeDecisionsFile.str()), AG);
+  }
 
   if (WorkDir && ResultVal == nullptr) {
     genASTTypes(M);

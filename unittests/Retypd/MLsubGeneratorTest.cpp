@@ -126,6 +126,13 @@ TEST(MLsub, CallArgSlotConflictSkipsEveryMember) {
   EXPECT_NE(binarysub::resolve_variable(Formal).get(),
             binarysub::resolve_variable(ConflictingActual).get());
   EXPECT_TRUE(CG.CallArgStructPtrMergeCandidates.empty());
+  ASSERT_EQ(CG.CallSlotMergeDecisions.size(), 1U);
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Policy, "call-arg-slot-group");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "skipped");
+  EXPECT_NE(CG.CallSlotMergeDecisions[0].Reason.find("overlap-conflict"),
+            std::string::npos);
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Entries.size(), 2U);
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Roots.size(), 3U);
 
   binarysub::release_type_graph(Formal);
   binarysub::release_type_graph(CompatibleActual);
@@ -158,6 +165,11 @@ TEST(MLsub, ReturnSlotMergesEveryCompatibleMember) {
   EXPECT_EQ(binarysub::resolve_variable(Formal).get(),
             binarysub::resolve_variable(SecondReturn).get());
   EXPECT_TRUE(CG.ReturnValueMergeCandidates.empty());
+  ASSERT_EQ(CG.CallSlotMergeDecisions.size(), 1U);
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Policy, "return-slot-group");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "merged");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Reason, "compatible-layouts");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Entries.size(), 2U);
 
   binarysub::release_type_graph(Formal);
   CG.releaseBinarysubState();
@@ -192,6 +204,34 @@ TEST(MLsub, ReturnSlotConflictSkipsEveryMember) {
   binarysub::release_type_graph(Formal);
   binarysub::release_type_graph(CompatibleReturn);
   binarysub::release_type_graph(ConflictingReturn);
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, CallArgSlotWithoutStructEvidenceRecordsSkippedDecision) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+
+  auto Formal = binarysub::make_variable(0, 32);
+  auto Actual = binarysub::make_variable(0, 32);
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.ArgIndex = 0, .ActualArg = Actual, .FormalArg = Formal});
+
+  EXPECT_EQ(CG.applyCallArgStructPtrMergePolicy(), 0U);
+  EXPECT_NE(binarysub::resolve_variable(Formal).get(),
+            binarysub::resolve_variable(Actual).get());
+  ASSERT_EQ(CG.CallSlotMergeDecisions.size(), 1U);
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "skipped");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Reason,
+            "missing-struct-evidence");
+  ASSERT_EQ(CG.CallSlotMergeDecisions[0].Roots.size(), 2U);
+  EXPECT_NE(CG.CallSlotMergeDecisions[0].Roots[1].find("action=skipped"),
+            std::string::npos);
+
+  binarysub::release_type_graph(Formal);
+  binarysub::release_type_graph(Actual);
   CG.releaseBinarysubState();
 }
 

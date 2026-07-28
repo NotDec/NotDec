@@ -203,6 +203,23 @@
   `PNDiff` 加减法求解、unify 等 trace
 - 典型用途：当 `ValueTypes.txt` 只能看到“结果不对”，但还不知道“约束传播过程中哪一步歪了”时，继续往这个文件追
 
+### `CallSlotMergeDecisions.txt`
+
+- 来源：参数/返回值调用槽整组合并策略
+- 作用：记录每个 formal 参数槽或返回槽的全部候选和最终决定，默认不需要开启
+  `NOTDEC_BINARYSUB_TRACE`
+- 生成条件：启用 `--gen-work-dir` 或 `--work-dir`
+- `policy`：`call-arg-slot-group` 表示实参/形参，`return-slot-group` 表示调用返回值或
+  函数内真实返回值
+- `decision`：`merged`、`skipped`、`partial` 或 `already-merged`
+- `reason`：布局冲突、缺少结构体证据、层级/大小不一致等直接原因
+- `entries`：该 formal 槽对应的全部 callsite 或 `return` 点
+- `roots`：决策发生前的 root、位宽、一层字段切片和每个 root 的处理结果
+
+查所有没有合并的槽位时，先搜索 `decision: skipped` 和 `decision: partial`。如果看到
+`already-merged`，说明该槽在轮到整组策略前已经被其他约束或合并规则处理，需要继续对照
+`binarysub-trace.log`。
+
 ### `llvm2c-before-demotessa.ll`
 
 - 来源：`llvm2c` 后端

@@ -202,6 +202,20 @@ struct ConstraintsGenerator {
   };
   std::vector<CallArgStructPtrMergeCandidate> CallArgStructPtrMergeCandidates;
 
+  // Snapshot one whole formal-slot decision before later policies can change
+  // its roots.  Entries retain every callsite/return point in the group, while
+  // Roots retain the layouts and per-root actions used for the all-or-nothing
+  // check.  MLsubRecovery writes these records only when a workdir is enabled.
+  struct CallSlotMergeDecision {
+    std::string Policy;
+    std::string Decision;
+    std::string Reason;
+    std::string Formal;
+    std::vector<std::string> Entries;
+    std::vector<std::string> Roots;
+  };
+  std::vector<CallSlotMergeDecision> CallSlotMergeDecisions;
+
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
   bool configureConstraintContext(binarysub::ConstraintContext &Context);
