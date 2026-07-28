@@ -141,6 +141,46 @@ LLVM 指针直接查询已经改成 opaque handle 的 `PNIGraph`，在本次修�
 `qsort`、`av_fifo_read`、`av_fifo_write`；完整 ffplay 中还声明了名单里的 `av_malloc_array` 和
 `av_fast_malloc`。
 
+## 完整 ffplay 与函数规模实验
+
+完整 108 函数 IR 已跑完。默认 binarysub 线程数为机器的 16 个硬件线程，canonicalize 并行生效：
+
+- eval：`/tmp/notdec-source-ffplay-full-group-r8-eval/merge-eval-summary.json`。
+- 结果：`wall_ms=445557`、`peak_rss_mb=5976`、`nodes_created=10239`、
+  `typed_target_nodes=107/5539`。
+- 合并正确性：`bad_unions=2`、`polluted_components=2`、`extra_types=2`；
+  `fragmented_types=16`、`fragmented_nodes=28`。
+- 输出 `/tmp/notdec-source-ffplay-full-group-r8-out.ll` 通过 LLVM 22 `opt -passes=verify`。
+
+两条不同 DebugInfo strict 类型的错误合并是：
+
+1. `avcodec_alloc_context3::<ret>` 的 `AVCodecContext*` 与
+   `check_stream_specifier::arg0` 的 `AVFormatContext*`。前 93 个函数时没有，加入第 94 个
+   `stream_component_open` 后出现，记录为 `explicit / binarysub_merge`。
+2. `configure_filtergraph::arg3` 的 `AVFilterContext*` 与其 `arg0` 的 `AVFilterGraph*`，记录为
+   `policy_replace_bound / binarysub_merge`。只分析 `configure_filtergraph` 或只加
+   `video_thread` 调用方不会出现；`configure_audio_filters + configure_filtergraph` 的最小组合可复现。
+
+递增实验按 IR 定义顺序保留前 N 个函数体，并用 `--rglob='.*'` 保留完整模块的 611 个全局定义，
+避免 `llvm-extract` 把全局变成无 initializer 的声明。每档显式设置
+`NOTDEC_BINARYSUB_THREADS=8`，产物在 `/tmp/notdec-ffplay-scale-20260728/n<N>g/`：
+
+| 函数数 | 最后加入的函数 | 节点数 | 耗时 | 峰值 RSS | bad unions |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 83 | `packet_queue_init` | 5580 | 117.0 s | 808 MiB | 0 |
+| 84 | `read_thread` | 6375 | 143.1 s | 875 MiB | 0 |
+| 85 | `stream_close` | 6488 | 172.5 s | 1828 MiB | 0 |
+| 86 | `video_display` | 7373 | 209.9 s | 2142 MiB | 0 |
+| 93 | `stream_component_close` | 7829 | 249.3 s | 2689 MiB | 0 |
+| 94 | `stream_component_open` | 8132 | 307.6 s | 3263 MiB | 1 |
+| 98 | `decoder_start` | 8714 | 344.5 s | 3949 MiB | 1 |
+| 99 | `video_thread` | 9222 | 380.2 s | 4331 MiB | 1 |
+
+没有函数使耗时出现数量级爆炸。最明显的复杂度拐点是第 85 个 `stream_close`：节点只增加 1.8%，
+但 RSS 增为 2.09 倍，耗时增加 20.5%，说明它引入的类型结构比节点数本身更影响 canonicalize。
+第 94 个 `stream_component_open` 也偏重：节点增加 3.9%，耗时增加 23.4%，并首次产生 wrong merge。
+相比之下，`read_thread` 和 `video_thread` 的耗时增长与节点增长更接近连续规模效应。
+
 ## 验证
 
 ```bash
@@ -155,8 +195,8 @@ ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-fa
 
 ## 评分
 
-- 实现效果：8/10。满足 subtype 全量先加、slot 整组冲突判断和多态实例隔离；裁剪 ffplay 无 wrong
-  merge。全量 ffplay 性能仍未完成测量。
+- 实现效果：7/10。满足 subtype 全量先加、slot 整组冲突判断和多态实例隔离；裁剪 ffplay 无 wrong
+  merge。全量 ffplay 已完成，但发现 2 条不同 DebugInfo 类型的错误合并，后续仍需修正。
 - 理解成本：6/10。新增一个参数/返回共用的分组 helper，并保留真实 return 与跨调用 return 的既有
   证据差异，逻辑集中但有一层必要分支。
 - 维护成本：5/10。API 名单需要随新的通用内存库扩充；组内预检查和 fatal invariant 有定向测试，
