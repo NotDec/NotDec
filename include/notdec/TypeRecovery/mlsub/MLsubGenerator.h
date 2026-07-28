@@ -51,6 +51,11 @@ namespace notdec::mlsub {
 
 using binarysub::SimpleType;
 
+// Workdir files repeat the same verbose value labels across SCC reports. Keep
+// one cache for a complete top-down pass so label formatting is paid once per
+// ExtValuePtr without giving the cache a lifetime beyond the LLVM module run.
+using ExtValueLabelCache = std::map<ExtValuePtr, std::string>;
+
 struct ConstraintsGenerator;
 
 struct RecordedLoad {
@@ -381,7 +386,7 @@ struct ConstraintsGenerator {
     }
   }
   void genTypes(ast::HTypeContext &HCtx, unsigned PointerSizeBytes,
-                bool SolveGlobals = false);
+                bool SolveGlobals, ExtValueLabelCache *DebugLabelCache);
   void releaseBinarysubState();
 
   SimpleType convertSimpleType(ExtValuePtr Val);

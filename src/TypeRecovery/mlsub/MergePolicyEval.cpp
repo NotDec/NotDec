@@ -279,12 +279,22 @@ std::uint64_t currentPeakRSSMB() {
 } // namespace
 
 struct MergePolicyEval::Impl {
+  struct TrackedOracleValue {
+    binarysub::SimpleType Node;
+    // OracleByValue is fully built in the constructor and outlives this map, so
+    // its std::map value addresses stay valid throughout online observation.
+    const OracleType *Oracle = nullptr;
+    std::string StableValue;
+  };
+
   const llvm::Module &M;
   std::string OutputDir;
   unsigned PointerSize = 0;
   Clock::time_point Start = Clock::now();
   std::map<ExtValuePtr, OracleType> OracleByValue;
-  std::map<ExtValuePtr, binarysub::SimpleType> ValueToNode;
+  // Online wrong-union checks only need strict struct-pointer ground truth.
+  // Coverage and fragmentation still use the complete AG/V2N in finish().
+  std::map<ExtValuePtr, TrackedOracleValue> StrictOracleValues;
   std::vector<BadUnionRecord> BadUnions;
   std::uint64_t AddSubtypeCalls = 0;
 
@@ -454,16 +464,12 @@ struct MergePolicyEval::Impl {
   TruthSet collectTruthForRoot(binarysub::SimpleType Root) const {
     TruthSet Out;
     Root = resolveRoot(Root);
-    for (const auto &Ent : ValueToNode) {
-      const auto *Oracle = getOracle(Ent.first);
-      if (Oracle == nullptr || !Oracle->IsStrictStructPointer ||
-          !isTargetValue(Ent.first)) {
+    for (const auto &[_, Tracked] : StrictOracleValues) {
+      if (resolveRoot(Tracked.Node) != Root) {
         continue;
       }
-      if (resolveRoot(Ent.second) != Root) {
-        continue;
-      }
-      Out.SamplesByType.emplace(Oracle->StrictKey, toStableString(Ent.first));
+      Out.SamplesByType.emplace(Tracked.Oracle->StrictKey,
+                                Tracked.StableValue);
     }
     return Out;
   }
@@ -471,16 +477,12 @@ struct MergePolicyEval::Impl {
   TruthSet collectTruthBeforeMerge(binarysub::SimpleType Root,
                                    binarysub::SimpleType From) const {
     TruthSet Out;
-    for (const auto &Ent : ValueToNode) {
-      const auto *Oracle = getOracle(Ent.first);
-      if (Oracle == nullptr || !Oracle->IsStrictStructPointer ||
-          !isTargetValue(Ent.first)) {
+    for (const auto &[_, Tracked] : StrictOracleValues) {
+      if (resolveRootBeforeMerge(Tracked.Node, From) != Root) {
         continue;
       }
-      if (resolveRootBeforeMerge(Ent.second, From) != Root) {
-        continue;
-      }
-      Out.SamplesByType.emplace(Oracle->StrictKey, toStableString(Ent.first));
+      Out.SamplesByType.emplace(Tracked.Oracle->StrictKey,
+                                Tracked.StableValue);
     }
     return Out;
   }
@@ -512,9 +514,17 @@ struct MergePolicyEval::Impl {
   }
 
   void observeValueNode(const ExtValuePtr &Val, binarysub::SimpleType Ty) {
-    if (Ty != nullptr) {
-      ValueToNode.insert_or_assign(Val, Ty);
+    if (Ty == nullptr) {
+      return;
     }
+    const auto *Oracle = getOracle(Val);
+    if (Oracle == nullptr || !Oracle->IsStrictStructPointer) {
+      return;
+    }
+    StrictOracleValues.insert_or_assign(
+        Val, TrackedOracleValue{.Node = Ty,
+                                .Oracle = Oracle,
+                                .StableValue = toStableString(Val)});
   }
 
   void observeValueMapMerge(binarysub::SimpleType From,
@@ -525,7 +535,10 @@ struct MergePolicyEval::Impl {
     maybeRecordBadUnion(FromSet, ToSet, "v2n_merge", "v2n_merge",
                         formatSimpleTypeKey(To), formatSimpleTypeKey(From));
     for (const auto &Val : MovedValues) {
-      ValueToNode.insert_or_assign(Val, To);
+      if (auto It = StrictOracleValues.find(Val);
+          It != StrictOracleValues.end()) {
+        It->second.Node = To;
+      }
     }
   }
 

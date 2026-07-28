@@ -1866,8 +1866,10 @@ struct VarOriginEntry {
   std::set<std::string> RootLabels;
 };
 
-std::string formatExtValueMappingLabel(ExtValuePtr Value);
-std::string formatExtValueList(const std::set<ExtValuePtr> &Values);
+std::string formatExtValueMappingLabel(
+    ExtValuePtr Value, ExtValueLabelCache *Cache = nullptr);
+std::string formatExtValueList(const std::set<ExtValuePtr> &Values,
+                               ExtValueLabelCache *Cache);
 std::string formatOriginIdSummary(const std::set<std::uint32_t> &OriginIds);
 void appendVarOriginEntries(std::map<std::uint32_t, VarOriginEntry> &Entries,
                             const binarysub::UTypePtr &Ty,
@@ -1879,7 +1881,8 @@ void appendDebugValueTypes(
     const std::set<ExtValuePtr> &ContraVariantValues,
     const std::map<binarysub::PolarVar, binarysub::UTypePtr> &Res,
     const std::map<std::uint32_t, std::set<ExtValuePtr>> &OriginalVariableSources,
-    bool SolveMemory, const binarysub::PolarVar &PolMem) {
+    bool SolveMemory, const binarysub::PolarVar &PolMem,
+    ExtValueLabelCache *DebugLabelCache) {
   std::error_code EC;
   llvm::raw_fd_ostream Out(join(DebugDir.str(), kValueTypesFile.str()), EC,
                            llvm::sys::fs::OF_Append);
@@ -1905,7 +1908,7 @@ void appendDebugValueTypes(
     };
     std::string Line = ContraVariantValues.count(Ent.first) == 0 ? "[+]" : "[-]";
     Line += " ";
-    Line += formatExtValueMappingLabel(Ent.first);
+    Line += formatExtValueMappingLabel(Ent.first, DebugLabelCache);
     Line += " => lower=";
     Line += formatSolvedType(true);
     Line += " ; upper=";
@@ -1937,7 +1940,8 @@ void appendDebugVarOrigins(
     const std::set<ExtValuePtr> &ContraVariantValues,
     const std::map<binarysub::PolarVar, binarysub::UTypePtr> &Res,
     const std::map<std::uint32_t, std::set<ExtValuePtr>> &OriginalVariableSources,
-    bool SolveMemory, const binarysub::PolarVar &PolMem) {
+    bool SolveMemory, const binarysub::PolarVar &PolMem,
+    ExtValueLabelCache *DebugLabelCache) {
   std::error_code EC;
   llvm::raw_fd_ostream Out(join(DebugDir.str(), kVarOriginsFile.str()), EC,
                            llvm::sys::fs::OF_Append);
@@ -1959,7 +1963,9 @@ void appendDebugVarOrigins(
     if (It == Res.end() || !It->second) {
       continue;
     }
-    appendVarOriginEntries(Entries, It->second, formatExtValueMappingLabel(Ent.first));
+    appendVarOriginEntries(
+        Entries, It->second,
+        formatExtValueMappingLabel(Ent.first, DebugLabelCache));
   }
   if (SolveMemory) {
     auto It = Res.find(PolMem);
@@ -1983,7 +1989,7 @@ void appendDebugVarOrigins(
       Out << "  vs#" << OriginId << " => ";
       if (auto It = OriginalVariableSources.find(OriginId);
           It != OriginalVariableSources.end()) {
-        Out << formatExtValueList(It->second);
+        Out << formatExtValueList(It->second, DebugLabelCache);
       } else {
         Out << "<unknown>";
       }
@@ -2068,16 +2074,28 @@ std::string sanitizeTraceText(llvm::StringRef Text) {
   return Result;
 }
 
-std::string formatExtValueMappingLabel(ExtValuePtr Value) {
+std::string formatExtValueMappingLabel(ExtValuePtr Value,
+                                       ExtValueLabelCache *Cache) {
+  if (Cache != nullptr) {
+    if (auto It = Cache->find(Value); It != Cache->end()) {
+      return It->second;
+    }
+  }
+
   std::string Stable = toStableString(Value);
   std::string Verbose = sanitizeTraceText(toString(Value, true));
+  std::string Result;
   if (Stable.empty()) {
-    return Verbose;
+    Result = std::move(Verbose);
+  } else if (Verbose.empty() || Verbose == Stable) {
+    Result = std::move(Stable);
+  } else {
+    Result = Stable + " (" + Verbose + ")";
   }
-  if (Verbose.empty() || Verbose == Stable) {
-    return Stable;
+  if (Cache != nullptr) {
+    Cache->emplace(std::move(Value), Result);
   }
-  return Stable + " (" + Verbose + ")";
+  return Result;
 }
 
 void collectUTypeVariableDetailsImpl(
@@ -2128,14 +2146,15 @@ collectUTypeVariableDetails(const binarysub::UTypePtr &Ty) {
   return Details;
 }
 
-std::string formatExtValueList(const std::set<ExtValuePtr> &Values) {
+std::string formatExtValueList(const std::set<ExtValuePtr> &Values,
+                               ExtValueLabelCache *Cache) {
   if (Values.empty()) {
     return "<none>";
   }
   std::vector<std::string> Labels;
   Labels.reserve(Values.size());
   for (const auto &Value : Values) {
-    Labels.push_back(formatExtValueMappingLabel(Value));
+    Labels.push_back(formatExtValueMappingLabel(Value, Cache));
   }
   std::sort(Labels.begin(), Labels.end());
   return llvm::join(Labels, " | ");
@@ -5773,7 +5792,8 @@ void MLsubRecovery::bottomUpPhase() {
 
 void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                                     unsigned PointerSizeBytes,
-                                    bool SolveGlobals) {
+                                    bool SolveGlobals,
+                                    ExtValueLabelCache *DebugLabelCache) {
   binarysub::TypeSimplifier Ts;
   using binarysub::PolarVar;
   SnapshotContraVariantValues = ContraVariantValues;
@@ -5868,9 +5888,11 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
 
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     appendDebugValueTypes(*WorkDir, Name, V2N, ContraVariantValues, Res,
-                          OriginalVariableSources, SolveGlobals, PolMem);
+                          OriginalVariableSources, SolveGlobals, PolMem,
+                          DebugLabelCache);
     appendDebugVarOrigins(*WorkDir, Name, V2N, ContraVariantValues, Res,
-                          OriginalVariableSources, SolveGlobals, PolMem);
+                          OriginalVariableSources, SolveGlobals, PolMem,
+                          DebugLabelCache);
   }
 }
 
@@ -5948,12 +5970,17 @@ void MLsubRecovery::topDownPhase() {
   if (!HCtx) {
     HCtx = std::make_shared<ast::HTypeContext>();
   }
+  // The cache spans every SCC because instantiated values can appear in more
+  // than one report. It is unused when workdir output is disabled.
+  ExtValueLabelCache DebugValueLabels;
+  ExtValueLabelCache *DebugLabelCache =
+      notdec::getWorkDirOpt() ? &DebugValueLabels : nullptr;
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
     // 尝试运行简化算法，保存到ValueTypes里面。
     // solve memory if ind == 0
     Data.Generator->genTypes(*HCtx, Mod.getDataLayout().getPointerSize(),
-                             Ind == 0);
+                             Ind == 0, DebugLabelCache);
   }
   if (MergeEval) {
     MergeEval->finish(AG);
