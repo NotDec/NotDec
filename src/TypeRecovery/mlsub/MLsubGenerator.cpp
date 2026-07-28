@@ -3004,18 +3004,18 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
       LHSVar->size != PointerSize) {
     return false;
   }
-  bool LHSHasStructEvidence = hasStructPointerEvidence(LHS);
-  bool RHSHasStructEvidence = hasStructPointerEvidence(RHS);
-  if (!LHSHasStructEvidence && !RHSHasStructEvidence) {
+
+  // Most variable edges connect values owned by different functions. Reject
+  // those before walking record fields, which can be large after propagation.
+  auto *LHSFunc = getVariableOwningFunction(LHS);
+  auto *RHSFunc = getVariableOwningFunction(RHS);
+  if (LHSFunc == nullptr || RHSFunc == nullptr || LHSFunc != RHSFunc) {
     return false;
   }
   if (!hasPointerLikeEvidence(LHS) || !hasPointerLikeEvidence(RHS)) {
     return false;
   }
-
-  auto *LHSFunc = getVariableOwningFunction(LHS);
-  auto *RHSFunc = getVariableOwningFunction(RHS);
-  if (LHSFunc == nullptr || RHSFunc == nullptr || LHSFunc != RHSFunc) {
+  if (!hasStructPointerEvidence(LHS) && !hasStructPointerEvidence(RHS)) {
     return false;
   }
   return true;
@@ -3427,7 +3427,36 @@ ConstraintsGenerator::explainStructFieldSliceCompatibilityFailure(
 }
 
 bool ConstraintsGenerator::hasStructPointerEvidence(SimpleType Ty) const {
-  return collectOneLevelStructFieldSlices(Ty).has_value();
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->size != PointerSize) {
+    return false;
+  }
+
+  // This query only needs existence. Avoid constructing the complete offset map
+  // used by layout conflict checks, especially for large propagated records.
+  auto BoundsHaveEvidence = [&](const std::vector<SimpleType> &Bounds) {
+    for (const auto &Bound : Bounds) {
+      auto ResolvedBound = binarysub::resolve_variable(Bound);
+      auto *Mem = ResolvedBound ? ResolvedBound->getAsTMemObject() : nullptr;
+      if (Mem == nullptr) {
+        continue;
+      }
+      for (const auto &[FieldName, FieldTy] : Mem->fields) {
+        auto Offset = parseConstantFieldOffset(FieldName);
+        if (!Offset || *Offset < 4) {
+          continue;
+        }
+        if (collectMaxDirectFieldAccessSizeBytes(FieldTy).has_value()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  return BoundsHaveEvidence(Var->lowerBounds) ||
+         BoundsHaveEvidence(Var->upperBounds);
 }
 
 bool ConstraintsGenerator::hasPointerLikeEvidence(SimpleType Ty) const {

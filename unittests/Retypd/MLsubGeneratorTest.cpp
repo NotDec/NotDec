@@ -276,6 +276,41 @@ TEST(MLsub, CallArgSlotWithoutStructEvidenceRecordsSkippedDecision) {
   CG.releaseBinarysubState();
 }
 
+TEST(MLsub, StructPointerEvidenceRequiresDirectNonzeroFieldAccess) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+
+  auto RootWithoutAccess = binarysub::make_variable(0, 32);
+  auto FieldWithoutAccess = binarysub::make_variable(0, 32);
+  CG.addSubtype(RootWithoutAccess,
+                binarysub::make_record({{"4", FieldWithoutAccess}}));
+  EXPECT_FALSE(CG.hasStructPointerEvidence(RootWithoutAccess));
+
+  auto RootAtZero = binarysub::make_variable(0, 32);
+  auto FieldAtZero = binarysub::make_variable(0, 32);
+  auto FieldAtZeroValue = binarysub::make_variable(0, 32);
+  CG.addSubtype(FieldAtZero,
+                binarysub::make_ptr_load(FieldAtZeroValue, 32));
+  CG.addSubtype(RootAtZero, binarysub::make_record({{"0", FieldAtZero}}));
+  EXPECT_FALSE(CG.hasStructPointerEvidence(RootAtZero));
+
+  auto RootWithAccess = binarysub::make_variable(0, 32);
+  auto FieldWithAccess = binarysub::make_variable(0, 32);
+  auto FieldValue = binarysub::make_variable(0, 32);
+  CG.addSubtype(FieldWithAccess, binarysub::make_ptr_load(FieldValue, 32));
+  CG.addSubtype(RootWithAccess,
+                binarysub::make_record({{"4", FieldWithAccess}}));
+  EXPECT_TRUE(CG.hasStructPointerEvidence(RootWithAccess));
+
+  binarysub::release_type_graph(RootWithoutAccess);
+  binarysub::release_type_graph(RootAtZero);
+  binarysub::release_type_graph(RootWithAccess);
+  CG.releaseBinarysubState();
+}
+
 TEST(MLsub, DifferentFormalSlotsRemainIndependent) {
   llvm::LLVMContext Ctx;
   std::unique_ptr<llvm::Module> M;
