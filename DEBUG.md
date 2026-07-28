@@ -11,6 +11,7 @@
 ```bash
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 --gen-work-dir
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --work-dir=work_dir
+./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --fast-work-dir
 ./build/bin/notdec input.bc --emit-tr-input-ir=/tmp/tr-input.ll -g --work-dir=work_dir
 ./build/bin/notdec /tmp/tr-input.ll -o /tmp/out.ll --tr-level=2 --frozen-tr-input-ir
 ```
@@ -23,6 +24,10 @@
   - 使用输入文件同名并追加 `.notdec`，例如 `cases/foo.ll.notdec/`
 - `--work-dir=<path>`
   - 用于覆盖默认工作文件夹路径
+- `--fast-work-dir`
+  - 必须和 `--gen-work-dir` / `-g` 一起使用
+  - `ValueTypes.txt` 和 `VarOrigins.txt` 只写 stable value label，不补完整 LLVM value 文本
+  - 适合完整项目跑批；需要看具体指令文本时不要开启
 - `--emit-tr-input-ir=<path>`
   - 跑完 pre-type-recovery 标准化 pass，导出类型恢复真正消费的输入 IR
   - 支持输出到 `.ll` 或 `.bc`
@@ -147,6 +152,7 @@
 - 以 `## SCC: ...` 分块，便于按 SCC 查看
 - `"[+]"` / `"[-]"` 表示当前条目在 binarysub 简化时采用的极性
 - value 标签优先打印 stable id，并在括号里补 verbose `ExtValuePtr`
+- 开启 `--fast-work-dir` 时只保留 stable id，避免为每个 value 调用 LLVM verbose printer
 - `[memory] <memory> => ...` 表示 memory 总类型
 - `ValueTypes.txt` 本身只保留 `value => UType`；如果需要继续追某个
   `UType` 变量对应的 `ut#id / vs#originId / ExtValuePtr`，去同目录下的

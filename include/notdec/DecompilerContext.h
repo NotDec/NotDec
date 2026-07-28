@@ -15,6 +15,7 @@ struct Options {
   int trLevel = 3;
   int log_level = 5; // default log level = level_notice
   std::string workDir;
+  bool fastWorkDir = false;
   std::string mergeEvalDir;
   std::string emitTRInputIR;
   bool frozenTRInputIR = false;

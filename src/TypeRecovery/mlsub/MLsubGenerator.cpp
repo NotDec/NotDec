@@ -2083,6 +2083,13 @@ std::string formatExtValueMappingLabel(ExtValuePtr Value,
   }
 
   std::string Stable = toStableString(Value);
+  if (notdec::isFastWorkDir()) {
+    if (Cache != nullptr) {
+      Cache->emplace(std::move(Value), Stable);
+    }
+    return Stable;
+  }
+
   std::string Verbose = sanitizeTraceText(toString(Value, true));
   std::string Result;
   if (Stable.empty()) {

@@ -33,8 +33,10 @@ namespace notdec {
 
 std::string getDefaultWorkDir(const std::string &inputPath);
 void setWorkDir(std::string path);
+void setFastWorkDir(bool enabled);
 llvm::StringRef getWorkDir();
 bool hasWorkDir();
+bool isFastWorkDir();
 std::optional<std::string> getWorkDirOpt();
 void appendWorkDirLog(llvm::StringRef fileName, llvm::StringRef content);
 inline void appendRecoveryPassLog(llvm::StringRef content) {

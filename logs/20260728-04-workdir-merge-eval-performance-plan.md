@@ -2,6 +2,10 @@
 
 > 增加一个按 ExtValuePtr 缓存最终 label机制试试吧。这个observer 只保存 strict oracle 值的改进也试试
 
+后续 prompt：
+
+> 对，那增加fast-work-dir试试吧
+
 # 背景
 
 完整 ffplay 在普通类型恢复模式下需要约 34 秒。仅开启 workdir 后增至 179 秒，仅开启
@@ -96,3 +100,29 @@ workdir 新 profile 中 `appendDebugVarOrigins()` 已退出 1% 以上热点；�
 
 workdir 的下一步可以复用 LLVM `ModuleSlotTracker`，避免每个唯一值第一次打印时重新扫描 module
 metadata。这个改动涉及 llvm2c 的 `ExtValuePtr::toString()` 接口，本次不继续扩大范围。
+
+# Fast workdir 后续实现（已完成）
+
+`include/notdec/DecompilerContext.h:14-24`、`include/notdec/Utils/Utils.h:33-41` 和
+`src/Utils/Utils.cpp:25-51` 增加 fast workdir 运行状态。`src/NotDec.cpp:106-125,243-250,300-327`
+增加 `--fast-work-dir`，未同时开启 `--gen-work-dir` 时直接报错。
+
+`src/TypeRecovery/mlsub/MLsubGenerator.cpp:2077-2105` 修改
+`formatExtValueMappingLabel()`：fast 模式仍按完整 `ExtValuePtr` 缓存 label，但只生成
+`toStableString()`，不再生成 verbose `toString(Value, true)`。默认 workdir 格式不变。现有
+`toStableString()` 对 `UConstant` 仍可能打印常量，这是少量剩余开销，不在本次扩大范围。
+
+完整 ffplay、Debug + ASan、8 线程下，使用同一二进制且都不带 perf 时，详细 workdir
+`114.26s`，fast workdir `36.59s`，减少 68.0%，已经接近 plain 的 `34.11s`；fast 模式峰值内存
+为 `2521.9 MiB`。输出 IR SHA256 仍为
+`d3f53f7a...d257f`，通过 LLVM 22 verifier；`CallSlotMergeDecisions.txt` 与详细模式 SHA256
+一致。`ValueTypes.txt` 和 `VarOrigins.txt` 合计从 `3,861,665` 字节降至 `2,445,200` 字节。
+
+验证：`MLsubGeneratorTest` 14/14 通过；LLVM IR tr-level 2 suite 通过；CLI 已验证单独传入
+`--fast-work-dir` 会返回 1 并说明依赖 `--gen-work-dir`。`cmake --build build --target all -j4`
+仍被 `external/NotDec-llvm2c` 现有 structuring test 的字符串 payload 与 `BodyBuilder::Payload`
+接口不匹配阻断；本次目标 `notdec` 和 `MLsubGeneratorTest` 均已单独构建成功。
+
+- 实现效果：10/10。workdir 额外 wall time 从约 80 秒降至约 2.5 秒。
+- 理解成本：9/10。只增加一个显式 CLI 开关，fast 和详细格式的差别直接对应 label 内容。
+- 维护成本：9/10。类型推理和文件结构未变；新增 ExtValuePtr 类型时仍由 `toStableString()` 统一处理。

@@ -24,6 +24,10 @@ namespace notdec {
 
 namespace {
 std::string CurrentWorkDir;
+// Fast workdir type reports keep stable value ids but omit verbose LLVM value
+// strings. Keep the mode beside CurrentWorkDir because those report writers
+// are spread across passes and already use this process-wide run context.
+bool FastWorkDir = false;
 }
 
 std::string getDefaultWorkDir(const std::string &inputPath) {
@@ -32,9 +36,13 @@ std::string getDefaultWorkDir(const std::string &inputPath) {
 
 void setWorkDir(std::string path) { CurrentWorkDir = std::move(path); }
 
+void setFastWorkDir(bool enabled) { FastWorkDir = enabled; }
+
 llvm::StringRef getWorkDir() { return CurrentWorkDir; }
 
 bool hasWorkDir() { return !CurrentWorkDir.empty(); }
+
+bool isFastWorkDir() { return FastWorkDir; }
 
 std::optional<std::string> getWorkDirOpt() {
   if (!hasWorkDir()) {

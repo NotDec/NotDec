@@ -108,6 +108,12 @@ static cl::opt<bool> genWorkDir(
     cl::desc("Generate intermediate work files in a work directory."),
     cl::init(false), cl::cat(NotdecCat));
 
+static cl::opt<bool> fastWorkDir(
+    "fast-work-dir",
+    cl::desc("Use stable value labels without verbose LLVM value text in "
+             "workdir type reports. Requires --gen-work-dir."),
+    cl::init(false), cl::cat(NotdecCat));
+
 static cl::alias genWorkDirShort(
     "g", cl::desc("Alias for --gen-work-dir"), cl::aliasopt(genWorkDir),
     cl::cat(NotdecCat));
@@ -238,6 +244,10 @@ int main(int argc, char *argv[]) {
     llvm::errs() << "Error: --work-dir requires --gen-work-dir.\n";
     return 1;
   }
+  if (fastWorkDir && !genWorkDir) {
+    llvm::errs() << "Error: --fast-work-dir requires --gen-work-dir.\n";
+    return 1;
+  }
   if (!emitTRInputIR.empty() && !outputFilename.empty()) {
     llvm::errs() << "Error: --emit-tr-input-ir cannot be combined with -o.\n";
     return 1;
@@ -298,6 +308,7 @@ int main(int argc, char *argv[]) {
   opts.mergeEvalDir = mergeEvalDir;
   opts.mergeStructPtrLoadStore = mergeStructPtrLoadStore;
   opts.frozenTRInputIR = frozenTRInputIR;
+  opts.fastWorkDir = fastWorkDir;
   if (genWorkDir) {
     opts.workDir = workDirOverride.empty()
                        ? notdec::getDefaultWorkDir(inputFilename)
@@ -312,6 +323,7 @@ int main(int argc, char *argv[]) {
   }
 
   notdec::setWorkDir(opts.workDir);
+  notdec::setFastWorkDir(opts.fastWorkDir);
   configureWorkDirLLVMReports(opts);
 
   if (frozenTRInputIR && insuffix != ".ll" && insuffix != ".bc") {

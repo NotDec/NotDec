@@ -272,6 +272,9 @@ cmake --build ./build --target all
 
 - `--gen-work-dir` / `-g`
 - `--work-dir=<path>`
+- `--fast-work-dir`
+  - 必须和 `--gen-work-dir` / `-g` 一起使用
+  - `ValueTypes.txt`、`VarOrigins.txt` 只写 stable label，完整项目跑批时可避免 verbose `Value::print()` 开销
 - `--emit-tr-input-ir=<path>`
 - `--frozen-tr-input-ir`
 
@@ -305,6 +308,7 @@ cmake --build ./build --target all
 ```bash
 ./build/bin/notdec input.wat -o /tmp/out.c --tr-level=2 --gen-work-dir
 ./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --work-dir=/tmp/notdec-work
+./build/bin/notdec input.bc -o /tmp/out.ll --tr-level=3 -g --fast-work-dir
 ```
 
 ### 源码级 IR 的 DebugInfo 合并策略评估
