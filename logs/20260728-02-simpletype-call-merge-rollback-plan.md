@@ -143,27 +143,27 @@ conflict reason 和 rollback touched-node 数。外层槽结果区分：
 binarysub trace 保留 speculative 事件，但用 begin/commit/rollback 标记事务边界。trace 是历史记录，不随
 rollback 擦除。
 
-# 分阶段实施
+# 分阶段实施（已完成）
 
-## 阶段一：binarysub 可回退图事务
+## 阶段一：binarysub 可回退图事务（已完成）
 
 先只实现内存 undo journal 和原子 `merge_variable_into()`，不接 NotDec 调用槽。用小图覆盖直接边、结构
 bound 内嵌引用、递归 queued merge、路径压缩、externalHandle 转移，以及中途 Error 后的恢复。用稳定图
 fingerprint 比较事务前和 rollback 后的全部可变状态。
 
-## 阶段二：延迟外部副作用
+## 阶段二：延迟外部副作用（已完成）
 
 把 PNDiff observer、merge-eval 和 V2N 更新收进待提交事件。先让单个
 `tryMergeVariablesForPolicy()` 支持 transaction，验证失败后 PNDiff representative、V2N 反向映射和
 评估计数都不变化。
 
-## 阶段三：函数级调用接口事务
+## 阶段三：函数级调用接口事务（已完成）
 
 合并参数/返回值两个入口，按 target function 建 plan，接入 recursive merge validator 和新的 decision
 统计。先用人工图复现“planned arg0 merge 重写出 arg0 <: arg3，内部 hook 尝试继续合并”的情况，确认
 冲突后整个函数 rollback。
 
-## 阶段四：ffplay 和性能评估
+## 阶段四：ffplay 和性能评估（已完成）
 
 先跑两个最小 wrong-merge 组合，再逐步扩大到完整 ffplay。比较 wrong merge、fragmentation、事务提交/
 回退次数、单次最大 touched nodes、临时节点数、wall time 和 peak RSS。
@@ -199,3 +199,64 @@ fingerprint 比较事务前和 rollback 后的全部可变状态。
   看 wrong merge 和 fragmented nodes，不能只看错合并归零。
 - 回退机制不能替代证据策略。unknown 是否允许、哪些 `void *` API 多态，仍需单独判断并在 decision 文件中
   明确记录。
+
+# 实现记录
+
+## 实现结果
+
+`external/binarysub/include/binarysub/binarysub-core.h:45-105,463-546` 增加
+`SimpleTypeTransaction`、首次写入快照入口和 merge validator；
+`external/binarysub/src/binarysub-core.cpp:16-101,112-1438,1739-1863` 实现 thread-local 单事务、
+commit/rollback，并覆盖路径压缩、bound、nested user、父指针和 external handle 写点。每个显式或递归
+merge 都先经过 validator，调用槽事务可把 shallow conflict 当作失败返回。
+
+`src/TypeRecovery/mlsub/MLsubGenerator.cpp:3530-4192` 的
+`applyTransactionalCallSlotMergePolicy()` 现在按目标函数共用事务。参数和返回槽先完成布局预检查；执行期间
+保存 PNDiff 原始 value、约束 observer、V2N merge 和 field follow-up，只有 commit 后才发布。rollback 会
+同步截断 `MergePolicyEval` 的 bad-union 证据。全部调用计划还会保存 `target::argN/ret` formal 标签，后续函数
+事务能识别前面已传播进 root 的其他函数槽位；只有事务开始时同属一个 prepared group 的原始 root 可作为
+合法例外。
+
+`src/TypeRecovery/mlsub/MLsubGenerator.cpp:92-115,5256-5299` 将 `av_log` 和
+`av_opt_set{,_int,_bin}` 作为 generic `void *` context API 按调用点实例化，避免单个 declaration formal
+连接不同对象布局。`src/TypeRecovery/mlsub/MergePolicyEval.cpp:794-804` 增加评估 checkpoint 回退；
+`DEBUG.md:206` 更新事务决策和多态 API 调试说明。
+
+`external/binarysub/src/binarysub-test.cpp:1200-1277` 覆盖递归失败后的完整图恢复和成功提交；
+`unittests/Retypd/MLsubGeneratorTest.cpp:177-497` 覆盖返回参数合法 alias、同函数递归跨槽回退、跨目标函数
+formal 标签传播、缺证据结果、PNDiff 保持和 FFmpeg generic API 元数据。
+
+实现中补了一点原计划未写清的内容：只看当前目标函数的 formal 标签仍会让较晚的 `avfilter_link` 事务把
+`configure_filtergraph::arg3` 重新传播到 `arg0`。因此标签范围改为本轮全部调用计划，标签随已提交 root
+动态解析；prepared group 的例外仍冻结在当前事务开始时，不能被本事务新产生的 alias 扩大。
+
+## ffplay 结果
+
+最终 8 线程完整运行产物在
+`/tmp/notdec-source-ffplay-transaction-poly-8t-20260728/`：
+
+- `bad_unions=0`、`polluted_components=0`；原来的两条错合并均消失。
+- `fragmented_nodes=31`、`fragmented_types=19`。事务前基线为 `28/16`，用 3 个额外分散节点/类型换取
+  wrong merge 归零。
+- `merged_nodes=692`、`nodes_created=10398`、`wall_ms=341179`、`peak_rss_mb=2599`。
+- 930 条槽决定中：`committed=203`、`precheck-skipped=704`、`preexisting-alias=17`、
+  `rolled-back=6`。
+- 输出 `out.ll` 通过 LLVM 22 `opt -passes=verify`。
+
+## 验证
+
+- `./build/binarysub`：通过。
+- `ctest --test-dir build -R '^MLsub\\.' --output-on-failure`：13/13 通过。
+- `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure`：21/21 通过。
+- SysY 仍是当前 Clang 14 输入与旧 golden 不一致；realworld fortune 仍由 frozen IR 的 extra-constraint
+  SHA256 锚点不一致阻断，均发生在本策略前。
+
+## 评分
+
+- 实现效果：9/10。事务能回退递归传播及外部副作用，完整 ffplay 的两条 wrong merge 归零；代价是
+  fragmentation 比事务前多 3。
+- 理解成本：6/10。底层事务集中，但调用策略需要同时理解 prepared group、全局 formal 标签和延迟副作用。
+- 维护成本：6/10。图写点新增时必须接入首次写快照；generic API 名单也需要按真实库语义维护。
+
+更好的后续方案是把 generic context API 放入已有 summary/polymorphic 配置并补 FFmpeg 覆盖，而不是持续
+扩大 C++ 内置名单；这不影响本次事务机制，暂不在本次修改中扩范围。

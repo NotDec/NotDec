@@ -205,20 +205,34 @@
 
 ### `CallSlotMergeDecisions.txt`
 
-- 来源：参数/返回值调用槽整组合并策略
-- 作用：记录每个 formal 参数槽或返回槽的全部候选和最终决定，默认不需要开启
+- 来源：事务化的参数/返回值调用槽整组合并策略
+- 作用：记录每个目标函数的参数和返回槽候选、递归合并过程和最终决定，默认不需要开启
   `NOTDEC_BINARYSUB_TRACE`
 - 生成条件：启用 `--gen-work-dir` 或 `--work-dir`
+- `transaction` / `target`：同一个目标函数的参数和返回槽共用事务编号；其中任一递归合并冲突时，
+  该事务已执行的槽会一起回退
 - `policy`：`call-arg-slot-group` 表示实参/形参，`return-slot-group` 表示调用返回值或
   函数内真实返回值
-- `decision`：`merged`、`skipped`、`partial` 或 `already-merged`
-- `reason`：布局冲突、缺少结构体证据、层级/大小不一致等直接原因
+- `decision`：`committed`、`precheck-skipped`、`rolled-back` 或 `preexisting-alias`
+- `reason`：布局冲突、缺少结构体证据、层级/大小不一致、跨 formal 槽递归传播等直接原因
+- `touched-nodes`：提交或回退前被事务首次修改的 `SimpleType` 节点数
 - `entries`：该 formal 槽对应的全部 callsite 或 `return` 点
 - `roots`：决策发生前的 root、位宽、一层字段切片和每个 root 的处理结果
+- `recursive-merges`：事务实际遇到的显式、反向边和策略触发的递归 merge；跨函数 formal 标签按
+  `target::argN` / `target::ret` 显示
 
-查所有没有合并的槽位时，先搜索 `decision: skipped` 和 `decision: partial`。如果看到
-`already-merged`，说明该槽在轮到整组策略前已经被其他约束或合并规则处理，需要继续对照
-`binarysub-trace.log`。
+查所有没有合并的槽位时，先搜索 `decision: precheck-skipped`、`decision: rolled-back` 和
+`decision: preexisting-alias`。`rolled-back` 表示冲突是在递归传播中才发现，图和合并评估证据均已
+恢复到事务开始前；`preexisting-alias` 表示污染发生在事务之前，本轮无法撤销，需要继续对照
+更早的 decision 或 `binarysub-trace.log`。
+
+### `PolymorphicBufferFunctions.txt`
+
+- 来源：类型恢复进入 SCC 划分前的内置多态 API 标记
+- 作用：列出按调用点实例化的通用 buffer、allocator 和 `void *` context API；这些函数不会用一个
+  declaration formal 把不同调用点的数据结构合在一起
+- 当前 ffplay 相关例子：`av_log`、`av_opt_set`、`av_opt_set_int`、`av_opt_set_bin`、
+  `av_fifo_read`、`av_fifo_write`
 
 ### `llvm2c-before-demotessa.ll`
 

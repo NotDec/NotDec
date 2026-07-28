@@ -791,6 +791,15 @@ void MergePolicyEval::observeVariableMerged(
 
 void MergePolicyEval::observeAddSubtype() { P->AddSubtypeCalls += 1; }
 
+std::size_t MergePolicyEval::badUnionCheckpoint() const {
+  return P->BadUnions.size();
+}
+
+void MergePolicyEval::rollbackBadUnions(std::size_t Checkpoint) {
+  assert(Checkpoint <= P->BadUnions.size());
+  P->BadUnions.resize(Checkpoint);
+}
+
 void MergePolicyEval::finish(const AllGraphs &AG) { P->finish(AG); }
 
 } // namespace notdec::mlsub

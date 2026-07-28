@@ -42,6 +42,7 @@
 #include <llvm/Support/SHA256.h>
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -101,10 +102,12 @@ bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
       "__strcpy_chk",  "__strncpy_chk",  "__strcat_chk",   "__strncat_chk",
       "__sprintf_chk", "__snprintf_chk", "__vsprintf_chk", "__vsnprintf_chk",
       // FFmpeg allocators, FIFO transfers, and qsort are generic over
-      // caller-owned element types. One declaration must not connect all
-      // callsites.
+      // caller-owned element types. The logging and option APIs likewise take
+      // unrelated object layouts through one void* context parameter. One
+      // declaration must not connect all callsites.
       "av_calloc", "av_mallocz", "av_malloc_array", "av_realloc_array",
-      "av_fast_malloc", "av_fifo_read", "av_fifo_write", "qsort"};
+      "av_fast_malloc", "av_fifo_read", "av_fifo_write", "av_log",
+      "av_opt_set", "av_opt_set_int", "av_opt_set_bin", "qsort"};
   for (auto Candidate : Names) {
     if (Candidate == Name) {
       return true;
@@ -2027,10 +2030,13 @@ void writeCallSlotMergeDecisions(llvm::StringRef Path, const AllGraphs &AG) {
     std::size_t Index = 0;
     for (const auto &Decision : Data.Generator->CallSlotMergeDecisions) {
       Out << "### Decision " << ++Index << "\n";
+      Out << "transaction: " << Decision.TransactionId << "\n";
+      Out << "target: " << Decision.Target << "\n";
       Out << "policy: " << Decision.Policy << "\n";
       Out << "decision: " << Decision.Decision << "\n";
       Out << "reason: " << Decision.Reason << "\n";
       Out << "formal: " << Decision.Formal << "\n";
+      Out << "touched-nodes: " << Decision.TouchedNodes << "\n";
       Out << "entries:\n";
       for (const auto &Entry : Decision.Entries) {
         Out << "  - " << Entry << "\n";
@@ -2038,6 +2044,10 @@ void writeCallSlotMergeDecisions(llvm::StringRef Path, const AllGraphs &AG) {
       Out << "roots:\n";
       for (const auto &Root : Decision.Roots) {
         Out << "  - " << Root << "\n";
+      }
+      Out << "recursive-merges:\n";
+      for (const auto &Merge : Decision.RecursiveMerges) {
+        Out << "  - " << Merge << "\n";
       }
       Out << "\n";
     }
@@ -3490,6 +3500,9 @@ static std::string formatCallSlotRootSnapshot(ConstraintsGenerator &CG,
 }
 
 struct CallSlotMergeEntry {
+  llvm::Function *Target = nullptr;
+  std::string Slot;
+  std::string Policy;
   SimpleType Actual = nullptr;
   SimpleType Formal = nullptr;
   std::string Detail;
@@ -3497,8 +3510,26 @@ struct CallSlotMergeEntry {
 };
 
 struct CallSlotMergeGroup {
+  llvm::Function *Target = nullptr;
   SimpleType Formal = nullptr;
+  std::set<std::string> Slots;
+  std::set<std::string> Policies;
   std::vector<CallSlotMergeEntry> Entries;
+};
+
+struct CallFunctionMergePlan {
+  llvm::Function *Target = nullptr;
+  std::size_t FirstEntryOrder = std::numeric_limits<std::size_t>::max();
+  std::size_t FirstArgOrder = std::numeric_limits<std::size_t>::max();
+  std::vector<CallSlotMergeGroup> Groups;
+};
+
+// Formal labels are collected before any function transaction starts. The raw
+// node is kept so resolving it later follows committed merges and lets a later
+// transaction see formal-slot identities inherited from earlier propagation.
+struct CallFormalSlotLabel {
+  SimpleType Formal = nullptr;
+  std::string Label;
 };
 
 struct CallSlotMergeRoot {
@@ -3509,22 +3540,77 @@ struct CallSlotMergeRoot {
   bool MergeWithoutStructEvidence = false;
 };
 
-// Check every known value for one formal slot before the first destructive
-// merge. Cross-call policies require at least one layout as their safety gate;
-// once present, only overlapping, differently sized slices reject the group.
-static std::size_t applyGroupedCallSlotMergePolicy(
-    ConstraintsGenerator &CG, llvm::StringRef Policy,
-    std::vector<CallSlotMergeEntry> Entries) {
-  std::vector<CallSlotMergeGroup> Groups;
-  std::map<const binarysub::TypeNode *, std::size_t> FormalToGroup;
+// A prepared group keeps the exact pre-transaction evidence used for both the
+// decision and the debug file. RootActions is filled while the transaction runs
+// but the snapshots themselves never change after the checkpoint starts.
+struct PreparedCallSlotMergeGroup {
+  CallSlotMergeGroup *Group = nullptr;
+  std::vector<CallSlotMergeRoot> Roots;
+  std::vector<std::string> EntrySnapshots;
+  std::vector<std::string> RootSnapshots;
+  std::vector<std::string> RootActions;
+  std::string FormalSnapshot;
+  bool HasStructEvidence = false;
+  std::optional<std::string> Failure;
+  std::optional<std::string> SkipReason;
+};
 
-  for (auto &Entry : Entries) {
+struct PendingCallPolicyMerge {
+  std::string Policy;
+  SimpleType From = nullptr;
+  SimpleType Into = nullptr;
+  std::string Detail;
+  std::vector<ExtValuePtr> MovedValues;
+};
+
+// PNDiff must be updated only after a transaction commits, but its value sets
+// must be captured before SimpleType roots and V2N keys are changed.
+struct PendingPNDiffUnify {
+  SimpleType Lhs = nullptr;
+  SimpleType Rhs = nullptr;
+  std::vector<ExtValuePtr> LeftValues;
+  std::vector<ExtValuePtr> RightValues;
+};
+
+struct PendingCallMergeEffects {
+  std::vector<std::pair<SimpleType, SimpleType>> ConstraintPairs;
+  std::vector<PendingCallPolicyMerge> PolicyMerges;
+  std::vector<PendingPNDiffUnify> PNDiffUnifies;
+  std::vector<std::string> MergeAttempts;
+};
+
+static std::string formatStringSet(const std::set<std::string> &Values) {
+  std::string Out;
+  for (const auto &Value : Values) {
+    if (!Out.empty()) {
+      Out += ",";
+    }
+    Out += Value;
+  }
+  return Out.empty() ? "<unknown>" : Out;
+}
+
+static std::string formatCallMergeTarget(const llvm::Function *Target) {
+  return Target && Target->hasName() ? Target->getName().str() : "<unknown>";
+}
+
+// Check every slot before opening the transaction, then execute all parameter
+// and return merges for one target function under one SimpleType checkpoint.
+// A recursive failure rolls every already-processed slot back together.
+static std::size_t applyTransactionalCallSlotMergePolicy(
+    ConstraintsGenerator &CG, std::vector<CallSlotMergeEntry> Entries) {
+  std::vector<CallFunctionMergePlan> Plans;
+  std::map<llvm::Function *, std::size_t> TargetToPlan;
+
+  for (std::size_t EntryOrder = 0; EntryOrder < Entries.size(); ++EntryOrder) {
+    auto &Entry = Entries[EntryOrder];
     auto Formal = binarysub::resolve_variable(Entry.Formal);
     if (!Formal) {
       CG.CallSlotMergeDecisions.push_back(
           ConstraintsGenerator::CallSlotMergeDecision{
-              .Policy = Policy.str(),
-              .Decision = "skipped",
+              .Target = formatCallMergeTarget(Entry.Target),
+              .Policy = Entry.Policy,
+              .Decision = "precheck-skipped",
               .Reason = "null-formal",
               .Formal = "<null>",
               .Entries = {Entry.Detail + " actual=" +
@@ -3532,171 +3618,585 @@ static std::size_t applyGroupedCallSlotMergePolicy(
               .Roots = {formatCallSlotRootSnapshot(CG, Entry.Actual) +
                         " action=skipped"}});
       CG.emitTypeRecoveryTrace(
-          "[merge-policy:" + Policy.str() +
+          "[merge-policy:" + Entry.Policy +
           ":group-skip] reason=null-formal detail=" + Entry.Detail);
       continue;
     }
-    auto [It, Inserted] = FormalToGroup.emplace(Formal.get(), Groups.size());
-    if (Inserted) {
-      Groups.push_back(CallSlotMergeGroup{.Formal = Formal});
+
+    auto [PlanIt, NewPlan] =
+        TargetToPlan.emplace(Entry.Target, Plans.size());
+    if (NewPlan) {
+      Plans.push_back(CallFunctionMergePlan{.Target = Entry.Target});
     }
-    Groups[It->second].Entries.push_back(std::move(Entry));
+    auto &Plan = Plans[PlanIt->second];
+    Plan.FirstEntryOrder = std::min(Plan.FirstEntryOrder, EntryOrder);
+    if (Entry.Slot.rfind("arg", 0) == 0) {
+      Plan.FirstArgOrder = std::min(Plan.FirstArgOrder, EntryOrder);
+    }
+    auto GroupIt = std::find_if(
+        Plan.Groups.begin(), Plan.Groups.end(), [&](const auto &Group) {
+          return Group.Formal.get() == Formal.get();
+        });
+    if (GroupIt == Plan.Groups.end()) {
+      Plan.Groups.push_back(
+          CallSlotMergeGroup{.Target = Entry.Target, .Formal = Formal});
+      GroupIt = std::prev(Plan.Groups.end());
+    }
+    GroupIt->Slots.insert(Entry.Slot);
+    GroupIt->Policies.insert(Entry.Policy);
+    GroupIt->Entries.push_back(std::move(Entry));
   }
 
-  std::size_t Merged = 0;
-  for (auto &Group : Groups) {
-    auto Formal = binarysub::resolve_variable(Group.Formal);
-    auto *FormalVar = Formal ? Formal->getAsVariableState() : nullptr;
-    std::string GroupDetail = Group.Entries.empty()
-                                  ? "<unknown>"
-                                  : Group.Entries.front().Detail;
-    GroupDetail += " members=" + std::to_string(Group.Entries.size());
+  std::stable_sort(Plans.begin(), Plans.end(), [](const auto &LHS,
+                                                  const auto &RHS) {
+    const auto LHSOrder =
+        LHS.FirstArgOrder == std::numeric_limits<std::size_t>::max()
+            ? LHS.FirstEntryOrder
+            : LHS.FirstArgOrder;
+    const auto RHSOrder =
+        RHS.FirstArgOrder == std::numeric_limits<std::size_t>::max()
+            ? RHS.FirstEntryOrder
+            : RHS.FirstArgOrder;
+    return LHSOrder < RHSOrder;
+  });
 
-    std::vector<CallSlotMergeRoot> Roots;
-    std::map<const binarysub::TypeNode *, std::size_t> RootToIndex;
-    auto AddRoot = [&](SimpleType Ty, bool MergeWithoutStructEvidence) {
-      Ty = binarysub::resolve_variable(Ty);
-      if (!Ty) {
-        return;
+  // Preserve the old useful ordering where return slots were merged before
+  // their values were consumed as another call's arguments. A producer plan
+  // precedes a consumer when one of its return roots is the consumer's actual
+  // argument root. Cycles keep their original stable order.
+  std::vector<std::set<std::size_t>> Successors(Plans.size());
+  std::vector<std::size_t> InDegree(Plans.size(), 0);
+  for (std::size_t Producer = 0; Producer < Plans.size(); ++Producer) {
+    std::set<const binarysub::TypeNode *> ReturnRoots;
+    for (const auto &Group : Plans[Producer].Groups) {
+      if (Group.Slots.count("ret") == 0) {
+        continue;
       }
-      auto [It, Inserted] = RootToIndex.emplace(Ty.get(), Roots.size());
-      if (Inserted) {
-        Roots.push_back(CallSlotMergeRoot{
-            .Type = Ty,
-            .MergeWithoutStructEvidence = MergeWithoutStructEvidence});
+      ReturnRoots.insert(binarysub::resolve_variable(Group.Formal).get());
+      for (const auto &Entry : Group.Entries) {
+        ReturnRoots.insert(binarysub::resolve_variable(Entry.Actual).get());
+      }
+    }
+    if (ReturnRoots.empty()) {
+      continue;
+    }
+    for (std::size_t Consumer = 0; Consumer < Plans.size(); ++Consumer) {
+      if (Producer == Consumer) {
+        continue;
+      }
+      bool DependsOnProducer = false;
+      for (const auto &Group : Plans[Consumer].Groups) {
+        if (Group.Slots.empty() ||
+            Group.Slots.begin()->rfind("arg", 0) != 0) {
+          continue;
+        }
+        for (const auto &Entry : Group.Entries) {
+          if (ReturnRoots.count(
+                  binarysub::resolve_variable(Entry.Actual).get()) != 0) {
+            DependsOnProducer = true;
+            break;
+          }
+        }
+        if (DependsOnProducer) {
+          break;
+        }
+      }
+      if (DependsOnProducer && Successors[Producer].insert(Consumer).second) {
+        ++InDegree[Consumer];
+      }
+    }
+  }
+  std::set<std::size_t> Ready;
+  for (std::size_t I = 0; I < Plans.size(); ++I) {
+    if (InDegree[I] == 0) {
+      Ready.insert(I);
+    }
+  }
+  std::vector<CallFunctionMergePlan> OrderedPlans;
+  OrderedPlans.reserve(Plans.size());
+  std::vector<bool> Moved(Plans.size(), false);
+  while (!Ready.empty()) {
+    auto I = *Ready.begin();
+    Ready.erase(Ready.begin());
+    Moved[I] = true;
+    OrderedPlans.push_back(std::move(Plans[I]));
+    for (auto Successor : Successors[I]) {
+      if (--InDegree[Successor] == 0) {
+        Ready.insert(Successor);
+      }
+    }
+  }
+  for (std::size_t I = 0; I < Plans.size(); ++I) {
+    if (!Moved[I]) {
+      OrderedPlans.push_back(std::move(Plans[I]));
+    }
+  }
+  Plans = std::move(OrderedPlans);
+
+  std::vector<CallFormalSlotLabel> FormalSlotLabels;
+  for (const auto &Plan : Plans) {
+    const auto TargetName = formatCallMergeTarget(Plan.Target);
+    for (const auto &Group : Plan.Groups) {
+      for (const auto &Slot : Group.Slots) {
+        FormalSlotLabels.push_back(CallFormalSlotLabel{
+            .Formal = Group.Formal, .Label = TargetName + "::" + Slot});
+      }
+    }
+  }
+
+  std::size_t TotalMerged = 0;
+  for (auto &Plan : Plans) {
+    const auto TransactionId = CG.NextCallMergeTransactionId++;
+    const auto TargetName = formatCallMergeTarget(Plan.Target);
+    std::vector<PreparedCallSlotMergeGroup> Prepared;
+    Prepared.reserve(Plan.Groups.size());
+    std::optional<std::string> PlanFailure;
+    std::string FailureDecision = "precheck-skipped";
+
+    for (auto &Group : Plan.Groups) {
+      PreparedCallSlotMergeGroup Item{.Group = &Group};
+      auto Formal = binarysub::resolve_variable(Group.Formal);
+      auto *FormalVar = Formal ? Formal->getAsVariableState() : nullptr;
+      std::map<const binarysub::TypeNode *, std::size_t> RootToIndex;
+      auto AddRoot = [&](SimpleType Ty, bool MergeWithoutStructEvidence) {
+        Ty = binarysub::resolve_variable(Ty);
+        if (!Ty) {
+          return;
+        }
+        auto [It, Inserted] =
+            RootToIndex.emplace(Ty.get(), Item.Roots.size());
+        if (Inserted) {
+          Item.Roots.push_back(CallSlotMergeRoot{
+              .Type = Ty,
+              .MergeWithoutStructEvidence = MergeWithoutStructEvidence});
+        } else {
+          Item.Roots[It->second].MergeWithoutStructEvidence |=
+              MergeWithoutStructEvidence;
+        }
+      };
+      AddRoot(Formal, /*MergeWithoutStructEvidence=*/true);
+      for (const auto &Entry : Group.Entries) {
+        AddRoot(Entry.Actual, !Entry.RequireStructEvidence);
+        Item.EntrySnapshots.push_back(
+            Entry.Detail + " actual=" +
+            formatCallSlotRootSnapshot(CG, Entry.Actual) +
+            " require_struct_evidence=" +
+            (Entry.RequireStructEvidence ? "true" : "false"));
+      }
+      for (const auto &Root : Item.Roots) {
+        Item.RootSnapshots.push_back(
+            formatCallSlotRootSnapshot(CG, Root.Type));
+      }
+      Item.RootActions.resize(Item.Roots.size(), "pending");
+      if (!Item.RootActions.empty()) {
+        Item.RootActions.front() = "formal-anchor";
+      }
+      Item.FormalSnapshot = formatCallSlotRootSnapshot(CG, Formal);
+
+      if (Group.Slots.size() > 1) {
+        Item.Failure = "formal-root-already-shared-by-slots=" +
+                       formatStringSet(Group.Slots);
+        FailureDecision = "preexisting-alias";
+      } else if (FormalVar == nullptr) {
+        Item.Failure = "non-variable-formal";
       } else {
-        Roots[It->second].MergeWithoutStructEvidence |=
-            MergeWithoutStructEvidence;
+        for (const auto &Root : Item.Roots) {
+          auto *Var = Root.Type->getAsVariableState();
+          if (Var == nullptr) {
+            Item.Failure = "non-variable-member";
+            break;
+          }
+          if (Var->level != FormalVar->level || Var->size != FormalVar->size) {
+            Item.Failure = "level-size-mismatch";
+            break;
+          }
+        }
+      }
+
+      Item.HasStructEvidence =
+          std::any_of(Item.Roots.begin(), Item.Roots.end(),
+                      [&](const auto &Root) {
+                        return CG.hasStructPointerEvidence(Root.Type);
+                      });
+      bool HasMemberAllowedWithoutEvidence = false;
+      for (std::size_t I = 1; I < Item.Roots.size(); ++I) {
+        HasMemberAllowedWithoutEvidence |=
+            Item.Roots[I].MergeWithoutStructEvidence;
+      }
+      if (!Item.Failure && !Item.HasStructEvidence &&
+          !HasMemberAllowedWithoutEvidence) {
+        // Missing evidence is not a conflict. Keep this slot out of the plan,
+        // while allowing other slots of the same function to run atomically.
+        Item.SkipReason = "missing-struct-evidence";
+      }
+      for (std::size_t I = 0; !Item.Failure && I < Item.Roots.size(); ++I) {
+        for (std::size_t J = I + 1; J < Item.Roots.size(); ++J) {
+          if (auto Conflict = CG.explainStructFieldSliceCompatibilityFailure(
+                  Item.Roots[I].Type, Item.Roots[J].Type,
+                  /*RequireEvidence=*/false)) {
+            Item.Failure = *Conflict;
+            break;
+          }
+        }
+      }
+      if (Item.Failure && !PlanFailure) {
+        PlanFailure = *Item.Failure;
+      }
+      Prepared.push_back(std::move(Item));
+    }
+
+    // A value can legitimately be both a formal argument and a return operand.
+    // Only report a preexisting alias when two distinct pre-transaction nodes
+    // already resolve to the same root; the transaction cannot undo that merge.
+    for (std::size_t I = 0; !PlanFailure && I < Prepared.size(); ++I) {
+      for (std::size_t J = I + 1; J < Prepared.size(); ++J) {
+        if (Prepared[I].Group->Slots == Prepared[J].Group->Slots) {
+          continue;
+        }
+        auto HasMergedAlias = [](SimpleType Actual, SimpleType Formal) {
+          if (!Actual || !Formal || Actual.get() == Formal.get()) {
+            return false;
+          }
+          return binarysub::resolve_variable(Actual).get() ==
+                 binarysub::resolve_variable(Formal).get();
+        };
+        for (const auto &LeftEntry : Prepared[I].Group->Entries) {
+          for (const auto &RightEntry : Prepared[J].Group->Entries) {
+            if (!HasMergedAlias(LeftEntry.Actual, RightEntry.Formal) &&
+                !HasMergedAlias(RightEntry.Actual, LeftEntry.Formal)) {
+              continue;
+            }
+            PlanFailure = "preexisting-alias slots=" +
+                          formatStringSet(Prepared[I].Group->Slots) + "," +
+                          formatStringSet(Prepared[J].Group->Slots);
+            FailureDecision = "preexisting-alias";
+            break;
+          }
+          if (PlanFailure) {
+            break;
+          }
+        }
+      }
+    }
+
+    auto RecordDecisions = [&](llvm::StringRef Decision,
+                               llvm::StringRef Reason,
+                               std::size_t TouchedNodes,
+                               const std::vector<std::string> &MergeAttempts) {
+      for (auto &Item : Prepared) {
+        std::vector<std::string> Roots = Item.RootSnapshots;
+        for (std::size_t I = 0; I < Roots.size(); ++I) {
+          Roots[I] += " action=" + Item.RootActions[I];
+        }
+        std::string ItemDecision = Decision.str();
+        std::string ItemReason = Reason.str();
+        std::size_t ItemTouchedNodes = TouchedNodes;
+        std::vector<std::string> ItemMergeAttempts = MergeAttempts;
+        if (Item.SkipReason &&
+            (Decision == "committed" || Decision == "rolled-back")) {
+          ItemDecision = "precheck-skipped";
+          ItemReason = *Item.SkipReason;
+          ItemTouchedNodes = 0;
+          ItemMergeAttempts.clear();
+        }
+        CG.CallSlotMergeDecisions.push_back(
+            ConstraintsGenerator::CallSlotMergeDecision{
+                .TransactionId = TransactionId,
+                .Target = TargetName,
+                .Policy = formatStringSet(Item.Group->Policies),
+                .Decision = std::move(ItemDecision),
+                .Reason = std::move(ItemReason),
+                .Formal = Item.FormalSnapshot,
+                .TouchedNodes = ItemTouchedNodes,
+                .Entries = Item.EntrySnapshots,
+                .Roots = std::move(Roots),
+                .RecursiveMerges = std::move(ItemMergeAttempts)});
       }
     };
-    AddRoot(Formal, /*MergeWithoutStructEvidence=*/true);
-    for (const auto &Entry : Group.Entries) {
-      AddRoot(Entry.Actual, !Entry.RequireStructEvidence);
-    }
 
-    std::vector<std::string> EntrySnapshots;
-    EntrySnapshots.reserve(Group.Entries.size());
-    for (const auto &Entry : Group.Entries) {
-      EntrySnapshots.push_back(
-          Entry.Detail + " actual=" +
-          formatCallSlotRootSnapshot(CG, Entry.Actual) +
-          " require_struct_evidence=" +
-          (Entry.RequireStructEvidence ? "true" : "false"));
-    }
-    std::vector<std::string> RootSnapshots;
-    RootSnapshots.reserve(Roots.size());
-    for (const auto &Root : Roots) {
-      RootSnapshots.push_back(formatCallSlotRootSnapshot(CG, Root.Type));
-    }
-    const std::string FormalSnapshot =
-        formatCallSlotRootSnapshot(CG, Formal);
-
-    std::optional<std::string> Failure;
-    if (FormalVar == nullptr) {
-      Failure = "non-variable-formal";
-    } else {
-      for (const auto &Root : Roots) {
-        auto *Var = Root.Type->getAsVariableState();
-        if (Var == nullptr) {
-          Failure = "non-variable-member";
-          break;
-        }
-        if (Var->level != FormalVar->level || Var->size != FormalVar->size) {
-          Failure = "level-size-mismatch";
-          break;
-        }
+    if (PlanFailure) {
+      for (auto &Item : Prepared) {
+        std::fill(Item.RootActions.begin(), Item.RootActions.end(), "skipped");
       }
-    }
-
-    bool HasStructEvidence =
-        std::any_of(Roots.begin(), Roots.end(), [&](const auto &Root) {
-          return CG.hasStructPointerEvidence(Root.Type);
-        });
-    bool HasMemberAllowedWithoutEvidence = false;
-    for (std::size_t I = 1; I < Roots.size(); ++I) {
-      HasMemberAllowedWithoutEvidence |=
-          Roots[I].MergeWithoutStructEvidence;
-    }
-    if (!Failure && !HasStructEvidence &&
-        !HasMemberAllowedWithoutEvidence) {
-      Failure = "missing-struct-evidence";
-    }
-
-    for (std::size_t I = 0; !Failure && I < Roots.size(); ++I) {
-      for (std::size_t J = I + 1; J < Roots.size(); ++J) {
-        if (auto Conflict = CG.explainStructFieldSliceCompatibilityFailure(
-                Roots[I].Type, Roots[J].Type, /*RequireEvidence=*/false)) {
-          Failure = *Conflict;
-          break;
-        }
-      }
-    }
-
-    if (Failure) {
-      for (auto &Root : RootSnapshots) {
-        Root += " action=skipped";
-      }
-      CG.CallSlotMergeDecisions.push_back(
-          ConstraintsGenerator::CallSlotMergeDecision{
-              .Policy = Policy.str(),
-              .Decision = "skipped",
-              .Reason = *Failure,
-              .Formal = FormalSnapshot,
-              .Entries = std::move(EntrySnapshots),
-              .Roots = std::move(RootSnapshots)});
-      CG.emitTypeRecoveryTrace(
-          "[merge-policy:" + Policy.str() + ":group-skip] reason=" +
-          *Failure + " formal=" + formatSimpleTypeForTrace(Formal) +
-          " detail=" + GroupDetail);
+      RecordDecisions(FailureDecision, *PlanFailure, 0, {});
+      CG.emitTypeRecoveryTrace("[call-merge-tx:skip] id=" +
+                               std::to_string(TransactionId) + " target=" +
+                               TargetName + " reason=" + *PlanFailure);
       continue;
     }
 
-    std::size_t GroupMerged = 0;
-    std::size_t SkippedForEvidence = 0;
-    if (!RootSnapshots.empty()) {
-      RootSnapshots[0] += " action=formal-anchor";
+    for (auto &Item : Prepared) {
+      if (Item.SkipReason) {
+        std::fill(Item.RootActions.begin(), Item.RootActions.end(),
+                  "skipped-missing-struct-evidence");
+      }
     }
-    for (std::size_t I = 1; I < Roots.size(); ++I) {
-      if (!HasStructEvidence && !Roots[I].MergeWithoutStructEvidence) {
-        RootSnapshots[I] +=
-            " action=skipped reason=missing-struct-evidence";
-        ++SkippedForEvidence;
+
+    PendingCallMergeEffects Effects;
+    auto QueuePNDiffUnify = [&](const SimpleType &Lhs, const SimpleType &Rhs) {
+      if (!CG.EnablePNDiffTypeVariableClosureUnification || !Lhs || !Rhs ||
+          !Lhs->isVariableState() || !Rhs->isVariableState()) {
+        return;
+      }
+      auto CollectValues = [&](const SimpleType &Ty) {
+        std::vector<ExtValuePtr> Values;
+        auto It = CG.V2N.rev().find(Ty);
+        if (It != CG.V2N.rev().end()) {
+          Values.assign(It->second.begin(), It->second.end());
+        }
+        return Values;
+      };
+      auto LeftValues = CollectValues(Lhs);
+      auto RightValues = CollectValues(Rhs);
+      if (LeftValues.empty() || RightValues.empty()) {
+        return;
+      }
+      Effects.PNDiffUnifies.push_back(PendingPNDiffUnify{
+          .Lhs = Lhs,
+          .Rhs = Rhs,
+          .LeftValues = std::move(LeftValues),
+          .RightValues = std::move(RightValues)});
+    };
+    const std::size_t EvalCheckpoint =
+        CG.MergeEval ? CG.MergeEval->badUnionCheckpoint() : 0;
+    binarysub::SimpleTypeTransaction Transaction;
+    CG.emitTypeRecoveryTrace("[call-merge-tx:begin] id=" +
+                             std::to_string(TransactionId) + " target=" +
+                             TargetName);
+
+    // The active explicit pair lets a return operand that is literally another
+    // formal slot merge as requested. If an earlier operation in this same
+    // transaction redirects that operand to the other formal, the raw root no
+    // longer matches and the cross-slot validator still rejects it.
+    SimpleType ActiveExplicitFrom = nullptr;
+    SimpleType ActiveExplicitInto = nullptr;
+
+    // These sets never resolve their members again. They describe only the
+    // roots which belonged to one prepared slot at transaction start, so a
+    // merge performed by the transaction cannot manufacture a new exception.
+    std::vector<std::set<const binarysub::TypeNode *>> PreparedGroupRoots;
+    PreparedGroupRoots.reserve(Prepared.size());
+    for (const auto &Item : Prepared) {
+      auto &Roots = PreparedGroupRoots.emplace_back();
+      for (const auto &Root : Item.Roots) {
+        Roots.insert(Root.Type.get());
+      }
+    }
+
+    auto FormalLabelsForRoot = [&](SimpleType Ty) {
+      std::set<std::string> Labels;
+      Ty = binarysub::resolve_variable(Ty);
+      for (const auto &FormalLabel : FormalSlotLabels) {
+        auto Formal = binarysub::resolve_variable(FormalLabel.Formal);
+        if (Formal && Formal.get() == Ty.get()) {
+          Labels.insert(FormalLabel.Label);
+        }
+      }
+      return Labels;
+    };
+
+    auto SharePreparedGroup = [&](const SimpleType &From,
+                                  const SimpleType &Into) {
+      return std::any_of(PreparedGroupRoots.begin(), PreparedGroupRoots.end(),
+                         [&](const auto &Roots) {
+                           return Roots.count(From.get()) != 0 &&
+                                  Roots.count(Into.get()) != 0;
+                         });
+    };
+
+    auto ValidateMerge = [&](const binarysub::MergeEvent &Event)
+        -> binarysub::expected<void, binarysub::Error> {
+      auto From = binarysub::resolve_variable(Event.from);
+      auto Into = binarysub::resolve_variable(Event.into);
+      auto FromLabels = FormalLabelsForRoot(From);
+      auto IntoLabels = FormalLabelsForRoot(Into);
+      std::string Attempt =
+          std::string(binarysub::merge_reason_name(Event.reason)) +
+          " from=" + formatCallSlotRootSnapshot(CG, From) +
+          " into=" + formatCallSlotRootSnapshot(CG, Into);
+      Effects.MergeAttempts.push_back(Attempt);
+      QueuePNDiffUnify(Event.from, Event.into);
+
+      bool SharesSlot = false;
+      for (const auto &Label : FromLabels) {
+        SharesSlot |= IntoLabels.count(Label) != 0;
+      }
+      bool IsUnchangedPlannedExplicit =
+          Event.reason == binarysub::MergeReason::Explicit &&
+          ActiveExplicitFrom && ActiveExplicitInto &&
+          Event.from.get() == ActiveExplicitFrom.get() &&
+          Event.into.get() == ActiveExplicitInto.get();
+      bool IsPreparedGroupMerge = SharePreparedGroup(Event.from, Event.into);
+      if (!IsUnchangedPlannedExplicit && !IsPreparedGroupMerge &&
+          !FromLabels.empty() && !IntoLabels.empty() && !SharesSlot) {
+        return binarysub::unexpected<binarysub::Error>(binarysub::Error::make(
+            "recursive merge crosses formal slots: from=" +
+            formatStringSet(FromLabels) + " into=" +
+            formatStringSet(IntoLabels)));
+      }
+      if (auto Conflict = CG.explainStructFieldSliceCompatibilityFailure(
+              From, Into, /*RequireEvidence=*/false)) {
+        return binarysub::unexpected<binarysub::Error>(binarysub::Error::make(
+            "recursive layout conflict: " + *Conflict));
+      }
+      return binarysub::expected<void, binarysub::Error>{};
+    };
+
+    std::optional<std::string> RuntimeFailure;
+    std::size_t PlanMerged = 0;
+    for (auto &Item : Prepared) {
+      if (Item.SkipReason) {
         continue;
       }
-      auto From = binarysub::resolve_variable(Roots[I].Type);
-      auto Into = binarysub::resolve_variable(Formal);
-      if (!From || !Into || From.get() == Into.get()) {
-        RootSnapshots[I] += " action=already-merged";
-        continue;
+      auto Formal = binarysub::resolve_variable(Item.Group->Formal);
+      std::string GroupDetail =
+          "target=" + TargetName + " slots=" +
+          formatStringSet(Item.Group->Slots) +
+          " members=" + std::to_string(Item.Group->Entries.size());
+      for (std::size_t I = 1; I < Item.Roots.size(); ++I) {
+        if (!Item.HasStructEvidence &&
+            !Item.Roots[I].MergeWithoutStructEvidence) {
+          Item.RootActions[I] = "skipped-missing-struct-evidence";
+          continue;
+        }
+        auto From = binarysub::resolve_variable(Item.Roots[I].Type);
+        auto Into = binarysub::resolve_variable(Formal);
+        if (!From || !Into || From.get() == Into.get()) {
+          Item.RootActions[I] = "already-merged";
+          continue;
+        }
+
+        ActiveExplicitFrom =
+            From.get() == Item.Roots[I].Type.get() ? From : nullptr;
+        ActiveExplicitInto = ActiveExplicitFrom ? Into : nullptr;
+
+        PendingCallPolicyMerge Pending{
+            .Policy = formatStringSet(Item.Group->Policies),
+            .From = From,
+            .Into = Into,
+            .Detail = GroupDetail};
+        for (const auto &Ent : CG.V2N.rev()) {
+          if (binarysub::resolve_variable(Ent.first).get() == From.get()) {
+            Pending.MovedValues.insert(Pending.MovedValues.end(),
+                                       Ent.second.begin(), Ent.second.end());
+          }
+        }
+
+        binarysub::ConstraintContext Context;
+        CG.configureConstraintContext(Context);
+        Context.validateVariableMerge = ValidateMerge;
+        Context.rejectShallowMergeConflict = true;
+        auto Result = binarysub::merge_variable_into(
+            From, Into,
+            [&](const SimpleType &Lhs, const SimpleType &Rhs) {
+              QueuePNDiffUnify(Lhs, Rhs);
+              Effects.ConstraintPairs.emplace_back(Lhs, Rhs);
+            },
+            &Context);
+        ActiveExplicitFrom = nullptr;
+        ActiveExplicitInto = nullptr;
+        if (!Result) {
+          RuntimeFailure = Result.error().msg;
+          break;
+        }
+        Effects.PolicyMerges.push_back(std::move(Pending));
+        Item.RootActions[I] = "merged-into-formal";
+        ++PlanMerged;
       }
-      if (!CG.tryMergeVariablesForPolicy(Policy, From, Into, GroupDetail)) {
-        llvm::report_fatal_error(
-            llvm::Twine("prechecked call-slot group merge failed for ") +
-            Policy);
+      if (RuntimeFailure) {
+        break;
       }
-      ++Merged;
-      ++GroupMerged;
-      RootSnapshots[I] += " action=merged-into-formal";
     }
-    std::string Decision = "already-merged";
-    std::string Reason = "all-members-share-formal-root";
-    if (SkippedForEvidence != 0) {
-      Decision = GroupMerged == 0 ? "skipped" : "partial";
-      Reason = "members-missing-struct-evidence";
-    } else if (GroupMerged != 0) {
-      Decision = "merged";
-      Reason = "compatible-layouts";
+
+    if (RuntimeFailure) {
+      Transaction.rollback();
+      if (CG.MergeEval) {
+        CG.MergeEval->rollbackBadUnions(EvalCheckpoint);
+      }
+      for (auto &Item : Prepared) {
+        // This slot never participated in the transaction. Keep its action
+        // consistent with the per-slot precheck-skipped decision below.
+        if (Item.SkipReason) {
+          continue;
+        }
+        for (auto &Action : Item.RootActions) {
+          if (Action == "pending" || Action == "merged-into-formal" ||
+              Action == "already-merged" || Action == "formal-anchor") {
+            Action = "rolled-back";
+          }
+        }
+      }
+      RecordDecisions("rolled-back", *RuntimeFailure,
+                      Transaction.touchedNodeCount(), Effects.MergeAttempts);
+      CG.emitTypeRecoveryTrace("[call-merge-tx:rollback] id=" +
+                               std::to_string(TransactionId) + " target=" +
+                               TargetName + " touched=" +
+                               std::to_string(Transaction.touchedNodeCount()) +
+                               " reason=" + *RuntimeFailure);
+      continue;
     }
-    CG.CallSlotMergeDecisions.push_back(
-        ConstraintsGenerator::CallSlotMergeDecision{
-            .Policy = Policy.str(),
-            .Decision = std::move(Decision),
-            .Reason = std::move(Reason),
-            .Formal = FormalSnapshot,
-            .Entries = std::move(EntrySnapshots),
-            .Roots = std::move(RootSnapshots)});
+
+    Transaction.commit();
+    for (const auto &Pair : Effects.ConstraintPairs) {
+      CG.observeOldMemoryTypeEdge(Pair.first, Pair.second);
+    }
+    for (const auto &Pending : Effects.PNDiffUnifies) {
+      CG.unifyPNDiffValueGroups(Pending.LeftValues, Pending.RightValues,
+                               Pending.Lhs, Pending.Rhs);
+    }
+    for (const auto &Pending : Effects.PolicyMerges) {
+      CG.emitMergeTrace(Pending.Policy, Pending.From, Pending.Into,
+                        Pending.MovedValues);
+      if (CG.MergeEval) {
+        CG.MergeEval->observeValueMapMerge(Pending.From, Pending.Into,
+                                           Pending.MovedValues);
+      }
+      CG.emitTypeRecoveryTrace("[merge-policy:" + Pending.Policy +
+                               "] from=" +
+                               binarysub::debug_string(Pending.From) +
+                               " into=" +
+                               binarysub::debug_string(Pending.Into) +
+                               " detail=" + Pending.Detail);
+    }
+
+    // V2N is intentionally unchanged during speculation. Move every old key to
+    // its final root only after PNDiff has consumed the original node identities.
+    std::vector<std::pair<SimpleType, SimpleType>> V2NMerges;
+    for (const auto &Ent : CG.V2N.rev()) {
+      auto FinalRoot = binarysub::resolve_variable(Ent.first);
+      if (FinalRoot && FinalRoot.get() != Ent.first.get()) {
+        V2NMerges.push_back({Ent.first, FinalRoot});
+      }
+    }
+    for (const auto &[From, Into] : V2NMerges) {
+      CG.V2N.merge(From, Into);
+    }
+    for (const auto &Pending : Effects.PolicyMerges) {
+      auto FinalRoot = binarysub::resolve_variable(Pending.Into);
+      auto Followups =
+          CG.collectStructPtrFieldFollowupMergeCandidatesForMergedOwner(
+              FinalRoot);
+      CG.StructFieldFollowupMergeCandidates.insert(
+          CG.StructFieldFollowupMergeCandidates.end(), Followups.begin(),
+          Followups.end());
+    }
+
+    for (auto &Item : Prepared) {
+      for (auto &Action : Item.RootActions) {
+        if (Action == "pending") {
+          Action = "already-merged";
+        }
+      }
+    }
+    RecordDecisions("committed", "compatible-layouts",
+                    Transaction.touchedNodeCount(), Effects.MergeAttempts);
+    CG.emitTypeRecoveryTrace("[call-merge-tx:commit] id=" +
+                             std::to_string(TransactionId) + " target=" +
+                             TargetName + " touched=" +
+                             std::to_string(Transaction.touchedNodeCount()));
+    TotalMerged += PlanMerged;
   }
-  return Merged;
+  return TotalMerged;
 }
 
 static std::string formatReturnValueMergeCandidateDetail(
@@ -3843,34 +4343,65 @@ void ConstraintsGenerator::applyDeferredCallConstraints() {
   DeferredCallConstraints.clear();
 }
 
-std::size_t ConstraintsGenerator::applyReturnValueMergePolicy() {
-  std::vector<CallSlotMergeEntry> Entries;
-  Entries.reserve(ReturnValueMergeCandidates.size());
-  for (const auto &Candidate : ReturnValueMergeCandidates) {
+static void appendReturnValueMergeEntries(
+    std::vector<CallSlotMergeEntry> &Entries,
+    const std::vector<ConstraintsGenerator::ReturnValueMergeCandidate>
+        &Candidates) {
+  Entries.reserve(Entries.size() + Candidates.size());
+  for (const auto &Candidate : Candidates) {
+    auto *Target = Candidate.Target;
+    if (Target == nullptr && Candidate.Return != nullptr) {
+      Target = Candidate.Return->getFunction();
+    }
     Entries.push_back(CallSlotMergeEntry{
+        .Target = Target,
+        .Slot = "ret",
+        .Policy = "return-slot-group",
         .Actual = Candidate.Operand,
         .Formal = Candidate.FunctionReturn,
         .Detail = formatReturnValueMergeCandidateDetail(Candidate),
         .RequireStructEvidence = Candidate.Call != nullptr});
   }
-  ReturnValueMergeCandidates.clear();
-  return applyGroupedCallSlotMergePolicy(*this, "return-slot-group",
-                                         std::move(Entries));
 }
 
-std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
-  std::vector<CallSlotMergeEntry> Entries;
-  Entries.reserve(CallArgStructPtrMergeCandidates.size());
-  for (const auto &Candidate : CallArgStructPtrMergeCandidates) {
+static void appendCallArgMergeEntries(
+    std::vector<CallSlotMergeEntry> &Entries,
+    const std::vector<ConstraintsGenerator::CallArgStructPtrMergeCandidate>
+        &Candidates) {
+  Entries.reserve(Entries.size() + Candidates.size());
+  for (const auto &Candidate : Candidates) {
     Entries.push_back(CallSlotMergeEntry{
+        .Target = Candidate.Target,
+        .Slot = "arg" + std::to_string(Candidate.ArgIndex),
+        .Policy = "call-arg-slot-group",
         .Actual = Candidate.ActualArg,
         .Formal = Candidate.FormalArg,
         .Detail = formatCallArgStructPtrMergeCandidateDetail(Candidate),
         .RequireStructEvidence = true});
   }
+}
+
+std::size_t ConstraintsGenerator::applyCallInterfaceMergePolicy() {
+  std::vector<CallSlotMergeEntry> Entries;
+  appendReturnValueMergeEntries(Entries, ReturnValueMergeCandidates);
+  appendCallArgMergeEntries(Entries, CallArgStructPtrMergeCandidates);
+  ReturnValueMergeCandidates.clear();
   CallArgStructPtrMergeCandidates.clear();
-  return applyGroupedCallSlotMergePolicy(*this, "call-arg-slot-group",
-                                         std::move(Entries));
+  return applyTransactionalCallSlotMergePolicy(*this, std::move(Entries));
+}
+
+std::size_t ConstraintsGenerator::applyReturnValueMergePolicy() {
+  std::vector<CallSlotMergeEntry> Entries;
+  appendReturnValueMergeEntries(Entries, ReturnValueMergeCandidates);
+  ReturnValueMergeCandidates.clear();
+  return applyTransactionalCallSlotMergePolicy(*this, std::move(Entries));
+}
+
+std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
+  std::vector<CallSlotMergeEntry> Entries;
+  appendCallArgMergeEntries(Entries, CallArgStructPtrMergeCandidates);
+  CallArgStructPtrMergeCandidates.clear();
+  return applyTransactionalCallSlotMergePolicy(*this, std::move(Entries));
 }
 
 std::vector<ConstraintsGenerator::StructPtrSlotMergeCandidate>
@@ -4734,8 +5265,8 @@ void MLsubRecovery::markBuiltinPolymorphicBufferFunctions(llvm::Module &M) {
       continue;
     }
 
-    // These APIs copy bytes between caller-owned buffers. A single declaration
-    // node would otherwise force unrelated buffers from different callsites to
+    // These APIs operate on caller-owned buffers or generic object contexts. A
+    // single declaration node would otherwise force unrelated callsites to
     // share one formal argument type.
     F.setMetadata(KIND_MLSUB_POLYMORPHIC_FUNCTION,
                   llvm::MDNode::get(F.getContext(), {}));
@@ -4756,7 +5287,7 @@ void MLsubRecovery::markBuiltinPolymorphicBufferFunctions(llvm::Module &M) {
       return;
     }
 
-    Out << "# Builtin buffer functions marked polymorphic before SCC "
+    Out << "# Builtin generic functions marked polymorphic before SCC "
            "partitioning\n";
     if (Rows.empty()) {
       Out << "No builtin polymorphic buffer functions detected.\n";
@@ -5192,18 +5723,12 @@ void MLsubRecovery::bottomUpPhase() {
     }
     Data.Generator->applyDeferredCallConstraints();
     auto PostSummaryMerged =
-        Data.Generator->applyCallArgStructPtrMergePolicy();
+        Data.Generator->applyCallInterfaceMergePolicy();
     if (PostSummaryMerged != 0) {
       llvm::errs()
-          << "Info: post-summary call arg/formal struct pointer merge policy "
+          << "Info: post-summary transactional call interface merge policy "
              "merged "
           << PostSummaryMerged << " pair(s)\n";
-    }
-    auto PostSummaryReturnMerged = Data.Generator->applyReturnValueMergePolicy();
-    if (PostSummaryReturnMerged != 0) {
-      llvm::errs()
-          << "Info: post-summary return value merge policy merged "
-          << PostSummaryReturnMerged << " pair(s)\n";
     }
     auto PostSummaryFieldFollowupMerged =
         Data.Generator->applyStructPtrFieldFollowupMergePolicy();
@@ -5861,6 +6386,17 @@ void ConstraintsGenerator::maybeUnifyPNDiffTypeVariablePair(
   auto LeftValues = gatherMappedValues(Lhs);
   auto RightValues = gatherMappedValues(Rhs);
   if (LeftValues.empty() || RightValues.empty()) {
+    return;
+  }
+
+  unifyPNDiffValueGroups(LeftValues, RightValues, Lhs, Rhs);
+}
+
+void ConstraintsGenerator::unifyPNDiffValueGroups(
+    llvm::ArrayRef<ExtValuePtr> LeftValues,
+    llvm::ArrayRef<ExtValuePtr> RightValues, const SimpleType &Lhs,
+    const SimpleType &Rhs) {
+  if (!EnablePNDiffTypeVariableClosureUnification) {
     return;
   }
 

@@ -7,6 +7,7 @@
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -32,6 +33,12 @@ public:
                             llvm::ArrayRef<ExtValuePtr> MovedValues);
   void observeVariableMerged(const binarysub::MergeEvent &Event);
   void observeAddSubtype();
+
+  // Variable-merge evaluation needs the graph state at each individual merge.
+  // A speculative call-interface transaction therefore records immediately and
+  // truncates back to this checkpoint if the graph transaction rolls back.
+  std::size_t badUnionCheckpoint() const;
+  void rollbackBadUnions(std::size_t Checkpoint);
 
   void finish(const AllGraphs &AG);
 

@@ -1,4 +1,5 @@
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
+#include "TypeRecovery/mlsub/Metadata.h"
 #include "binarysub/binarysub.h"
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -23,8 +24,7 @@ makeMLsubGeneratorForFunctionArgs(llvm::LLVMContext &Ctx,
                                   llvm::Argument *&Arg1) {
   M = std::make_unique<llvm::Module>("mlsub-test", Ctx);
   auto *I32 = llvm::Type::getInt32Ty(Ctx);
-  auto *FTy = llvm::FunctionType::get(llvm::Type::getVoidTy(Ctx), {I32, I32},
-                                      false);
+  auto *FTy = llvm::FunctionType::get(I32, {I32, I32}, false);
   auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "f",
                                    M.get());
   auto It = F->arg_begin();
@@ -128,7 +128,7 @@ TEST(MLsub, CallArgSlotConflictSkipsEveryMember) {
   EXPECT_TRUE(CG.CallArgStructPtrMergeCandidates.empty());
   ASSERT_EQ(CG.CallSlotMergeDecisions.size(), 1U);
   EXPECT_EQ(CG.CallSlotMergeDecisions[0].Policy, "call-arg-slot-group");
-  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "skipped");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "precheck-skipped");
   EXPECT_NE(CG.CallSlotMergeDecisions[0].Reason.find("overlap-conflict"),
             std::string::npos);
   EXPECT_EQ(CG.CallSlotMergeDecisions[0].Entries.size(), 2U);
@@ -167,11 +167,52 @@ TEST(MLsub, ReturnSlotMergesEveryCompatibleMember) {
   EXPECT_TRUE(CG.ReturnValueMergeCandidates.empty());
   ASSERT_EQ(CG.CallSlotMergeDecisions.size(), 1U);
   EXPECT_EQ(CG.CallSlotMergeDecisions[0].Policy, "return-slot-group");
-  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "merged");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "committed");
   EXPECT_EQ(CG.CallSlotMergeDecisions[0].Reason, "compatible-layouts");
   EXPECT_EQ(CG.CallSlotMergeDecisions[0].Entries.size(), 2U);
 
   binarysub::release_type_graph(Formal);
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, ReturnOperandMayBeTheSameNodeAsAFormalArgument) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+  auto *Target = Arg0->getParent();
+
+  auto ArgFormal = CG.createNode(Arg0);
+  auto ReturnFormal = CG.createNode(notdec::ReturnValue{Target});
+  auto ArgActual = CG.createNode(Arg1);
+  addStructLayout(CG, ArgFormal, {{4, 4}});
+  addStructLayout(CG, ArgActual, {{8, 4}});
+
+  // Returning an argument reuses the exact formal node. This is normal
+  // dataflow, not an alias produced by an earlier failed merge.
+  CG.ReturnValueMergeCandidates.push_back(
+      {.Target = Target,
+       .Operand = ArgFormal,
+       .FunctionReturn = ReturnFormal});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.Target = Target,
+       .ArgIndex = 0,
+       .ActualArg = ArgActual,
+       .FormalArg = ArgFormal});
+
+  EXPECT_EQ(CG.applyCallInterfaceMergePolicy(), 2U);
+  EXPECT_EQ(binarysub::resolve_variable(ArgFormal).get(),
+            binarysub::resolve_variable(ReturnFormal).get());
+  EXPECT_EQ(binarysub::resolve_variable(ArgActual).get(),
+            binarysub::resolve_variable(ReturnFormal).get());
+  EXPECT_EQ(&CG.getPNINode(Arg0),
+            &CG.getPNINode(notdec::ReturnValue{Target}));
+  EXPECT_EQ(&CG.getPNINode(Arg0), &CG.getPNINode(Arg1));
+  ASSERT_EQ(CG.CallSlotMergeDecisions.size(), 2U);
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "committed");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[1].Decision, "committed");
+
   CG.releaseBinarysubState();
 }
 
@@ -223,7 +264,7 @@ TEST(MLsub, CallArgSlotWithoutStructEvidenceRecordsSkippedDecision) {
   EXPECT_NE(binarysub::resolve_variable(Formal).get(),
             binarysub::resolve_variable(Actual).get());
   ASSERT_EQ(CG.CallSlotMergeDecisions.size(), 1U);
-  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "skipped");
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].Decision, "precheck-skipped");
   EXPECT_EQ(CG.CallSlotMergeDecisions[0].Reason,
             "missing-struct-evidence");
   ASSERT_EQ(CG.CallSlotMergeDecisions[0].Roots.size(), 2U);
@@ -253,7 +294,7 @@ TEST(MLsub, DifferentFormalSlotsRemainIndependent) {
   CG.CallArgStructPtrMergeCandidates.push_back(
       {.ArgIndex = 0, .ActualArg = FirstActual, .FormalArg = FirstFormal});
   CG.CallArgStructPtrMergeCandidates.push_back(
-      {.ArgIndex = 0, .ActualArg = SecondActual, .FormalArg = SecondFormal});
+      {.ArgIndex = 1, .ActualArg = SecondActual, .FormalArg = SecondFormal});
 
   EXPECT_EQ(CG.applyCallArgStructPtrMergePolicy(), 2U);
   EXPECT_EQ(binarysub::resolve_variable(FirstFormal).get(),
@@ -266,6 +307,194 @@ TEST(MLsub, DifferentFormalSlotsRemainIndependent) {
   binarysub::release_type_graph(FirstFormal);
   binarysub::release_type_graph(SecondFormal);
   CG.releaseBinarysubState();
+}
+
+TEST(MLsub, RecursiveCrossFormalMergeRollsBackWholeFunction) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+  auto *Target = Arg0->getParent();
+
+  auto Formal0 = CG.createNode(Arg0);
+  auto Formal1 = CG.createNode(Arg1);
+  auto Actual0 = binarysub::make_variable(0, 32);
+  auto Actual1 = binarysub::make_variable(0, 32);
+  auto SkippedFormal = binarysub::make_variable(0, 32);
+  auto SkippedActual = binarysub::make_variable(0, 32);
+  addStructLayout(CG, Formal0, {{4, 4}});
+  addStructLayout(CG, Actual0, {{8, 4}});
+  addStructLayout(CG, Formal1, {{12, 4}});
+  addStructLayout(CG, Actual1, {{16, 4}});
+
+  // This old edge is harmless until Actual0 is merged into Formal0. Rewriting
+  // it then creates Formal0 <: Formal1 and invokes the same-function hook.
+  CG.addSubtype(Actual0, Formal1);
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.Target = Target,
+       .ArgIndex = 0,
+       .ActualArg = Actual0,
+       .FormalArg = Formal0});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.Target = Target,
+       .ArgIndex = 1,
+       .ActualArg = Actual1,
+       .FormalArg = Formal1});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.Target = Target,
+       .ArgIndex = 2,
+       .ActualArg = SkippedActual,
+       .FormalArg = SkippedFormal});
+
+  EXPECT_NE(&CG.getPNINode(Arg0), &CG.getPNINode(Arg1));
+  EXPECT_EQ(CG.applyCallInterfaceMergePolicy(), 0U);
+  EXPECT_EQ(binarysub::resolve_variable(Formal0).get(), Formal0.get());
+  EXPECT_EQ(binarysub::resolve_variable(Formal1).get(), Formal1.get());
+  EXPECT_EQ(binarysub::resolve_variable(Actual0).get(), Actual0.get());
+  EXPECT_EQ(binarysub::resolve_variable(Actual1).get(), Actual1.get());
+  EXPECT_NE(&CG.getPNINode(Arg0), &CG.getPNINode(Arg1));
+
+  ASSERT_EQ(CG.CallSlotMergeDecisions.size(), 3U);
+  EXPECT_EQ(CG.CallSlotMergeDecisions[0].TransactionId,
+            CG.CallSlotMergeDecisions[1].TransactionId);
+  EXPECT_EQ(CG.CallSlotMergeDecisions[1].TransactionId,
+            CG.CallSlotMergeDecisions[2].TransactionId);
+  for (std::size_t I = 0; I < 2; ++I) {
+    const auto &Decision = CG.CallSlotMergeDecisions[I];
+    EXPECT_EQ(Decision.Target, "f");
+    EXPECT_EQ(Decision.Decision, "rolled-back");
+    EXPECT_NE(Decision.Reason.find("crosses formal slots"), std::string::npos);
+    EXPECT_GT(Decision.TouchedNodes, 0U);
+    EXPECT_FALSE(Decision.RecursiveMerges.empty());
+  }
+  const auto &Skipped = CG.CallSlotMergeDecisions[2];
+  EXPECT_EQ(Skipped.Target, "f");
+  EXPECT_EQ(Skipped.Decision, "precheck-skipped");
+  EXPECT_EQ(Skipped.Reason, "missing-struct-evidence");
+  EXPECT_EQ(Skipped.TouchedNodes, 0U);
+  EXPECT_TRUE(Skipped.RecursiveMerges.empty());
+  for (const auto &Root : Skipped.Roots) {
+    EXPECT_NE(Root.find("action=skipped-missing-struct-evidence"),
+              std::string::npos);
+  }
+
+  binarysub::release_type_graph(Actual0);
+  binarysub::release_type_graph(Actual1);
+  binarysub::release_type_graph(SkippedFormal);
+  binarysub::release_type_graph(SkippedActual);
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, RecursiveMergeKeepsFormalLabelsFromOtherTargets) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("cross-target-call-merge-test", Ctx);
+  auto *PtrTy = llvm::PointerType::getUnqual(Ctx);
+  auto *FTy = llvm::FunctionType::get(llvm::Type::getVoidTy(Ctx),
+                                      {PtrTy, PtrTy}, false);
+  auto *Source = llvm::Function::Create(
+      FTy, llvm::Function::ExternalLinkage, "source", M.get());
+  auto *Target = llvm::Function::Create(
+      FTy, llvm::Function::ExternalLinkage, "target", M.get());
+  auto SourceIt = Source->arg_begin();
+  auto *SourceArg0 = &*SourceIt++;
+  auto *SourceArg1 = &*SourceIt++;
+
+  static std::set<llvm::Function *> SCCs;
+  SCCs.clear();
+  SCCs.insert(Source);
+  SCCs.insert(Target);
+  notdec::mlsub::ConstraintsGenerator CG(
+      "cross-target-call-merge-test", 32, SCCs,
+      binarysub::make_variable(0, 32));
+
+  auto SourceFormal0 = CG.createNode(SourceArg0);
+  auto SourceFormal1 = CG.createNode(SourceArg1);
+  auto TargetFormal = binarysub::make_variable(0, 32);
+  auto EvidenceActual = binarysub::make_variable(0, 32);
+
+  // This edge is initially harmless because neither source formal has struct
+  // evidence. The target transaction first moves SourceFormal1 (and its LLVM
+  // owner handle) into TargetFormal, then adds EvidenceActual's record bound.
+  // The same-function hook consequently tries to merge the target root into
+  // SourceFormal0. Global formal labels must reject and roll back that step.
+  CG.addSubtype(SourceFormal1, SourceFormal0);
+  addStructLayout(CG, EvidenceActual, {{8, 4}});
+
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.Target = Source,
+       .ArgIndex = 0,
+       .ActualArg = SourceFormal0,
+       .FormalArg = SourceFormal0});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.Target = Source,
+       .ArgIndex = 1,
+       .ActualArg = SourceFormal1,
+       .FormalArg = SourceFormal1});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.Target = Target,
+       .ArgIndex = 0,
+       .ActualArg = SourceFormal1,
+       .FormalArg = TargetFormal});
+  CG.CallArgStructPtrMergeCandidates.push_back(
+      {.Target = Target,
+       .ArgIndex = 0,
+       .ActualArg = EvidenceActual,
+       .FormalArg = TargetFormal});
+
+  EXPECT_EQ(CG.applyCallInterfaceMergePolicy(), 0U);
+  EXPECT_EQ(binarysub::resolve_variable(SourceFormal0).get(),
+            SourceFormal0.get());
+  EXPECT_EQ(binarysub::resolve_variable(SourceFormal1).get(),
+            SourceFormal1.get());
+  EXPECT_EQ(binarysub::resolve_variable(TargetFormal).get(),
+            TargetFormal.get());
+  EXPECT_EQ(binarysub::resolve_variable(EvidenceActual).get(),
+            EvidenceActual.get());
+
+  auto TargetDecision = std::find_if(
+      CG.CallSlotMergeDecisions.begin(), CG.CallSlotMergeDecisions.end(),
+      [](const auto &Decision) { return Decision.Target == "target"; });
+  ASSERT_NE(TargetDecision, CG.CallSlotMergeDecisions.end());
+  EXPECT_EQ(TargetDecision->Decision, "rolled-back");
+  EXPECT_NE(TargetDecision->Reason.find("source::arg1"), std::string::npos);
+  EXPECT_NE(TargetDecision->Reason.find("source::arg0"), std::string::npos);
+
+  binarysub::release_type_graph(TargetFormal);
+  binarysub::release_type_graph(EvidenceActual);
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, GenericFFmpegContextAPIsArePolymorphic) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("generic-ffmpeg-api-test", Ctx);
+  auto *PtrTy = llvm::PointerType::getUnqual(Ctx);
+  auto *VoidTy = llvm::Type::getVoidTy(Ctx);
+  auto *I32Ty = llvm::Type::getInt32Ty(Ctx);
+  auto *LogTy = llvm::FunctionType::get(
+      VoidTy, {PtrTy, I32Ty, PtrTy}, /*isVarArg=*/true);
+  auto *SetTy = llvm::FunctionType::get(
+      I32Ty, {PtrTy, PtrTy, PtrTy, I32Ty}, /*isVarArg=*/false);
+  auto *Log = llvm::Function::Create(
+      LogTy, llvm::Function::ExternalLinkage, "av_log", M.get());
+  auto *OptSet = llvm::Function::Create(
+      SetTy, llvm::Function::ExternalLinkage, "av_opt_set", M.get());
+  auto *Ordinary = llvm::Function::Create(
+      SetTy, llvm::Function::ExternalLinkage, "ordinary", M.get());
+
+  llvm::ModuleAnalysisManager MAM;
+  notdec::mlsub::MLsubRecovery Recovery(*M, MAM);
+  Recovery.markBuiltinPolymorphicBufferFunctions(*M);
+
+  EXPECT_NE(Log->getMetadata(
+                notdec::mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION),
+            nullptr);
+  EXPECT_NE(OptSet->getMetadata(
+                notdec::mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION),
+            nullptr);
+  EXPECT_EQ(Ordinary->getMetadata(
+                notdec::mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION),
+            nullptr);
 }
 
 TEST(MLsub, PhiNodeCanBeUsedByAnEarlierListedBlock) {

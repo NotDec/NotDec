@@ -207,14 +207,19 @@ struct ConstraintsGenerator {
   // Roots retain the layouts and per-root actions used for the all-or-nothing
   // check.  MLsubRecovery writes these records only when a workdir is enabled.
   struct CallSlotMergeDecision {
+    std::uint64_t TransactionId = 0;
+    std::string Target;
     std::string Policy;
     std::string Decision;
     std::string Reason;
     std::string Formal;
+    std::size_t TouchedNodes = 0;
     std::vector<std::string> Entries;
     std::vector<std::string> Roots;
+    std::vector<std::string> RecursiveMerges;
   };
   std::vector<CallSlotMergeDecision> CallSlotMergeDecisions;
+  std::uint64_t NextCallMergeTransactionId = 1;
 
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
@@ -222,6 +227,7 @@ struct ConstraintsGenerator {
   bool tryMergeVariablesForPolicy(llvm::StringRef Policy, SimpleType From,
                                   SimpleType Into,
                                   const std::string &TraceDetail);
+  std::size_t applyCallInterfaceMergePolicy();
   std::size_t applyReturnValueMergePolicy();
   const ExtValuePtr *getVariableExternalValue(SimpleType Ty) const;
   void attachExternalValueHandle(SimpleType Ty, const ExtValuePtr &Val);
@@ -359,13 +365,8 @@ struct ConstraintsGenerator {
       flushPointerDerivedTypeConstraints();
     }
     {
-      auto Merged = applyReturnValueMergePolicy();
-      llvm::errs() << "Info: return value merge policy merged " << Merged
-                   << " pair(s)\n";
-    }
-    {
-      auto Merged = applyCallArgStructPtrMergePolicy();
-      llvm::errs() << "Info: call arg/formal struct pointer merge policy merged "
+      auto Merged = applyCallInterfaceMergePolicy();
+      llvm::errs() << "Info: transactional call interface merge policy merged "
                    << Merged << " pair(s)\n";
     }
     if (EnableStructPtrLoadStoreMerge) {
@@ -395,6 +396,9 @@ struct ConstraintsGenerator {
   void addAggregateReturnConstraints(llvm::Value *Agg, llvm::ReturnInst &Ret);
   void maybeUnifyPNDiffTypeVariablePair(const SimpleType &Lhs,
                                         const SimpleType &Rhs);
+  void unifyPNDiffValueGroups(llvm::ArrayRef<ExtValuePtr> LeftValues,
+                              llvm::ArrayRef<ExtValuePtr> RightValues,
+                              const SimpleType &Lhs, const SimpleType &Rhs);
   void observeOldMemoryTypeEdge(const SimpleType &Lhs, const SimpleType &Rhs);
   void emitMappingTrace(llvm::StringRef Event, ExtValuePtr Val,
                         const SimpleType &Ty);
@@ -655,9 +659,9 @@ class MLsubRecovery {
   // Generic allocator wrappers must become SCC summary boundaries before
   // prepareSCC(), otherwise callers and the wrapper body share one monotype SCC.
   std::set<llvm::Function *> DetectedMallocWrappers;
-  // C/POSIX buffer APIs reuse one declaration for many unrelated caller buffers.
-  // Mark them polymorphic before SCC partitioning so each callsite gets fresh
-  // argument variables instead of sharing one `read::arg1`-style node.
+  // Buffer and generic-context APIs reuse one declaration for unrelated caller
+  // types. Mark them polymorphic before SCC partitioning so each callsite gets
+  // fresh argument variables instead of sharing one `read::arg1`-style node.
   std::set<llvm::Function *> DetectedPolymorphicBufferFunctions;
   llvm::json::Value SummaryOverrideDoc = nullptr;
   std::set<llvm::Function *> SummaryOverrideFuncs;
