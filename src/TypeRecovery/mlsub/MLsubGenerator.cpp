@@ -88,6 +88,8 @@ constexpr llvm::StringLiteral kPolymorphicBufferFunctionsFile =
     "PolymorphicBufferFunctions.txt";
 constexpr llvm::StringLiteral kCallSlotMergeDecisionsFile =
     "CallSlotMergeDecisions.txt";
+constexpr llvm::StringLiteral kLocalSubtypeMergeStatsFile =
+    "LocalSubtypeMergeStats.txt";
 
 bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
   static constexpr llvm::StringLiteral Names[] = {
@@ -2060,6 +2062,118 @@ void writeCallSlotMergeDecisions(llvm::StringRef Path, const AllGraphs &AG) {
   }
 }
 
+llvm::StringRef
+localSubtypeMergeModeName(ConstraintsGenerator::LocalSubtypeMergeMode Mode) {
+  switch (Mode) {
+  case ConstraintsGenerator::LocalSubtypeMergeMode::StructPointer:
+    return "struct-pointer";
+  case ConstraintsGenerator::LocalSubtypeMergeMode::Pointer:
+    return "pointer";
+  case ConstraintsGenerator::LocalSubtypeMergeMode::AllLocal:
+    return "all-local";
+  }
+  llvm_unreachable("unknown local subtype merge mode");
+}
+
+void writeLocalSubtypeMergeStats(llvm::StringRef Path, const AllGraphs &AG) {
+  std::error_code EC;
+  llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Error printing to " << Path << ", " << EC.message()
+                 << "\n";
+    return;
+  }
+
+  std::size_t Checks = 0;
+  std::size_t BasicCandidates = 0;
+  std::size_t SameFunctionCandidates = 0;
+  std::size_t PointerCandidates = 0;
+  std::size_t Accepted = 0;
+  std::size_t ReplaceBoundMergeEvents = 0;
+  std::size_t AuxiliaryMergeEvents = 0;
+  std::size_t EarlyCallMerged = 0;
+  std::map<std::string, std::size_t> SubtypeFailures;
+  for (const auto &Data : AG.AllSCCs) {
+    if (Data.Generator == nullptr) {
+      continue;
+    }
+    Checks += Data.Generator->LocalSubtypeHookChecks;
+    BasicCandidates += Data.Generator->LocalSubtypeBasicCandidates;
+    SameFunctionCandidates +=
+        Data.Generator->LocalSubtypeSameFunctionCandidates;
+    PointerCandidates += Data.Generator->LocalSubtypePointerCandidates;
+    Accepted += Data.Generator->LocalSubtypeAccepted;
+    ReplaceBoundMergeEvents +=
+        Data.Generator->LocalSubtypeReplaceBoundMergeEvents;
+    AuxiliaryMergeEvents += Data.Generator->LocalSubtypeAuxiliaryMergeEvents;
+    EarlyCallMerged += Data.Generator->EarlyCallInterfaceMerged;
+    for (const auto &[Reason, Count] :
+         Data.Generator->SubtypeConstraintFailures) {
+      SubtypeFailures[Reason] += Count;
+    }
+  }
+
+  Out << "# Local subtype merge experiment\n\n";
+  Out << "hook-checks: " << Checks << "\n";
+  Out << "same-level-size-candidates: " << BasicCandidates << "\n";
+  Out << "same-function-candidates: " << SameFunctionCandidates << "\n";
+  Out << "pointer-candidates: " << PointerCandidates << "\n";
+  Out << "accepted: " << Accepted << "\n";
+  Out << "policy-replace-bound-merge-events: " << ReplaceBoundMergeEvents
+      << "\n";
+  Out << "policy-auxiliary-merge-events: " << AuxiliaryMergeEvents << "\n";
+  Out << "policy-merge-events: "
+      << ReplaceBoundMergeEvents + AuxiliaryMergeEvents << "\n\n";
+  Out << "early-call-interface-merged: " << EarlyCallMerged << "\n\n";
+  Out << "subtype-constraint-failures: ";
+  std::size_t TotalSubtypeFailures = 0;
+  for (const auto &[_, Count] : SubtypeFailures) {
+    TotalSubtypeFailures += Count;
+  }
+  Out << TotalSubtypeFailures << "\n";
+  for (const auto &[Reason, Count] : SubtypeFailures) {
+    Out << "  - " << Count << " x " << Reason << "\n";
+  }
+  Out << "\n";
+
+  for (const auto &Data : AG.AllSCCs) {
+    if (Data.Generator == nullptr) {
+      continue;
+    }
+    const auto &G = *Data.Generator;
+    Out << "## SCC: " << Data.SCCName << "\n";
+    Out << "mode: " << localSubtypeMergeModeName(G.LocalSubtypeMode) << "\n";
+    Out << "hook-checks: " << G.LocalSubtypeHookChecks << "\n";
+    Out << "same-level-size-candidates: " << G.LocalSubtypeBasicCandidates
+        << "\n";
+    Out << "same-function-candidates: " << G.LocalSubtypeSameFunctionCandidates
+        << "\n";
+    Out << "pointer-candidates: " << G.LocalSubtypePointerCandidates << "\n";
+    Out << "accepted: " << G.LocalSubtypeAccepted << "\n";
+    Out << "policy-replace-bound-merge-events: "
+        << G.LocalSubtypeReplaceBoundMergeEvents << "\n";
+    Out << "policy-auxiliary-merge-events: "
+        << G.LocalSubtypeAuxiliaryMergeEvents << "\n";
+    Out << "policy-merge-events: "
+        << G.LocalSubtypeReplaceBoundMergeEvents +
+               G.LocalSubtypeAuxiliaryMergeEvents
+        << "\n\n";
+    Out << "early-call-interface-enabled: "
+        << (G.EnableEarlyCallInterfaceMerge ? "true" : "false") << "\n";
+    Out << "early-call-interface-merged: " << G.EarlyCallInterfaceMerged
+        << "\n\n";
+    std::size_t SCCSubtypeFailures = 0;
+    for (const auto &[_, Count] : G.SubtypeConstraintFailures) {
+      SCCSubtypeFailures += Count;
+    }
+    Out << "subtype-constraint-failures: " << SCCSubtypeFailures << "\n";
+    for (const auto &[Reason, Count] : G.SubtypeConstraintFailures) {
+      Out << "  - " << Count << " x " << Reason << "\n";
+    }
+    Out << "\n";
+  }
+}
+
 std::string formatTypeBuilderRootLabel(ExtValuePtr Value) {
   return toStableString(Value);
 }
@@ -2865,12 +2979,16 @@ bool ConstraintsGenerator::configureConstraintContext(
       -> binarysub::expected<void, binarysub::Error> {
     return onVariableNonVarBoundAdded(Var, Bound, Polarity, EnqueueMerge);
   };
-  if (MergeEval) {
-    Context.onVariableMerged =
-        [Eval = MergeEval](const binarysub::MergeEvent &Event) {
-          Eval->observeVariableMerged(Event);
-        };
-  }
+  Context.onVariableMerged = [this](const binarysub::MergeEvent &Event) {
+    if (Event.reason == binarysub::MergeReason::PolicyReplaceBound) {
+      ++LocalSubtypeReplaceBoundMergeEvents;
+    } else if (Event.reason == binarysub::MergeReason::PolicyAuxiliary) {
+      ++LocalSubtypeAuxiliaryMergeEvents;
+    }
+    if (MergeEval) {
+      MergeEval->observeVariableMerged(Event);
+    }
+  };
   return HasHook;
 }
 
@@ -3019,6 +3137,7 @@ ConstraintsGenerator::getVariableOwningFunction(SimpleType Ty) const {
 binarysub::expected<bool, binarysub::Error>
 ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
     SimpleType LHS, SimpleType RHS) const {
+  ++LocalSubtypeHookChecks;
   LHS = binarysub::resolve_variable(LHS);
   RHS = binarysub::resolve_variable(RHS);
   auto *LHSVar = LHS ? LHS->getAsVariableState() : nullptr;
@@ -3026,7 +3145,11 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
   if (LHSVar == nullptr || RHSVar == nullptr || LHS.get() == RHS.get()) {
     return false;
   }
-  if (LHSVar->level != RHSVar->level || LHSVar->size != RHSVar->size ||
+  if (LHSVar->level != RHSVar->level || LHSVar->size != RHSVar->size) {
+    return false;
+  }
+  ++LocalSubtypeBasicCandidates;
+  if (LocalSubtypeMode != LocalSubtypeMergeMode::AllLocal &&
       LHSVar->size != PointerSize) {
     return false;
   }
@@ -3038,12 +3161,23 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
   if (LHSFunc == nullptr || RHSFunc == nullptr || LHSFunc != RHSFunc) {
     return false;
   }
+  ++LocalSubtypeSameFunctionCandidates;
+  if (LocalSubtypeMode == LocalSubtypeMergeMode::AllLocal) {
+    ++LocalSubtypeAccepted;
+    return true;
+  }
   if (!hasPointerLikeEvidence(LHS) || !hasPointerLikeEvidence(RHS)) {
     return false;
+  }
+  ++LocalSubtypePointerCandidates;
+  if (LocalSubtypeMode == LocalSubtypeMergeMode::Pointer) {
+    ++LocalSubtypeAccepted;
+    return true;
   }
   if (!hasStructPointerEvidence(LHS) && !hasStructPointerEvidence(RHS)) {
     return false;
   }
+  ++LocalSubtypeAccepted;
   return true;
 }
 
@@ -4381,19 +4515,36 @@ void ConstraintsGenerator::deferCallConstraint(
 }
 
 void ConstraintsGenerator::applyDeferredCallConstraints() {
-  // Do not interleave subtype generation with candidate recording.  A subtype
-  // added for a later call can add layout evidence to a slot shared with an
-  // earlier call, so every merge policy must see the completed call graph.
-  for (const auto &Deferred : DeferredCallConstraints) {
-    addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
-  }
-  for (const auto &Deferred : DeferredCallConstraints) {
-    recordCallArgStructPtrMergeCandidates(
-        *Deferred.Call, *Deferred.Target, Deferred.ActualFunc,
-        Deferred.FormalFunc);
-    recordCallReturnStructPtrMergeCandidates(
-        *Deferred.Call, *Deferred.Target, Deferred.ActualFunc,
-        Deferred.FormalFunc);
+  if (EnableEarlyCallInterfaceMerge) {
+    // This is intentionally opt-in. It measures how much work can be avoided by
+    // eliminating actual/formal edges before propagation, while exposing the
+    // risk that later call edges would have supplied new conflict evidence.
+    for (const auto &Deferred : DeferredCallConstraints) {
+      recordCallArgStructPtrMergeCandidates(*Deferred.Call, *Deferred.Target,
+                                            Deferred.ActualFunc,
+                                            Deferred.FormalFunc);
+      recordCallReturnStructPtrMergeCandidates(*Deferred.Call, *Deferred.Target,
+                                               Deferred.ActualFunc,
+                                               Deferred.FormalFunc);
+    }
+    EarlyCallInterfaceMerged += applyCallInterfaceMergePolicy();
+    for (const auto &Deferred : DeferredCallConstraints) {
+      addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
+    }
+  } else {
+    // Keep the production ordering exact: every call subtype is added before
+    // any candidate is recorded, so the policy sees the completed call graph.
+    for (const auto &Deferred : DeferredCallConstraints) {
+      addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
+    }
+    for (const auto &Deferred : DeferredCallConstraints) {
+      recordCallArgStructPtrMergeCandidates(*Deferred.Call, *Deferred.Target,
+                                            Deferred.ActualFunc,
+                                            Deferred.FormalFunc);
+      recordCallReturnStructPtrMergeCandidates(*Deferred.Call, *Deferred.Target,
+                                               Deferred.ActualFunc,
+                                               Deferred.FormalFunc);
+    }
   }
   DeferredCallConstraints.clear();
 }
@@ -5186,6 +5337,8 @@ void MLsubRecovery::run() {
   if (WorkDir) {
     writeCallSlotMergeDecisions(
         join(*WorkDir, kCallSlotMergeDecisionsFile.str()), AG);
+    writeLocalSubtypeMergeStats(
+        join(*WorkDir, kLocalSubtypeMergeStatsFile.str()), AG);
   }
 
   if (WorkDir && ResultVal == nullptr) {

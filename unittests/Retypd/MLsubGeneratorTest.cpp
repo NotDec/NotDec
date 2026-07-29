@@ -311,6 +311,99 @@ TEST(MLsub, StructPointerEvidenceRequiresDirectNonzeroFieldAccess) {
   CG.releaseBinarysubState();
 }
 
+TEST(MLsub, PointerLocalSubtypeModeDoesNotRequireStructEvidence) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+
+  auto LHS = CG.createNode(Arg0);
+  auto RHS = CG.createNode(Arg1);
+  auto LHSField = binarysub::make_variable(0, 32);
+  auto RHSField = binarysub::make_variable(0, 32);
+  CG.addSubtype(LHS, binarysub::make_record({{"4", LHSField}}));
+  CG.addSubtype(RHS, binarysub::make_record({{"8", RHSField}}));
+
+  CG.LocalSubtypeMode =
+      notdec::mlsub::ConstraintsGenerator::LocalSubtypeMergeMode::StructPointer;
+  auto DefaultDecision = CG.shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
+  ASSERT_TRUE(DefaultDecision);
+  EXPECT_FALSE(DefaultDecision.value());
+
+  CG.LocalSubtypeMode =
+      notdec::mlsub::ConstraintsGenerator::LocalSubtypeMergeMode::Pointer;
+  auto PointerDecision = CG.shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
+  ASSERT_TRUE(PointerDecision);
+  EXPECT_TRUE(PointerDecision.value());
+
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, AllLocalSubtypeModeStillRequiresSameFunction) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+  auto LHS = CG.createNode(Arg0);
+  auto RHS = CG.createNode(Arg1);
+
+  CG.LocalSubtypeMode =
+      notdec::mlsub::ConstraintsGenerator::LocalSubtypeMergeMode::AllLocal;
+  auto SameFunction = CG.shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
+  ASSERT_TRUE(SameFunction);
+  EXPECT_TRUE(SameFunction.value());
+
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *OtherTy = llvm::FunctionType::get(I32, {I32}, false);
+  auto *Other = llvm::Function::Create(OtherTy, llvm::Function::ExternalLinkage,
+                                       "other", M.get());
+  auto OtherArg = CG.createNode(Other->getArg(0));
+  auto CrossFunction =
+      CG.shouldMergeSameFunctionStructPtrSubtype(LHS, OtherArg);
+  ASSERT_TRUE(CrossFunction);
+  EXPECT_FALSE(CrossFunction.value());
+
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, EarlyCallInterfaceModeMergesBeforeDeferredSubtype) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+  auto *Target = Arg0->getParent();
+
+  auto Formal = CG.createNode(Arg0);
+  auto Actual = CG.createNode(Arg1);
+  addStructLayout(CG, Formal, {{4, 4}});
+  addStructLayout(CG, Actual, {{8, 4}});
+  auto FormalFunc = binarysub::make_function({Formal}, nullptr);
+  auto ActualFunc = binarysub::make_function({Actual}, nullptr);
+
+  // A real CallBase is kept in the deferred record for diagnostics, but this
+  // test supplies the SimpleType call signature directly.
+  auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", Target);
+  llvm::IRBuilder<> Builder(Entry);
+  auto *Call = Builder.CreateCall(Target, {Arg0, Arg1});
+  Builder.CreateRet(Call);
+
+  CG.EnableEarlyCallInterfaceMerge = true;
+  CG.deferCallConstraint(*Call, *Target, FormalFunc, ActualFunc, FormalFunc);
+  CG.applyDeferredCallConstraints();
+
+  EXPECT_EQ(CG.EarlyCallInterfaceMerged, 1U);
+  EXPECT_EQ(binarysub::resolve_variable(Formal).get(),
+            binarysub::resolve_variable(Actual).get());
+  EXPECT_TRUE(CG.DeferredCallConstraints.empty());
+  EXPECT_TRUE(CG.CallArgStructPtrMergeCandidates.empty());
+  EXPECT_TRUE(CG.SubtypeConstraintFailures.empty());
+
+  CG.releaseBinarysubState();
+}
+
 TEST(MLsub, DifferentFormalSlotsRemainIndependent) {
   llvm::LLVMContext Ctx;
   std::unique_ptr<llvm::Module> M;

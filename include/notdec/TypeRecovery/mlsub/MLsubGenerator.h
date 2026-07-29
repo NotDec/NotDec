@@ -226,6 +226,29 @@ struct ConstraintsGenerator {
   std::vector<CallSlotMergeDecision> CallSlotMergeDecisions;
   std::uint64_t NextCallMergeTransactionId = 1;
 
+  // Diagnostic modes for testing whether local subtype edges can be replaced
+  // by merges before they grow large bound graphs.  The default keeps the
+  // current struct-pointer rule; broader modes are opt-in experiments because
+  // a merge cannot be split when later constraints reveal a conflict.
+  enum class LocalSubtypeMergeMode { StructPointer, Pointer, AllLocal };
+  LocalSubtypeMergeMode LocalSubtypeMode = LocalSubtypeMergeMode::StructPointer;
+  mutable std::size_t LocalSubtypeHookChecks = 0;
+  mutable std::size_t LocalSubtypeBasicCandidates = 0;
+  mutable std::size_t LocalSubtypeSameFunctionCandidates = 0;
+  mutable std::size_t LocalSubtypePointerCandidates = 0;
+  mutable std::size_t LocalSubtypeAccepted = 0;
+  std::size_t LocalSubtypeReplaceBoundMergeEvents = 0;
+  std::size_t LocalSubtypeAuxiliaryMergeEvents = 0;
+  // Experimental ordering: merge complete actual/formal slot groups before
+  // adding their call subtype edges. This can eliminate temporary edges, but
+  // the precheck only sees layout evidence available before those edges exist.
+  bool EnableEarlyCallInterfaceMerge = false;
+  std::size_t EarlyCallInterfaceMerged = 0;
+  // addSubtype historically treats a rejected constraint as local evidence it
+  // cannot add and continues. Count those failures so early-merge experiments
+  // cannot look successful merely because a later conflicting edge was lost.
+  std::map<std::string, std::size_t> SubtypeConstraintFailures;
+
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
   bool configureConstraintContext(binarysub::ConstraintContext &Context);
@@ -329,6 +352,19 @@ struct ConstraintsGenerator {
         llvm::errs() << "Warning: unknown NOTDEC_POINTER_ANALYSIS_MODE='"
                      << Mode << "', using original.\n";
       }
+    }
+    if (auto *Mode = std::getenv("NOTDEC_LOCAL_SUBTYPE_MERGE_MODE")) {
+      if (std::strcmp(Mode, "pointer") == 0) {
+        LocalSubtypeMode = LocalSubtypeMergeMode::Pointer;
+      } else if (std::strcmp(Mode, "all-local") == 0) {
+        LocalSubtypeMode = LocalSubtypeMergeMode::AllLocal;
+      } else if (std::strcmp(Mode, "struct-pointer") != 0) {
+        llvm::errs() << "Warning: unknown NOTDEC_LOCAL_SUBTYPE_MERGE_MODE='"
+                     << Mode << "', using struct-pointer.\n";
+      }
+    }
+    if (auto *Enabled = std::getenv("NOTDEC_EARLY_CALL_INTERFACE_MERGE")) {
+      EnableEarlyCallInterfaceMerge = std::strcmp(Enabled, "1") == 0;
     }
   }
 
@@ -452,12 +488,21 @@ struct ConstraintsGenerator {
     binarysub::ConstraintContext Context;
     binarysub::ConstraintContext *ContextPtr =
         configureConstraintContext(Context) ? &Context : nullptr;
-    binarysub::constrain(lhs, rhs, cache,
-                         [this](const SimpleType &Lhs, const SimpleType &Rhs) {
-                           maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
-                           observeOldMemoryTypeEdge(Lhs, Rhs);
-                         },
-                         ContextPtr);
+    auto Result = binarysub::constrain(
+        lhs, rhs, cache,
+        [this](const SimpleType &Lhs, const SimpleType &Rhs) {
+          maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
+          observeOldMemoryTypeEdge(Lhs, Rhs);
+        },
+        ContextPtr);
+    if (!Result) {
+      ++SubtypeConstraintFailures[Result.error().msg];
+      if (TraceStream != nullptr) {
+        emitTypeRecoveryTrace(
+            "[subtype:rejected] lhs=" + binarysub::debug_string(lhs) + " rhs=" +
+            binarysub::debug_string(rhs) + " reason=" + Result.error().msg);
+      }
+    }
   }
 
   SimpleType addVarSubtype(llvm::Value *Val, SimpleType dtv) {

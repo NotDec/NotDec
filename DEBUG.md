@@ -232,6 +232,32 @@
 恢复到事务开始前；`preexisting-alias` 表示污染发生在事务之前，本轮无法撤销，需要继续对照
 更早的 decision 或 `binarysub-trace.log`。
 
+### `LocalSubtypeMergeStats.txt`
+
+- 来源：同函数 subtype 合并 hook 和 deferred call subtype 处理流程
+- 生成条件：启用 `--gen-work-dir` 或 `--work-dir`
+- 作用：统计同层同位宽候选、同函数候选、pointer-like 候选、实际 policy merge，以及
+  `addSubtype()` 被 solver 拒绝的原因；用于判断“先加 subtype、后 merge”是否产生了明显的临时工作
+- `early-call-interface-merged`：在实验顺序下，加入调用 subtype 前已合并的 actual/formal 对数
+- `policy-replace-bound-merge-events`：首次处理 var-var subtype 时直接触发的合并数
+- `policy-auxiliary-merge-events`：后到结构体或 pointer bound 使旧 var-var 边满足策略后触发的合并数
+- 以上 event 表示 solver 已实际执行的 merge 工作，包含之后被整函数事务回退的尝试；最终代表节点变化
+  仍以 `merge-eval-summary.json` 为准
+- `subtype-constraint-failures`：`addSubtype()` 原本就会忽略并继续的 solver 拒绝；本文件只是把原因暴露出来，
+  不能把该数字当成实验模式新增的冲突
+
+下面的环境变量只用于性能和正确性 A/B，不改变默认策略：
+
+- `NOTDEC_LOCAL_SUBTYPE_MERGE_MODE=pointer`：同函数、同层、同位宽且两端 pointer-like 时允许 merge，
+  不再要求结构体字段访问证据
+- `NOTDEC_LOCAL_SUBTYPE_MERGE_MODE=all-local`：同函数、同层、同位宽的 var-var subtype 都允许 merge
+- `NOTDEC_EARLY_CALL_INTERFACE_MERGE=1`：先按整函数事务策略尝试 actual/formal 槽合并，再加入 deferred
+  call subtype
+
+默认 `NOTDEC_LOCAL_SUBTYPE_MERGE_MODE=struct-pointer`，并且先加入全部 call subtype，再执行事务合并。
+提前合并只能看到当时已有的布局证据，后到约束可能说明原合并不该发生；因此这些实验开关不能作为
+常规跑批配置。
+
 ### `PolymorphicBufferFunctions.txt`
 
 - 来源：类型恢复进入 SCC 划分前的内置多态 API 标记
