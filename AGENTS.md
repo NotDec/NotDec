@@ -348,6 +348,44 @@ canonicalize 默认已经并行，不需要再设置
 - `fragmentation.fragmented_nodes` / `fragmented_types`：同类型节点是否还分散。
 - `performance.wall_ms` / `peak_rss_mb`：类型恢复加评估链路的耗时和峰值内存。
 
+### 源码级 IR 合并评估的固定流程
+
+对新的源码级项目做类型合并评估时，按下面顺序处理：
+
+1. 先确认输入确实带有可用 DebugInfo，并记录源码版本、IR 路径、编译方式和 IR 哈希。运行结果还要用
+   LLVM 22 verifier 检查，不能只看 merge-eval 成功退出。
+2. 跑评估前先读源码和 IR，检查多态边界。重点包括 libc 的通用 allocator、deallocator、裸 buffer
+   读写/复制函数、回调的 `void *` context，以及项目内对这些函数的 wrapper。`malloc/calloc/realloc`
+   的纯返回转发 wrapper、`free` 的纯参数转发 wrapper 都应按调用点隔离；分配后立即初始化固定结构体的
+   factory 不是通用 malloc wrapper，不要标成多态。
+3. 网络程序额外检查 `read/write/recv/send` 及 wrapper，也检查 `recvfrom/recvmsg/accept/getsockname`、
+   `getpeername/getsockopt/setsockopt/ioctl` 这类布局由地址族、option 或 request 决定的内存参数。只有裸
+   buffer 或运行时决定布局的参数需要多态；固定读写某个明确结构体的业务函数不要因为调用了 socket API
+   就整体标成多态。
+4. 用 workdir 的 `MallocWrappers.txt`、`PolymorphicBufferFunctions.txt` 和源码互相核对。自动检测只能作为
+   提示：还要检查 wrapper 链、函数指针/间接调用、allocator/free 是否被改名，以及是否存在未覆盖的 raw
+   memory 输入。新增内置名单前要确认函数语义确实通用，避免丢掉固定类型 API 的跨调用约束。
+5. 完整评估固定使用 8 线程、`--tr-level=2`、`--merge-struct-ptr-load-store`、`--fast-work-dir` 和
+   `--merge-eval-dir`，并用 `/usr/bin/time -v` 记录 wall time 与峰值内存。每次使用新的 work/eval 目录，
+   避免追加旧文件。canonicalize 默认并行，不额外设置 parallel 环境变量。
+6. 结果先看 DebugInfo oracle coverage 是否足够，再看 `bad_unions`、`polluted_components` 和
+   `bad_unions.jsonl`。出现错误合并时结合 first witness、`CallSlotMergeDecisions.txt` 和源码定位第一条错误
+   边；wrong merge 解决后再看 fragmentation，不能用减少 fragmentation 换取错误合并。
+7. 如果完整运行太慢，或错误合并难以分析，就按调用图逐步增加函数，保留相关全局变量、声明和 DebugInfo，
+   找到首次出现耗时突增或同一条 bad union 的最小函数集合。小 IR 必须复现相同 strict 类型和 first
+   witness；在小 IR 上修复后，最后仍要回到完整项目复跑，确认错误消失且输出 IR、coverage 和性能没有
+   退化。
+
+典型命令：
+
+```bash
+NOTDEC_BINARYSUB_THREADS=8 /usr/bin/time -v ./build/bin/notdec \
+  input.ll --tr-level=2 --merge-struct-ptr-load-store \
+  -g --fast-work-dir --work-dir=/tmp/notdec-source-project-work \
+  --merge-eval-dir=/tmp/notdec-source-project-eval \
+  -o /tmp/notdec-source-project-out.ll
+```
+
 ## 9. 测试
 
 测试布局和 oracle 细节以 `test/README.md` 为准；这里仅保留当前最常用入口。
