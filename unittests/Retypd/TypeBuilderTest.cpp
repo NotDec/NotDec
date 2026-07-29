@@ -6,6 +6,16 @@
 #include <llvm/IR/Module.h>
 #include <memory>
 
+namespace {
+
+class ExposedTypeBuilder : public notdec::mlsub::TypeBuilder {
+public:
+  using notdec::mlsub::TypeBuilder::convertFieldType;
+  using notdec::mlsub::TypeBuilder::TypeBuilder;
+};
+
+} // namespace
+
 TEST(Retypd, TypeBuilderSemanticPrimitiveAliasTest) {
   static constexpr const char *Dot = R"dot(
       digraph win_uint32 {
@@ -131,6 +141,50 @@ TEST(Retypd, TypeBuilderTopFieldRecordLayoutTest) {
   ASSERT_NE(Decl->getFields()[0].Type, nullptr);
   EXPECT_TRUE(Decl->getFields()[0].Type->isTopType());
   EXPECT_EQ(Decl->getFields()[1].R.Start, 4);
+}
+
+TEST(Retypd, TypeBuilderDirectPrimitiveFieldFallsBackToFieldWidth) {
+  notdec::ast::HTypeContext HCtx;
+  notdec::mlsub::TypeBuilderContext TBParent(HCtx, 8);
+  ExposedTypeBuilder TB(TBParent);
+
+  auto *HTy =
+      TB.convertFieldType(binarysub::make_uprimitivetype("uint", 64), 1);
+
+  ASSERT_NE(HTy, nullptr);
+  ASSERT_TRUE(HTy->isTopType());
+  EXPECT_EQ(HTy->getAs<notdec::ast::TopType>()->getBitSize(), 8u);
+}
+
+TEST(Retypd, TypeBuilderDirectBottomFieldFallsBackToTop) {
+  notdec::ast::HTypeContext HCtx;
+  notdec::mlsub::TypeBuilderContext TBParent(HCtx, 8);
+  ExposedTypeBuilder TB(TBParent);
+
+  auto *HTy = TB.convertFieldType(binarysub::make_ubot(64), 2);
+
+  ASSERT_NE(HTy, nullptr);
+  ASSERT_TRUE(HTy->isTopType());
+  EXPECT_EQ(HTy->getAs<notdec::ast::TopType>()->getBitSize(), 16u);
+}
+
+TEST(Retypd, TypeBuilderFieldIntersectionIgnoresPrimitiveAddressEvidence) {
+  notdec::ast::HTypeContext HCtx;
+  notdec::mlsub::TypeBuilderContext TBParent(HCtx, 8);
+  ExposedTypeBuilder TB(TBParent);
+
+  auto Layout = binarysub::make_urecordtype({{"@0", binarysub::make_utop(8)}});
+  auto Mixed = binarysub::make_uinter(
+      binarysub::make_uprimitivetype("uint", 64), Layout);
+  auto *HTy = TB.convertFieldType(Mixed, 1);
+
+  ASSERT_NE(HTy, nullptr);
+  ASSERT_TRUE(HTy->isRecordType());
+  auto *Decl = HTy->getAsRecordDecl();
+  ASSERT_NE(Decl, nullptr);
+  ASSERT_EQ(Decl->getFields().size(), 1u);
+  EXPECT_TRUE(Decl->getFields().front().Type->isTopType());
+  EXPECT_FALSE(HTy->isSetInterType());
 }
 
 TEST(Retypd, TypeBuilderRecursiveRecordSetAnchorsPointeeRecord) {

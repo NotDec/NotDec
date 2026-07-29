@@ -49,14 +49,51 @@ wrong merge。产物在 `/tmp/notdec-source-vsftpd-final-20260729-MWInAh`。
 `/tmp/notdec-vsftpd-final-small-runs-20260729-PWLq7z`。这些组合只说明已覆盖接口没有发现错误合并；
 coverage 很低，不能代替完整项目结论。
 
-另一个 8 函数 secure-buffer 组合在 2.41 秒时稳定触发
-`external/binarysub/src/TypeBuilder.cpp:682` 的
-`Unexpected primitive UType as a direct field` 断言，峰值 RSS 约 768 MiB。多态标记后仍可复现，
-位置在 HType 转换，发生在 merge-eval 最终报告之前，因此它不是 bad union 证据。复现目录是
-`/tmp/notdec-vsftpd-final-small-runs-20260729-PWLq7z/secbuf`。
+另一个 8 函数 secure-buffer 组合最初在 2.41 秒时稳定触发
+`Unexpected primitive UType as a direct field`。原因是旧 buffer 从 `char **` load 后经
+`ptrtoint` 参与取模，新 buffer 又写回同一 slot；load/store closure 使新旧指针共享类型，最终形成
+`uint:64 & record`。其中 primitive 是地址数值用法，不是 dereference 后的字段布局。
+
+## 2026-07-29 字段混合交集修复
+
+修改文件和函数：
+
+- `external/binarysub/include/binarysub/TypeBuilder.h:48-52,122-124`
+  - `TypeBuilder` 增加字段 fallback warning 去重集合和输出函数声明。
+- `external/binarysub/src/TypeBuilder.cpp:487-508`
+  - `emitFieldFallbackWarning()` 按原因、UType 文本形状和字段宽度去重，warning 带 root 和递归路径。
+- `external/binarysub/src/TypeBuilder.cpp:676-776`
+  - `convertFieldType()` 处理 `UInter` 时，如果同时有 record/pointer/recursive/function 布局项和
+    primitive，只在字段转换中跳过 primitive。原始 SimpleType/UType 约束不变。
+  - 裸 primitive 或 bottom 不再断言，也不返回空指针或伪造 `void *`；改为 warning 后返回按
+    `FieldSizeBytes` 定宽的 `TopType`，保留字段范围。
+- `unittests/Retypd/TypeBuilderTest.cpp:9-17,146-188`
+  - 增加裸 primitive、裸 bottom 和 `primitive & record` 三个回归测试。
+
+验证结果：
+
+- `TypeBuilderTest`：9/9 通过。
+- `binarysub` 自测通过。
+- `llvm_ir` tr-level=2 suite 通过。
+- secure-buffer IR 完整跑通，耗时 0.97 秒，峰值 RSS 约 269 MiB；两个 SCC 各输出一次去重
+  warning，LLVM 22 verifier 通过。
+- secure-buffer merge-eval：`bad_unions=0`、`polluted_components=0`，但 typed coverage 是 0/85，
+  所以只能证明评估链路完成，不能作为类型合并质量样本。结果目录是
+  `/tmp/notdec-vsftpd-secbuf-fieldfix-final-20260729-KlPxkh`。
+- `sysy` suite 仍有 9 个匿名值编号 golden 差异，失败日志没有本次 TypeBuilder warning；单线程
+  canonicalize 结果相同。fortune suite 在类型推理前因 extra-constraints SHA 与当前 IR 不匹配退出。
+
+简评：
+
+- 实现效果：8/10。消除断言，同时只在字段视角丢弃地址的数字用法。
+- 复杂度成本：8/10。改动局限在 `convertFieldType()`，没有引入 optional 返回链。
+- 维护成本：8/10。warning 保留异常输入证据，规则和 value/member 视角边界一致。
+
+更好的长期方案是让 `ptrtoint` 的 PNDiff alias 和 MLsub 类型 alias 分开，但这会影响 EVM 的地址整数
+模型，不适合作为本次局部修复。
 
 ## 判断
 
-vsftpd 的首要问题是完整 level-0 大组在类型求解前半段长期单线程运行。当前小组合没有暴露 wrong
-merge；下一步若继续做，应先用 secure-buffer 小 IR 处理 HType 断言，再按函数数量扩大 IR，直到能生成
-第一份有代表性的 `merge-eval-summary.json`，然后才分析 bad union。
+secure-buffer 的 HType 断言已经解决。vsftpd 当前首要问题仍是完整 level-0 大组在跨 SCC 调用约束传播
+阶段长期单线程运行；下一步应给 deferred call constraint 增加分段计时和传播计数，再按函数数量扩大 IR，
+直到能生成第一份有代表性的 `merge-eval-summary.json`。
