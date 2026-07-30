@@ -17,10 +17,10 @@ vsftpd 的 `resolve_variable`、`onVariableNonVarBoundAdded` 和 `shouldMergeSam
 # 路线
 
 - 遍历 lower/upper bounds 时先检查原始节点是否为变量，只对变量邻居解析 root。
-- 每个代表变量记录已经处理过的证据等级：无、pointer-like、struct-pointer。只有等级上升时才重查邻居。
-- 节点 merge 会改变邻居集合，因此使合并两端的记录失效；事务执行期间不使用这项缓存，避免回退留下
-  超前状态。
-- 在 `LocalSubtypeMergeStats.txt` 记录回调、实际重查和过滤数量，并增加针对重复证据与结构体升级的测试。
+- 暂不维护三档证据状态。先用新加入 bound 的形状做 fast-fail：默认
+  `struct-pointer`/`pointer` 策略只有 function 或 memory bound 可能带来新的 pointer-like 证据，
+  primitive bound 不再重查邻居；`all-local` 实验模式保留旧行为。
+- `TryQueue()` 和 lower/upper 循环先过滤非变量邻居，避免无意义的 root 解析。
 
 # 风险和判断标准
 
@@ -42,3 +42,24 @@ vsftpd 的 `resolve_variable`、`onVariableNonVarBoundAdded` 和 `shouldMergeSam
 
 下一步先不引入三档状态表；比较是否可以仅根据新加入的 bound 做一次性证据判断，避免维护 merge/rollback
 失效逻辑。
+
+# 实现记录（第二步已完成）
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3185-3203`：在
+  `onVariableNonVarBoundAdded()` 入口增加 bound 形状 fast-fail。默认局部 subtype 策略遇到
+  primitive bound 直接返回；`all-local` 保持原有触发行为，避免改变该实验模式语义。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3208-3252`：保留第一步的 `TryQueue()`、lower/upper
+  非变量过滤。
+- `MLsubGeneratorTest` 17/17、binarysub 自测和 LLVM IR type-recovery suite 通过；ffplay 输出哈希
+  保持 `d3f53f7a4276366410c98d6b7008a41fcb5d52b8db7a9f3786e1527e331d257f`，本次约 6.15s，属于
+  正常波动。
+- vsftpd 固定 30s profile：`resolve_variable` 约从 35.97% 降到 19.13%，但
+  `onVariableNonVarBoundAdded` 及其 lambda 升到约 42.51% inclusive，总 cycles 仍只有约 0.6% 改善。
+  说明简单过滤有效但把成本转移到 hook 内部；下一步若继续优化，应直接减少重复邻居重查，不能只增加
+  更多入口判断。
+
+## 复杂度和维护成本评估
+
+- 实现复杂度：低，只增加常量时间的 bound 形状判断，不维护跨 merge/rollback 的缓存状态。
+- 理解成本：低，判断与现有 `hasPointerLikeEvidence()` 的证据定义一致。
+- 后期维护成本：低；`all-local` 的显式例外避免实验模式悄然改变。

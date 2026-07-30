@@ -3187,8 +3187,18 @@ ConstraintsGenerator::onVariableNonVarBoundAdded(
     const binarysub::EnqueueMergeFn &EnqueueMerge) const {
   Var = binarysub::resolve_variable(Var);
   auto *VarState = Var ? Var->getAsVariableState() : nullptr;
+  // A primitive bound cannot make a pointer-sized variable eligible for the
+  // pointer-based local merge policy. Function and memory bounds are the only
+  // non-variable shapes that can add pointer-like evidence, so repeated scalar
+  // bounds do not need to rescan existing variable neighbors.
+  const bool BoundCanAddPointerEvidence =
+      Bound != nullptr &&
+      (Bound->getAsTMemObject() != nullptr ||
+       Bound->getAsTFunction() != nullptr);
   if (VarState == nullptr || VarState->size != PointerSize ||
       Bound == nullptr || Bound->isVariableState() ||
+      (LocalSubtypeMode != LocalSubtypeMergeMode::AllLocal &&
+       !BoundCanAddPointerEvidence) ||
       !hasPointerLikeEvidence(Var)) {
     return binarysub::expected<void, binarysub::Error>{};
   }
