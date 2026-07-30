@@ -3198,6 +3198,12 @@ ConstraintsGenerator::onVariableNonVarBoundAdded(
   // follow-up is handled by the normal merge policy after a merge happens.
   auto TryQueue =
       [&](SimpleType Other) -> binarysub::expected<void, binarysub::Error> {
+    // The hook is called for a non-variable bound, but it scans both bound
+    // vectors. Reject those entries before root resolution; only variable
+    // neighbors can trigger the same-function merge policy.
+    if (!Other || !Other->isVariableState()) {
+      return binarysub::expected<void, binarysub::Error>{};
+    }
     Other = binarysub::resolve_variable(Other);
     auto *OtherState = Other ? Other->getAsVariableState() : nullptr;
     if (OtherState == nullptr || Other.get() == Var.get()) {
@@ -3218,11 +3224,17 @@ ConstraintsGenerator::onVariableNonVarBoundAdded(
   };
 
   for (const auto &Lower : VarState->lowerBounds) {
+    if (!Lower || !Lower->isVariableState()) {
+      continue;
+    }
     if (auto Result = TryQueue(Lower); !Result) {
       return Result;
     }
   }
   for (const auto &Upper : VarState->upperBounds) {
+    if (!Upper || !Upper->isVariableState()) {
+      continue;
+    }
     if (auto Result = TryQueue(Upper); !Result) {
       return Result;
     }
