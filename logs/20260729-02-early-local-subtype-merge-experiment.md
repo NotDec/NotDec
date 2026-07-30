@@ -130,3 +130,22 @@ cast/PHI/select 和结构体方向性数据流；正确标注 allocator、raw bu
 更好的方案是保留 subtype 语义，先找出重复 call edge 和传播量最大的 target/slot，再做去重、cache 或
 局部增量求解。若以后仍要提前 merge，需要保存缺证据的候选并在 bound 变化后重试；若还要处理已提交
 merge 的后到冲突，则必须引入更长生命周期的事务或可撤销 equality，复杂度明显更高。
+
+## 后续实验：`std::set` constraint worklist（未采用）
+
+临时将 `external/binarysub/src/binarysub-core.cpp` 中 `constrain_worklist_only()` 和 `constrain()`
+的 vector worklist 换成按 `TypeNode *` 排序的 `std::set`，用容器本身去掉尚未 pop 的重复约束对。
+没有使用 `TypeRef::operator<`，避免结构比较开销和不同节点被当成同一 key。
+
+ffplay 在 Debug + ASAN、8 线程下交错各跑两次：
+
+| worklist | wall | user CPU | 平均 RSS |
+| --- | --- | --- | ---: |
+| vector | 33.84s / 32.90s | 71.07s / 66.74s | 2566908 KiB |
+| `std::set` | 33.20s / 33.52s | 70.39s / 68.22s | 2585260 KiB |
+
+两者平均 wall 分别为 33.37s 和 33.36s，无可测改善；`std::set` 平均 user CPU 高约 0.6%，
+RSS 多约 18 MiB。两种输出的 SHA-256 均为
+`d3f53f7a4276366410c98d6b7008a41fcb5d52b8db7a9f3786e1527e331d257f`，`binarysub` 自测通过。
+这说明 ffplay 中 pending 重复很少，或者去重收益被红黑树分配和 `O(log n)` 操作抵消。实验代码已撤回，
+保留 vector 默认实现。
