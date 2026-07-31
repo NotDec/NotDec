@@ -263,8 +263,14 @@ struct ConstraintsGenerator {
   llvm::Function *getVariableOwningFunction(SimpleType Ty) const;
   binarysub::expected<bool, binarysub::Error>
   shouldMergeSameFunctionStructPtrSubtype(SimpleType LHS, SimpleType RHS) const;
+  binarysub::expected<void, binarysub::Error> queueLocalSubtypeMerges(
+      SimpleType Var, const binarysub::EnqueueMergeFn &EnqueueMerge) const;
   binarysub::expected<void, binarysub::Error> onVariableNonVarBoundAdded(
       SimpleType Var, SimpleType Bound, binarysub::BoundPolarity Polarity,
+      const binarysub::EnqueueMergeFn &EnqueueMerge) const;
+  binarysub::expected<void, binarysub::Error>
+  onVariableNestedBoundRewritten(
+      SimpleType User, SimpleType OldBound, SimpleType NewBound,
       const binarysub::EnqueueMergeFn &EnqueueMerge) const;
   void recordCallArgStructPtrMergeCandidate(llvm::CallBase &Call,
                                             llvm::Function &Target,
@@ -310,6 +316,11 @@ struct ConstraintsGenerator {
   std::optional<std::string>
   explainStructFieldSliceCompatibilityFailure(SimpleType LHS, SimpleType RHS,
                                               bool RequireEvidence) const;
+  bool hasStructPointerEvidenceInBound(SimpleType Bound) const;
+  bool hasPointerLikeEvidenceBeforeNonVarBound(
+      SimpleType Ty, binarysub::BoundPolarity Polarity) const;
+  bool hasStructPointerEvidenceBeforeNonVarBound(
+      SimpleType Ty, binarysub::BoundPolarity Polarity) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;
   bool hasPointerLikeEvidence(SimpleType Ty) const;
   std::size_t applyCallArgStructPtrMergePolicy();

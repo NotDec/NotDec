@@ -63,3 +63,40 @@ vsftpd 的 `resolve_variable`、`onVariableNonVarBoundAdded` 和 `shouldMergeSam
 - 实现复杂度：低，只增加常量时间的 bound 形状判断，不维护跨 merge/rollback 的缓存状态。
 - 理解成本：低，判断与现有 `hasPointerLikeEvidence()` 的证据定义一致。
 - 后期维护成本：低；`all-local` 的显式例外避免实验模式悄然改变。
+
+## 实现记录（第三步：只在证据升级时重查）
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3193-3251`：提取
+  `queueLocalSubtypeMerges()`，统一 lower/upper 邻居扫描，并在解析 root 前过滤非变量
+  bound。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:3269-3375`：新增
+  `hasPointerLikeEvidenceBeforeNonVarBound()` 和
+  `hasStructPointerEvidenceBeforeNonVarBound()`。`pointer` 模式只在 pointer evidence
+  首次出现时扫描，`struct-pointer` 模式在 pointer 或 struct evidence 首次出现/升级时
+  扫描；通过跳过刚追加的 bound 判断旧证据，不在节点上保存需要事务回退的状态。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:263-327`：声明扫描 helper、证据判断
+  helper 和嵌套 bound 回调。
+- `external/binarysub/include/binarysub/binarysub-core.h:546-560`、
+  `external/binarysub/src/binarysub-core.cpp:1290-1337,1551-1556`：增加
+  `onVariableNestedBoundRewritten` 回调。变量 merge 改写已有 record/function bound 后，
+  若新 bound 才出现 struct evidence，立即通知策略层；这样不会靠后续无关 bound 触发全量重查。
+- `unittests/Retypd/MLsubGeneratorTest.cpp` 和
+  `external/binarysub/src/binarysub-test.cpp:1268-1340`：覆盖重复 function bound 不重复
+  扫描，以及 nested record bound 改写能触发回调。
+
+验证：
+
+- `./build/bin/MLsubGeneratorTest`：18/18 通过。
+- `./build/binarysub`：全部自测通过。
+- `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure`：通过。
+- 使用 `build-relwithdebinfo-20260731/bin/notdec` 对完整 vsftpd 做固定 profile；本次约束生成
+  在约 12 秒完成，RelWithDebInfo 采样文件为
+  `/tmp/notdec-profiles-20260731/vsftpd-evidence-gate-flat-015135/perf.data`。
+  flat profile 的主要用户态热点是 `std::_Rb_tree_increment` 8.42%、`_int_malloc` 6.08%、
+  `malloc` 5.85%、`_int_free` 5.09% 和 binarysub 红黑树插入 3.45%；
+  `binarysub::resolve_variable` 约 0.84%，未出现 `__asan_*`。这表明重复 root 解析已不再是
+  当前主热点，后续应针对 bound/类型集合的红黑树访问和分配开销单独优化，而不是继续扩大
+  `onVariableNonVarBoundAdded()` 的入口判断。
+
+本步没有改变 subtype 边、节点合并条件或事务回退结果；新增回调只处理 merge 后已经存在的
+nested bound 中新出现的 evidence。

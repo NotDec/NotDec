@@ -2979,6 +2979,14 @@ bool ConstraintsGenerator::configureConstraintContext(
       -> binarysub::expected<void, binarysub::Error> {
     return onVariableNonVarBoundAdded(Var, Bound, Polarity, EnqueueMerge);
   };
+  Context.onVariableNestedBoundRewritten =
+      [this](const SimpleType &User, const SimpleType &OldBound,
+             const SimpleType &NewBound,
+             const binarysub::EnqueueMergeFn &EnqueueMerge)
+      -> binarysub::expected<void, binarysub::Error> {
+    return onVariableNestedBoundRewritten(User, OldBound, NewBound,
+                                          EnqueueMerge);
+  };
   Context.onVariableMerged = [this](const binarysub::MergeEvent &Event) {
     if (Event.reason == binarysub::MergeReason::PolicyReplaceBound) {
       ++LocalSubtypeReplaceBoundMergeEvents;
@@ -3182,30 +3190,17 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
 }
 
 binarysub::expected<void, binarysub::Error>
-ConstraintsGenerator::onVariableNonVarBoundAdded(
-    SimpleType Var, SimpleType Bound, binarysub::BoundPolarity,
-    const binarysub::EnqueueMergeFn &EnqueueMerge) const {
+ConstraintsGenerator::queueLocalSubtypeMerges(
+    SimpleType Var, const binarysub::EnqueueMergeFn &EnqueueMerge) const {
   Var = binarysub::resolve_variable(Var);
   auto *VarState = Var ? Var->getAsVariableState() : nullptr;
-  // A primitive bound cannot make a pointer-sized variable eligible for the
-  // pointer-based local merge policy. Function and memory bounds are the only
-  // non-variable shapes that can add pointer-like evidence, so repeated scalar
-  // bounds do not need to rescan existing variable neighbors.
-  const bool BoundCanAddPointerEvidence =
-      Bound != nullptr &&
-      (Bound->getAsTMemObject() != nullptr ||
-       Bound->getAsTFunction() != nullptr);
-  if (VarState == nullptr || VarState->size != PointerSize ||
-      Bound == nullptr || Bound->isVariableState() ||
-      (LocalSubtypeMode != LocalSubtypeMergeMode::AllLocal &&
-       !BoundCanAddPointerEvidence) ||
-      !hasPointerLikeEvidence(Var)) {
+  if (VarState == nullptr) {
     return binarysub::expected<void, binarysub::Error>{};
   }
 
-  // A node can get pointer/struct evidence after the variable-variable edge was
-  // already processed. Re-check only direct variable bounds here; recursive
-  // follow-up is handled by the normal merge policy after a merge happens.
+  // A node can get pointer/struct evidence after the variable-variable edge
+  // was already processed. Scan direct variable neighbors only when the
+  // caller has established that a relevant evidence transition occurred.
   auto TryQueue =
       [&](SimpleType Other) -> binarysub::expected<void, binarysub::Error> {
     // The hook is called for a non-variable bound, but it scans both bound
@@ -3250,6 +3245,151 @@ ConstraintsGenerator::onVariableNonVarBoundAdded(
     }
   }
   return binarysub::expected<void, binarysub::Error>{};
+}
+
+bool ConstraintsGenerator::hasStructPointerEvidenceInBound(
+    SimpleType Bound) const {
+  Bound = binarysub::resolve_variable(Bound);
+  auto *Mem = Bound ? Bound->getAsTMemObject() : nullptr;
+  if (Mem == nullptr) {
+    return false;
+  }
+  for (const auto &[FieldName, FieldTy] : Mem->fields) {
+    auto Offset = parseConstantFieldOffset(FieldName);
+    if (!Offset || *Offset < 4) {
+      continue;
+    }
+    if (collectMaxDirectFieldAccessSizeBytes(FieldTy).has_value()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ConstraintsGenerator::hasPointerLikeEvidenceBeforeNonVarBound(
+    SimpleType Ty, binarysub::BoundPolarity Polarity) const {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->size != PointerSize) {
+    return false;
+  }
+  if (const auto *Val = getVariableExternalValue(Ty)) {
+    if (hasTypedPointerExternalValue(*Val)) {
+      return true;
+    }
+  }
+
+  auto IsPointerLikeBound = [](SimpleType Bound) {
+    Bound = binarysub::resolve_variable(Bound);
+    return Bound && (Bound->getAsTMemObject() != nullptr ||
+                     Bound->getAsTFunction() != nullptr);
+  };
+  auto HasEvidence = [&](const std::vector<SimpleType> &Bounds,
+                         bool SkipLast) {
+    const auto Limit =
+        SkipLast && !Bounds.empty() ? Bounds.size() - 1 : Bounds.size();
+    for (std::size_t I = 0; I < Limit; ++I) {
+      if (IsPointerLikeBound(Bounds[I])) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return HasEvidence(Var->lowerBounds,
+                     Polarity == binarysub::BoundPolarity::Lower) ||
+         HasEvidence(Var->upperBounds,
+                     Polarity == binarysub::BoundPolarity::Upper);
+}
+
+bool ConstraintsGenerator::hasStructPointerEvidenceBeforeNonVarBound(
+    SimpleType Ty, binarysub::BoundPolarity Polarity) const {
+  Ty = binarysub::resolve_variable(Ty);
+  auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->size != PointerSize) {
+    return false;
+  }
+  auto HasEvidence = [&](const std::vector<SimpleType> &Bounds,
+                         bool SkipLast) {
+    const auto Limit =
+        SkipLast && !Bounds.empty() ? Bounds.size() - 1 : Bounds.size();
+    for (std::size_t I = 0; I < Limit; ++I) {
+      if (hasStructPointerEvidenceInBound(Bounds[I])) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return HasEvidence(Var->lowerBounds,
+                     Polarity == binarysub::BoundPolarity::Lower) ||
+         HasEvidence(Var->upperBounds,
+                     Polarity == binarysub::BoundPolarity::Upper);
+}
+
+binarysub::expected<void, binarysub::Error>
+ConstraintsGenerator::onVariableNonVarBoundAdded(
+    SimpleType Var, SimpleType Bound, binarysub::BoundPolarity Polarity,
+    const binarysub::EnqueueMergeFn &EnqueueMerge) const {
+  Var = binarysub::resolve_variable(Var);
+  auto *VarState = Var ? Var->getAsVariableState() : nullptr;
+  if (VarState == nullptr || VarState->size != PointerSize ||
+      Bound == nullptr || Bound->isVariableState()) {
+    return binarysub::expected<void, binarysub::Error>{};
+  }
+
+  // all-local is an opt-in diagnostic mode whose trigger behavior is kept
+  // unchanged. The evidence transition gate is only for the pointer policies.
+  const bool BoundCanAddPointerEvidence =
+      Bound->getAsTMemObject() != nullptr || Bound->getAsTFunction() != nullptr;
+  if (LocalSubtypeMode == LocalSubtypeMergeMode::AllLocal) {
+    if (!hasPointerLikeEvidence(Var)) {
+      return binarysub::expected<void, binarysub::Error>{};
+    }
+    return queueLocalSubtypeMerges(Var, EnqueueMerge);
+  }
+  if (!BoundCanAddPointerEvidence) {
+    return binarysub::expected<void, binarysub::Error>{};
+  }
+
+  // The callback runs after the new bound was appended. Compare against the
+  // preceding vector contents by ignoring its just-appended tail entry. This
+  // keeps the gate transaction-safe without storing policy state on nodes.
+  const bool HadPointerEvidence =
+      hasPointerLikeEvidenceBeforeNonVarBound(Var, Polarity);
+  const bool PointerEvidenceUpgraded = !HadPointerEvidence;
+  if (LocalSubtypeMode == LocalSubtypeMergeMode::Pointer) {
+    if (!PointerEvidenceUpgraded) {
+      return binarysub::expected<void, binarysub::Error>{};
+    }
+    return queueLocalSubtypeMerges(Var, EnqueueMerge);
+  }
+
+  const bool HadStructEvidence =
+      hasStructPointerEvidenceBeforeNonVarBound(Var, Polarity);
+  const bool HasStructEvidence = hasStructPointerEvidence(Var);
+  if (!PointerEvidenceUpgraded &&
+      !(HasStructEvidence && !HadStructEvidence)) {
+    return binarysub::expected<void, binarysub::Error>{};
+  }
+  return queueLocalSubtypeMerges(Var, EnqueueMerge);
+}
+
+binarysub::expected<void, binarysub::Error>
+ConstraintsGenerator::onVariableNestedBoundRewritten(
+    SimpleType User, SimpleType OldBound, SimpleType NewBound,
+    const binarysub::EnqueueMergeFn &EnqueueMerge) const {
+  if (LocalSubtypeMode != LocalSubtypeMergeMode::StructPointer) {
+    return binarysub::expected<void, binarysub::Error>{};
+  }
+  User = binarysub::resolve_variable(User);
+  auto *UserState = User ? User->getAsVariableState() : nullptr;
+  if (UserState == nullptr || UserState->size != PointerSize) {
+    return binarysub::expected<void, binarysub::Error>{};
+  }
+  if (hasStructPointerEvidenceInBound(OldBound) ||
+      !hasStructPointerEvidenceInBound(NewBound)) {
+    return binarysub::expected<void, binarysub::Error>{};
+  }
+  return queueLocalSubtypeMerges(User, EnqueueMerge);
 }
 
 std::optional<std::vector<ConstraintsGenerator::StructFieldSlice>>
@@ -3617,28 +3757,17 @@ bool ConstraintsGenerator::hasStructPointerEvidence(SimpleType Ty) const {
 
   // This query only needs existence. Avoid constructing the complete offset map
   // used by layout conflict checks, especially for large propagated records.
-  auto BoundsHaveEvidence = [&](const std::vector<SimpleType> &Bounds) {
-    for (const auto &Bound : Bounds) {
-      auto ResolvedBound = binarysub::resolve_variable(Bound);
-      auto *Mem = ResolvedBound ? ResolvedBound->getAsTMemObject() : nullptr;
-      if (Mem == nullptr) {
-        continue;
-      }
-      for (const auto &[FieldName, FieldTy] : Mem->fields) {
-        auto Offset = parseConstantFieldOffset(FieldName);
-        if (!Offset || *Offset < 4) {
-          continue;
-        }
-        if (collectMaxDirectFieldAccessSizeBytes(FieldTy).has_value()) {
-          return true;
-        }
-      }
+  for (const auto &Bound : Var->lowerBounds) {
+    if (hasStructPointerEvidenceInBound(Bound)) {
+      return true;
     }
-    return false;
-  };
-
-  return BoundsHaveEvidence(Var->lowerBounds) ||
-         BoundsHaveEvidence(Var->upperBounds);
+  }
+  for (const auto &Bound : Var->upperBounds) {
+    if (hasStructPointerEvidenceInBound(Bound)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool ConstraintsGenerator::hasPointerLikeEvidence(SimpleType Ty) const {

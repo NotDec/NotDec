@@ -340,6 +340,32 @@ TEST(MLsub, PointerLocalSubtypeModeDoesNotRequireStructEvidence) {
   CG.releaseBinarysubState();
 }
 
+TEST(MLsub, LocalSubtypeRescanOnlyOnPointerEvidenceUpgrade) {
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  llvm::Argument *Arg0 = nullptr;
+  llvm::Argument *Arg1 = nullptr;
+  auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
+  CG.EnablePNDiffTypeVariableClosureUnification = false;
+
+  auto LHS = CG.createNode(Arg0);
+  auto RHS = CG.createNode(Arg1);
+  CG.addSubtype(LHS, RHS);
+  const auto BeforeEvidence = CG.LocalSubtypeHookChecks;
+
+  CG.addSubtype(LHS, binarysub::make_function({}, nullptr));
+  const auto AfterFirstEvidence = CG.LocalSubtypeHookChecks;
+  EXPECT_GT(AfterFirstEvidence, BeforeEvidence);
+
+  // A second function bound does not change pointer evidence. The existing
+  // variable neighbor therefore must not be rescanned.
+  CG.addSubtype(LHS,
+                binarysub::make_function({binarysub::make_variable(0, 32)},
+                                         nullptr));
+  EXPECT_EQ(CG.LocalSubtypeHookChecks, AfterFirstEvidence);
+  CG.releaseBinarysubState();
+}
+
 TEST(MLsub, AllLocalSubtypeModeStillRequiresSameFunction) {
   llvm::LLVMContext Ctx;
   std::unique_ptr<llvm::Module> M;
