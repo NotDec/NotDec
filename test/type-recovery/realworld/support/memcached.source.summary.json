@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "functions": {
+    "calloc": { "is_polymorphic": true },
+    "bcmp": { "is_polymorphic": true },
+    "pthread_create": { "is_polymorphic": true },
+    "event_set": { "is_polymorphic": true },
+    "accept": { "is_polymorphic": true },
+    "accept4": { "is_polymorphic": true },
+    "getpeername": { "is_polymorphic": true },
+    "getsockname": { "is_polymorphic": true },
+    "getsockopt": { "is_polymorphic": true },
+    "setsockopt": { "is_polymorphic": true },
+    "sendmsg": { "is_polymorphic": true },
+    "preadv": { "is_polymorphic": true },
+    "cache_alloc": { "is_polymorphic": true },
+    "do_cache_alloc": { "is_polymorphic": true },
+    "cache_free": { "is_polymorphic": true },
+    "do_cache_free": { "is_polymorphic": true },
+    "slabs_alloc": { "is_polymorphic": true },
+    "slabs_free": { "is_polymorphic": true }
+  }
+}

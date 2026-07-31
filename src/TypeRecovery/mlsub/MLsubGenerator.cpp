@@ -15,7 +15,6 @@
 #include "notdec/TypeRecovery/mlsub/Metadata.h"
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
 #include "notdec/TypeRecovery/LowTy.h"
-#include "notdec/Utils/AllSCCIterator.h"
 #include "notdec/Utils/SingleNodeSCCIterator.h"
 #include "notdec/Utils/Utils.h"
 
@@ -47,6 +46,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace llvm;
@@ -6314,11 +6314,63 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
   const auto &PolyFuncs = PolyPolicy.PolyFuncs;
   const auto &LevelOverrides = PolyPolicy.LevelOverrides;
 
-  all_scc_iterator<CallGraph *> CGI = notdec::scc_begin(AG.CG);
-  // 把CGI遍历的结果都顺序保存到vector里
+  // LLVM's CallGraph has synthetic external-caller and external-callee nodes.
+  // The former conservatively reaches every address-taken function, while many
+  // real functions reach the latter through ordinary library declarations.
+  // Including either node in Tarjan's graph turns an otherwise acyclic module
+  // into one artificial SCC, so decompose only real Function nodes here.
   std::vector<std::vector<CallGraphNode *>> SCCResults;
-  for (; !CGI.isAtEnd(); ++CGI) {
-    SCCResults.push_back(*CGI);
+  std::map<CallGraphNode *, unsigned int> TarjanIndex;
+  std::map<CallGraphNode *, unsigned int> TarjanLowLink;
+  std::set<CallGraphNode *> TarjanOnStack;
+  std::vector<CallGraphNode *> TarjanStack;
+  unsigned int NextTarjanIndex = 0;
+  std::function<void(CallGraphNode *)> VisitNode = [&](CallGraphNode *Node) {
+    TarjanIndex.emplace(Node, NextTarjanIndex);
+    TarjanLowLink.emplace(Node, NextTarjanIndex);
+    ++NextTarjanIndex;
+    TarjanStack.push_back(Node);
+    TarjanOnStack.insert(Node);
+
+    for (auto &CallRecord : *Node) {
+      CallGraphNode *Callee = CallRecord.second;
+      if (Callee == nullptr || Callee->getFunction() == nullptr) {
+        continue;
+      }
+      if (TarjanIndex.find(Callee) == TarjanIndex.end()) {
+        VisitNode(Callee);
+        TarjanLowLink.at(Node) =
+            std::min(TarjanLowLink.at(Node), TarjanLowLink.at(Callee));
+      } else if (TarjanOnStack.count(Callee) != 0) {
+        TarjanLowLink.at(Node) =
+            std::min(TarjanLowLink.at(Node), TarjanIndex.at(Callee));
+      }
+    }
+
+    if (TarjanLowLink.at(Node) != TarjanIndex.at(Node)) {
+      return;
+    }
+    std::vector<CallGraphNode *> Component;
+    while (true) {
+      CallGraphNode *Member = TarjanStack.back();
+      TarjanStack.pop_back();
+      TarjanOnStack.erase(Member);
+      Component.push_back(Member);
+      if (Member == Node) {
+        break;
+      }
+    }
+    // Tarjan emits callee components before their callers, matching the old
+    // all_scc_iterator order consumed in reverse below.
+    SCCResults.push_back(std::move(Component));
+  };
+  for (auto &KV : *AG.CG) {
+    CallGraphNode *Node = KV.second.get();
+    if (Node->getFunction() == nullptr ||
+        TarjanIndex.find(Node) != TarjanIndex.end()) {
+      continue;
+    }
+    VisitNode(Node);
   }
   // 遍历所有的CallGraphNode，然后构建一个反向的，从callee到所有caller的map
   for (auto &KV : *AG.CG) {
@@ -6499,9 +6551,18 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
   };
   for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
     for (std::size_t SuccIndex : RawSCCs[RawIndex].Succs) {
-      if (RawSCCs[RawIndex].Level == RawSCCs[SuccIndex].Level) {
-        Union(RawIndex, SuccIndex);
+      if (RawSCCs[RawIndex].Level != RawSCCs[SuccIndex].Level) {
+        continue;
       }
+      // A polymorphic raw SCC is a summary boundary.  A same-level edge
+      // leaving or entering it must stay visible to the caller/callee
+      // instantiation logic; otherwise a large monomorphic neighbor group
+      // silently shares the polymorphic function's formal variables.
+      if (RawSCCs[RawIndex].IsPolymorphic ||
+          RawSCCs[SuccIndex].IsPolymorphic) {
+        continue;
+      }
+      Union(RawIndex, SuccIndex);
     }
   }
   std::optional<std::size_t> LevelZeroRoot;
@@ -6532,23 +6593,69 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     }
   }
 
-  std::vector<GroupInfo> OrderedGroups;
-  OrderedGroups.reserve(Groups.size());
+  std::map<std::size_t, GroupInfo> GroupInfos;
   for (auto &[Root, Members] : Groups) {
     (void)Members;
-    OrderedGroups.push_back(GroupInfo{
+    GroupInfos.emplace(Root, GroupInfo{
         .Root = Root,
         .Level = RawSCCs[Root].Level,
         .FirstTopoPosition = FirstTopoPosition.at(Root),
     });
   }
-  std::sort(OrderedGroups.begin(), OrderedGroups.end(),
-            [](const GroupInfo &LHS, const GroupInfo &RHS) {
-              if (LHS.Level != RHS.Level) {
-                return LHS.Level < RHS.Level;
-              }
-              return LHS.FirstTopoPosition < RHS.FirstTopoPosition;
-            });
+
+  // A DSU group can contain raw SCCs from separated parts of the original
+  // topological order. Sorting only by its first member can therefore place a
+  // caller group after a callee group. Rebuild the order from the contracted
+  // call graph so bottomUpPhase() always sees every callee generator first.
+  std::map<std::size_t, std::set<std::size_t>> GroupSuccs;
+  std::map<std::size_t, std::size_t> GroupInDegree;
+  for (const auto &[Root, Info] : GroupInfos) {
+    (void)Info;
+    GroupInDegree.emplace(Root, 0);
+  }
+  for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
+    std::size_t Root = FindRoot(RawIndex);
+    for (std::size_t SuccIndex : RawSCCs[RawIndex].Succs) {
+      std::size_t SuccRoot = FindRoot(SuccIndex);
+      if (Root == SuccRoot) {
+        continue;
+      }
+      assert(RawSCCs[RawIndex].Level <= RawSCCs[SuccIndex].Level);
+      if (GroupSuccs[Root].insert(SuccRoot).second) {
+        ++GroupInDegree.at(SuccRoot);
+      }
+    }
+  }
+
+  std::set<std::tuple<unsigned int, std::size_t, std::size_t>> ReadyGroups;
+  auto addReadyGroup = [&](std::size_t Root) {
+    const auto &Info = GroupInfos.at(Root);
+    ReadyGroups.emplace(Info.Level, Info.FirstTopoPosition, Root);
+  };
+  for (const auto &[Root, InDegree] : GroupInDegree) {
+    if (InDegree == 0) {
+      addReadyGroup(Root);
+    }
+  }
+
+  std::vector<GroupInfo> OrderedGroups;
+  OrderedGroups.reserve(Groups.size());
+  while (!ReadyGroups.empty()) {
+    auto ReadyIt = ReadyGroups.begin();
+    std::size_t Root = std::get<2>(*ReadyIt);
+    ReadyGroups.erase(ReadyIt);
+    OrderedGroups.push_back(GroupInfos.at(Root));
+    for (std::size_t SuccRoot : GroupSuccs[Root]) {
+      auto &InDegree = GroupInDegree.at(SuccRoot);
+      assert(InDegree > 0);
+      --InDegree;
+      if (InDegree == 0) {
+        addReadyGroup(SuccRoot);
+      }
+    }
+  }
+  assert(OrderedGroups.size() == Groups.size() &&
+         "contracted SCC group graph must be a DAG");
 
   std::vector<SCCData> &AllSCCs = AG.AllSCCs;
   std::map<CallGraphNode *, std::size_t> &Func2SCCIndex = AG.Func2SCCIndex;
@@ -6590,6 +6697,11 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
       *SCCsCatalog << "SCC" << SCCIndex << "," << Name
                    << " (level = " << Data.level << ")" << "\n";
     }
+  }
+  // Keep the partition available when a large benchmark is stopped after
+  // constraint generation but before the normal workdir teardown.
+  if (SCCsCatalog) {
+    SCCsCatalog->flush();
   }
 }
 
@@ -6809,10 +6921,15 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
       // ignore bitcast ConstantExpr
       if (CE->getOpcode() == Instruction::BitCast) {
         return convertSimpleType(getExtValuePtr(CE->getOperand(0), CE, 0));
-      } else if (CE->getOpcode() == Instruction::IntToPtr) {
-        if (isa<ConstantInt>(CE->getOperand(0))) {
-          assert(false && "Should be converted earlier");
-        }
+      } else if (CE->getOpcode() == Instruction::IntToPtr ||
+                 CE->getOpcode() == Instruction::PtrToInt) {
+        // ConstantExpr casts can appear in globals or optimized stores, e.g. an
+        // integer table cell initialized from the address of a string. There is
+        // no instruction to visit and remap first, so keep the cast result as an
+        // ordinary value of its own LLVM type instead of aborting or connecting
+        // the source pointer into struct-layout constraints.
+        return binarysub::make_variable(
+            lvl, getSize(getExtValuePtr(C, User, OpInd)));
       } else if (CE->getOpcode() == Instruction::GetElementPtr) {
         // getelementptr of table, i.e., function pointer array
         if (auto GV = dyn_cast<GlobalVariable>(CE->getOperand(0))) {
