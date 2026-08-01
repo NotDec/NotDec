@@ -17,6 +17,10 @@
 > 继续跑memcached的内存profiling，好像是valgrind Massif跑得特别慢，那能不能提前停止获得一部分结果呢？Heaptrack已经有初步结果了吗？可以先分析一下
 >
 > 那只完成简单的第一阶段吧，继续吧
+>
+> 怎么采样到更后面总内存更大的情况？
+>
+> 继续
 
 # 背景
 
@@ -184,6 +188,65 @@ Heaptrack 中剩余主要分配仍来自 `CompactTypeBuilder::mergeRecord()` 调
 `CompactTypeArena::merge()`，也就是重叠 record/function/pointer 子槽位的二元合并，以及多个
 canonicalize 状态分别保留大结果。不能把这次局部收益解释为已经解决总体峰值。递归子 builder、结果缓存和
 arena 生命周期重做留到后续阶段，本次不实现。
+
+## 16 GiB 后段采样（已完成）
+
+Heaptrack 支持运行中附加，但本机 `kernel.yama.ptrace_scope=1` 不允许同级进程 ptrace。本轮没有修改系统
+安全设置，而是安装 Ubuntu `libjemalloc-dev 5.2.1-4ubuntu1`，用 jemalloc 自带的采样 profiler 从进程启动
+时记录调用栈：
+
+```text
+MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_prefix:<dir>/jeprof
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+```
+
+仍使用同一 frozen stage-B bitcode、修复后的 RelWithDebInfo `notdec` 和单线程 binarysub。外层每 100 ms
+读取目标进程 RSS，每秒读取 `smaps_rollup`，RSS 达到 16 GiB 时发送 `SIGTERM`。结果在
+`/tmp/notdec-memcached-jemalloc-late-20260801`：共 16 个 heap dump，最后一个是
+`jeprof.1683424.15.i15.heap`。jemalloc 改变了 allocator，所以它只用于归因；最终绝对峰值仍需用原生
+allocator 校准。
+
+运行在 27.999 秒达到 16,893,572 KiB RSS 后停止；最近一次 PSS 是 16,235,304 KiB，private 是
+16,234,668 KiB，swap 为 0。20.073 到 27.999 秒的 RSS 从 7,400,624 KiB 增至 16,893,572 KiB，仍以
+约 1.142 GiB/s 增长。dump 使用 512 KiB 采样率，逐栈按 jemalloc/jeprof 的 Poisson 公式校正。最后 dump
+的 live heap 为 16,079,792,680 B（14.975 GiB），和同一时段 PSS 接近，因此已经覆盖后段主要私有内存，
+不是早停 Heaptrack 的亚 GiB 局部结果。
+
+| dump | 约经过时间 | 校正 live heap | `SimpleVarSet` 节点 | `CompactType` 本体 |
+| --- | ---: | ---: | ---: | ---: |
+| i4 | 17.71 s | 4.101 GiB | 3.291 GiB | 0.670 GiB |
+| i8 | 21.10 s | 8.088 GiB | 6.270 GiB | 1.632 GiB |
+| i12 | 24.54 s | 12.044 GiB | 9.212 GiB | 2.567 GiB |
+| i15 | 27.11 s | 14.975 GiB | 11.397 GiB | 3.297 GiB |
+
+最后 dump 的主要存活对象如下。估算对象数按对应 jemalloc size class 计算，只用于说明数量级。
+
+| 分配对象 | 校正存活量 | 占 live heap | 估算数量 |
+| --- | ---: | ---: | ---: |
+| `SimpleVarSet` 红黑树节点 | 11.397 GiB | 76.10% | 约 2.55 亿个 48 B 节点 |
+| `CompactType` | 3.297 GiB | 22.01% | 约 1383 万个 256 B 对象 |
+| arena 的 `types` vector 容量 | 0.125 GiB | 0.83% | 16,777,216 个指针槽位 |
+| record map 红黑树节点 | 0.037 GiB | 0.24% | 约 49 万个 80 B 节点 |
+
+`SimpleVarSet` 分配栈还能继续拆开：
+
+| 路径 | 存活量 | 占总 live heap |
+| --- | ---: | ---: |
+| `CompactTypeBuilder::mergeRecord()` 第 711 行的重叠字段递归 merge | 6.205 GiB | 41.44% |
+| `normalizeDirectPointer()` 第 771 行把 direct pointer 反复并入 field 0 | 3.355 GiB | 22.40% |
+| `mergePointerSlot()` 第 750 行的嵌套 merge | 1.535 GiB | 10.25% |
+| 其余 `SimpleVarSet` 路径 | 0.302 GiB | 2.02% |
+
+这些路径最后都落到 `CompactTypeArena::merge()` 第 871-872 行：先完整复制 lhs 的 vars set，再插入 rhs；
+随后第 839-845 行创建新的 `CompactType` 并把它放进 arena。第一阶段 builder 只消除了第 1698、1869 行
+顶层 bounds left-fold 的前缀，子字段冲突仍调用旧二元 merge。时间序列也给出了优先级：pointer-slot 路径
+在 live heap 约 4 GiB 时已经接近 1.53 GiB，之后基本不增长；record 路径则从 1.36 GiB 继续长到
+6.21 GiB，field-0 归一化从 0.25 GiB 长到 3.36 GiB。
+
+因此下一阶段不应先优化 record map 容器本身，它在 15 GiB 时只有约 37 MiB。更直接的候选是让 record
+子字段和 field-0 也在同一次 `mergeAll()` 中保持可变累积状态，最后再 freeze，避免每次字段冲突都复制
+整棵 `SimpleVarSet` 并生成 arena-owned `CompactType`。这比只改 pointer slot 更可能降低后段峰值，但会涉及
+嵌套 polarity、递归类型和逐步 direct-pointer 归一化语义，属于第二阶段，本轮不实现。
 
 ## 验证
 
