@@ -1,6 +1,14 @@
 # 用户原始 prompt
 
 > 那试一下这个memchached
+>
+> 等一下，当前遇到的UAF问题是什么情况，有没有修复
+>
+> 怎么做比较好呢？这样做是否有什么负面作用？
+>
+> 其次，思考其他部分是否存在同样的问题？
+>
+> 那修复一下试试
 
 # 背景
 
@@ -38,7 +46,7 @@ arg 和 `void *` context。仅将确实跨调用点承载不同布局的接口�
 - 最终 IR 必须有可用 `DICompileUnit` 和 struct DebugInfo，并通过 LLVM 22 assembler/verifier；wrong
   merge 必须优先清零或逐条解释，不能用降低 fragmentation 掩盖错误合并。
 
-# 实现记录（SCC 探针已完成）
+# 实现记录（SCC 探针与 UAF 修复已完成）
 
 - Bench2 `source-ir` 已加入 memcached 的源码、构建记录、`ir/memcached/memcached.bc` 和
   `ir/memcached/memcached.ll`，并更新外部目录的 manifest/README。BC SHA-256 为
@@ -58,6 +66,34 @@ arg 和 `void *` context。仅将确实跨调用点承载不同布局的接口�
   `malloc`、`free`、`realloc` 都是单节点组。`event_set`、`pthread_create`、socket API、cache/slab API
   也各自独立于 level 1。故多态函数确实形成了更高 level 的独立 SCC，而不是留在 level 0 大组里。
 
+## `extrude()` UAF 修复
+
+memcached 的单线程 ASan 运行在 18.30 秒稳定报 `heap-use-after-free`。读栈位于
+`binarysub::extrude()` 入口，释放栈是递归 extrusion 通过 `VariableState::addUpperBound()` 扩容源变量的
+bound vector。根因是 `extrude()` 遍历一个方向的 bounds 时，嵌套函数参数会切换极性，并向同一个变量的
+对应 vector 追加 bridge；扩容后，外层迭代器和作为递归实参的 vector 元素引用都已失效。负极性路径对称。
+
+- `external/binarysub/include/binarysub/binarysub-core.h:598-601` 和
+  `external/binarysub/src/binarysub-core.cpp:790-882`：`extrude()` 按值持有 pointer-sized `SimpleType`；进入
+  每个极性分支时记录初始 bound 数量，每轮递归前再按值取出当前元素。这样递归扩容不会留下悬空引用，
+  同时本轮仍只复制进入 extrusion 前已有的 bounds，不把新 bridge 重新卷入本轮。实现只需 O(1) 额外空间，
+  没有复制整条 bound vector。
+- `external/binarysub/src/binarysub-test.cpp:1329-1387` 新增
+  `test_extrude_bound_snapshot()`，分别覆盖正、负极性。测试把输入 vector 填到 `size == capacity`，再构造
+  含源变量的递归函数，保证反极性递归追加 bridge 时发生扩容；同时检查旧 bounds 被复制一次、bridge
+  方向正确。`external/binarysub/include/binarysub/binarysub-test.h:18` 和
+  `external/binarysub/src/binarysub-test-main.cpp:47` 接入测试。
+
+没有改成 `deque`，也没有预留一个猜测容量：前者会改变所有 bound 遍历的内存布局，后者不能保证深层递归
+不会再次扩容。当前修复依赖 `extrude()` 对源 bounds 只追加、不删除或重排；该约束已写在循环前注释里。
+`SimpleType` 是非 owning 的单指针 handle，按值传递和每轮元素快照只增加一次指针复制，没有引用计数和
+整表复制。
+
+审计 `external/binarysub` 中其余 lower/upper bound 循环后，没有发现第二处相同问题：
+`TypeGraphInstantiator::instantiate()` 只写新图；`merge_variable_into_impl()` 和邻居删除路径已经先复制源 bounds；
+`constrain_impl()` 的相关循环只向 worklist 排队，policy merge 也延后执行；simplify/canonicalize 路径只读
+bounds。因而本次没有扩大修改范围。
+
 ## 性能结论
 
 未带项目 override 的完整基线在 11:50.26、峰值 62,956,388 KiB 时被 SIGKILL，未生成
@@ -72,8 +108,15 @@ arg 和 `void *` context。仅将确实跨调用点承载不同布局的接口�
 
 - LLVM 22 `llvm-as` 与 `opt -passes=verify` 验证 memcached IR 通过。
 - `cmake --build ./build --target notdec -j4` 通过。
+- `./build/binarysub`：全部通过，包含新增的正、负极性扩容回归。
+- g++-14 Debug + ASan 独立构建的 `binarysub`：全部通过，未报告 sanitizer 错误。
 - `./build/bin/MLsubGeneratorTest`：18/18 通过。
 - `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure`：通过。
+- 修复后的 memcached 原 frozen stage-B 输入固定单线程运行 90 秒，退出码 124 仅来自主动超时，stderr
+  没有 ASan/UAF；旧版在同一路径 18.30 秒即报 UAF。该结果只证明越过原崩溃点，完整类型恢复仍未完成，
+  不能作为性能或内存结论。
+- 一次包含 realworld suite 的 CTest 中，fortune 因 `ir_anchor.sha256` 与当前输入不匹配而在类型恢复前失败；
+  这是已有测试数据问题，与本次 UAF 路径无关。相关 LLVM IR suite 已单独重跑并通过。
 
 ## 复杂度和维护成本评估
 
@@ -83,3 +126,7 @@ arg 和 `void *` context。仅将确实跨调用点承载不同布局的接口�
   调用方向和原因。
 - 后期维护成本：5/10。Tarjan 只遍历有 `Function` 的节点；新增 CallGraph 节点类型时需要保持该过滤，
   但不依赖 LLVM 内部 synthetic 节点的具体连边。
+- UAF 修复效果：9/10。ASan 的释放栈直接对应 vector 扩容，稳定小回归和 memcached 原路径均不再复现。
+- UAF 修复理解成本：2/10。只记录初始长度并在递归前复制一个 handle。
+- UAF 修复维护成本：2/10。需要继续保持 extrusion 对源 bound vector 只追加；若以后允许删除或重排，
+  这里应改为整表快照。
