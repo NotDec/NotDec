@@ -285,6 +285,7 @@ cmake --build ./build --target all
 - `NOTDEC_EXTRA_CONSTRAINTS`
 - `NOTDEC_BINARYSUB_THREADS`
 - `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL`
+- `NOTDEC_BINARYSUB_CANONICALIZE_MODE`
 
 说明：
 
@@ -302,6 +303,9 @@ cmake --build ./build --target all
   - 这个开关不控制更早的 bottom-up 约束生成；该阶段当前仍是串行
   - 需要编译期完全关闭 binarysub oneTBB 时，用
     `-DNOTDEC_ENABLE_BINARYSUB_PARALLEL=OFF` 重新配置 CMake
+- `NOTDEC_BINARYSUB_CANONICALIZE_MODE`
+  - 未设置或设为 `exact` 时使用默认 Exact canonicalize
+  - 设为 `folded` 时启用单线程 Folded canonicalize；不支持的 root 回退 Exact
 
 典型命令：
 

@@ -16,6 +16,56 @@ Folded 模式仍保留 Exact/Folded 两种模式、partial repeat 和固定 buck
 
 后续如果按本计划实现，直接把实现记录、验证结果和计划调整写回本文件，不再新建一份重复日志。
 
+# 实现记录（2026-08-01）
+
+第一阶段已实现。默认仍是 Exact；设置
+`NOTDEC_BINARYSUB_CANONICALIZE_MODE=folded` 后启用 Folded，unsupported root 完整回退 Exact。
+
+实现时没有先构造 Exact 再从结果中猜 cycle。那种做法仍会保留 LCM 长度的不可变中间树，达不到本计划的
+内存目标。当前直接从原始 `SimpleType` 变量闭包开始，只读遍历组合状态：
+
+1. 每层只接受同名 record 字段上的直接变量后继；function、direct pointer、其他字段里的变量和分支后继
+   均在分配 fresh variable 前回退 Exact。
+2. 遍历到完整变量组合状态重复为止，因此 2/3、3/5、5/7 仍实际访问 6、15、35 个周期状态。
+3. 从周期状态中选择能在每个相位保留源变量的最短周期作为骨架；LCM 状态按相位追加到骨架数量的
+   `FoldedAccumulator`。
+4. 原始 record bound 在进入 LCM bucket 循环前各物化一次。bucket 循环本身不生成 arena-owned merge
+   前缀；遍历完成后才为每个 bucket 创建 fresh recVar 并 freeze。
+5. 完整状态重复前的 root 前缀按原顺序反向重建，不再像早期试作那样直接返回第一个 bucket 而丢掉前缀。
+
+主要修改如下：
+
+- `external/binarysub/include/binarysub/binarysub.h:449,589-629,691-721`：增加 arena 节点计数、
+  `CanonicalizeMode`、Folded metrics/options 和 `canonicalizeFoldedType()` 入口。
+- `external/binarysub/src/binarysub.cpp:795-956`：新增只在 root 内使用的 `FoldedAccumulator`。嵌套字段在
+  第二次输入时才提升为子 accumulator，只有 `freeze() &&` 能发布不可变节点。
+- `external/binarysub/src/binarysub.cpp:2127-2469`：实现只读发现、LCM 状态遍历、骨架验证、bucket 聚合、
+  fresh recVar、prefix 重建和 Exact fallback。
+- `external/binarysub/src/binarysub.cpp:3260-3310,3512-3532`：Folded canonicalize 强制串行，增加 mode 和
+  requests/roots/fallback/buckets/states/freeze/arena trace。
+- `external/binarysub/src/binarysub-test.cpp:887-1069`：覆盖 2/3、3/5、5/7、正负位置、`I | S` 保留、
+  function fallback、默认/显式 Exact 一致和 Folded canonicalize 串行。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:86-87,6145-6148`：把
+  `NOTDEC_BINARYSUB_CANONICALIZE_MODE=folded` 接到 `BulkSimplifyOptions`；未设置时不改变主链路。
+
+验证结果：
+
+- `external/binarysub/build-gcc14/binarysub`：通过，oneTBB ON。
+- `external/binarysub/build-gcc14-folded-notbb/binarysub`：通过，oneTBB OFF。
+- `build/binarysub`、`build/bin/TypeBuilderTest`（9/9）、`build/bin/MLsubGeneratorTest`（18/18）：通过。
+- `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure`：通过。
+
+memcached 使用 nodebug frozen stage-B、单线程和每次 bulk 10 秒 canonicalize 预算做了 60.63 秒限时探针。
+已完成的 20 次 bulk simplify 共处理到 253 个 fallback root，支持范围内的 Folded request/root 都是 0；
+最大 RSS 为 15,057,420 KiB。这个结果说明当前严格的单后继 record 形状没有命中 memcached 已处理部分，
+因此按本计划停止完整峰值 A/B，不能声称 Folded 改善了 memcached 内存。探针结果在
+`/tmp/notdec-memcached-folded-probe-20260801.a1ZUPI`。
+
+本次实现效果 7/10：合成 LCM cycle 按预期折叠，且不再先构造 Exact 链；真实项目当前未命中。理解成本
+6/10，维护成本 6/10：新增路径约束明确，unsupported 统一回退，后续若扩大到 pointer/function 必须补齐
+极性和 merge 关系测试。更值得继续评估的方向仍是把 nested mutable accumulator 用到 Exact，而不是为了
+提高命中率放宽 Folded 的正确性边界。
+
 # 背景
 
 当前 `CompactType` 不可变是有意保留的约束。它会缓存 structural hash，并作为
