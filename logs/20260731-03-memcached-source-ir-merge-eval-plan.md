@@ -9,6 +9,12 @@
 > 其次，思考其他部分是否存在同样的问题？
 >
 > 那修复一下试试
+>
+> memcached，有什么办法profile一下内存消耗，考虑如何减少内存占用吗？必须要根据测量出来的数据
+>
+> 一般用什么？heaptrack 或 Valgrind能用apt安装的话都可以安装一下。直接用经常用的策略，没必要为了安装工具而妥协。
+>
+> 继续跑memcached的内存profiling，好像是valgrind Massif跑得特别慢，那能不能提前停止获得一部分结果呢？Heaptrack已经有初步结果了吗？可以先分析一下
 
 # 背景
 
@@ -103,6 +109,43 @@ bounds。因而本次没有扩大修改范围。
 `MLsubRecovery::prepareSCC()` 的 level-0 合并仍会把所有 level-0 raw SCC 放到一个 generator，当前就是
 533 个节点。这是为了保持全局变量和共享 memory 的跨函数约束；直接按调用图拆开会改变语义。因此本轮没有
 再用约 60 GiB 的完整运行去伪造性能结论，也还没有 coverage、wrong merge 或 fragmentation 指标。
+
+## 内存 profiling（阶段性完成）
+
+所有类型恢复采样都固定 `NOTDEC_BINARYSUB_THREADS=1`，使用修复后的
+`build-relwithdebinfo-20260731/bin/notdec` 和 frozen stage-B bitcode。主动停止的 Heaptrack
+`total memory leaked` 只表示停止时仍存活，不能当作泄漏。
+
+- 原生 bitcode 基线运行 120 秒后由 `timeout` 停止。`/usr/bin/time -v` 的最大 RSS 为
+  61,904,992 KiB（约 59.0 GiB）；同一 cgroup 的匿名内存增量从约第 15 秒开始增长，20 到 70 秒间
+  大致每秒增加 1 GiB。cgroup 还包含其他进程，只用于看增长阶段，峰值以目标进程的 `time -v` 为准。
+  修复后的程序没有再次出现 UAF，但完整类型恢复仍未完成。
+- 修复后、保留完整 DebugInfo 的 Heaptrack 运行在 30.38 秒时主动停止。报告位于
+  `/tmp/notdec-memcached-profile-20260801/heaptrack-direct-bc-fixed-30s/report.txt`：共记录
+  20,105,986 次分配，峰值 live heap 为报告值 727.56M，Heaptrack 自身在内的峰值 RSS 为 996.56M。
+  `external/binarysub/src/binarysub.cpp:683-799` 的 `CompactTypeArena::merge()` 调用栈占约
+  611M 峰值存活分配，即约 84%；整个 `canonicalizeType()` 调用栈覆盖约 630M。
+  主要对象是 `SimpleVarSet` 红黑树节点、`CompactType` 和 record map 节点。
+- `external/binarysub/src/binarysub-core.cpp:1052-1089` 的 `register_nested_bound_uses_impl()`
+  仍有高频分配，但峰值只保留报告值约 5.13M；`contains_variable_ref_impl()` 相关路径约有
+  401 万次分配，停止时为 0 B live。它们会拖慢运行，不是持续涨到 60 GiB 的主要来源。
+- 完整 DebugInfo bitcode 的 Massif 在 180 秒时仍停在 LLVM bitcode/DebugInfo metadata reader，
+  没有生成 `SCCs.txt`。提前发送 `SIGTERM` 后，`massif.out` 正常可读，guest heap 峰值约
+  3.93 MiB；约 979 MiB 的 host RSS 主要是 Valgrind 自身，不能当作目标 heap。这份结果只覆盖解析阶段。
+- 为让 Massif 测到类型恢复核心，另用 LLVM 22 `--strip-debug` 生成 680 KiB profiling bitcode；
+  401 个函数定义不变且 verifier 通过，同时关闭 merge-eval。Massif 在 33.85 秒生成
+  `ValueTypes.txt`，进入 bulk simplify 后再采 60 秒，于 94.06 秒主动停止。报告位于
+  `/tmp/notdec-memcached-profile-20260801/massif-nodebug-bc-fixed-partial/report.txt`：最后快照的
+  useful heap 为 752,659,151 B，allocator extra 为 187,374,225 B，总计约 896.49 MiB。
+  其中 `CompactType` 对象、变量 set 节点和 record map 节点合计 597,339,264 B，占 useful heap
+  约 79%。停止栈在 `canonicalizeType()` 展开 bound 的位置，与 Heaptrack 结论一致。该运行只能
+  归因类型恢复内存，不能用于 DebugInfo coverage、wrong merge 或 fragmentation。
+
+当前主因不是普通内存泄漏，而是 `external/binarysub/include/binarysub/binarysub.h:280-307` 的不可变
+`CompactType` 在 canonicalize 中反复合并：`CompactTypeArena::merge()` 每次复制 set/map 并创建新节点，
+当前 arena 为保证 raw handle 有效，会把创建过的全部中间节点保留到整个 bulk simplify 结束。下一步应先
+统计 `merge(pol, lhs, rhs)` 输入对的重复率，再验证结果缓存；若重复率或缓存收益不足，再考虑一次聚合多个
+bound 或重做 arena 生命周期。单纯把 `std::set` 换成更紧凑的容器只能降低常数，不能解决中间结果数量增长。
 
 ## 验证
 
