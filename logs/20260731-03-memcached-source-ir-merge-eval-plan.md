@@ -15,6 +15,8 @@
 > 一般用什么？heaptrack 或 Valgrind能用apt安装的话都可以安装一下。直接用经常用的策略，没必要为了安装工具而妥协。
 >
 > 继续跑memcached的内存profiling，好像是valgrind Massif跑得特别慢，那能不能提前停止获得一部分结果呢？Heaptrack已经有初步结果了吗？可以先分析一下
+>
+> 那只完成简单的第一阶段吧，继续吧
 
 # 背景
 
@@ -143,9 +145,45 @@ bounds。因而本次没有扩大修改范围。
 
 当前主因不是普通内存泄漏，而是 `external/binarysub/include/binarysub/binarysub.h:280-307` 的不可变
 `CompactType` 在 canonicalize 中反复合并：`CompactTypeArena::merge()` 每次复制 set/map 并创建新节点，
-当前 arena 为保证 raw handle 有效，会把创建过的全部中间节点保留到整个 bulk simplify 结束。下一步应先
-统计 `merge(pol, lhs, rhs)` 输入对的重复率，再验证结果缓存；若重复率或缓存收益不足，再考虑一次聚合多个
-bound 或重做 arena 生命周期。单纯把 `std::set` 换成更紧凑的容器只能降低常数，不能解决中间结果数量增长。
+当前 arena 为保证 raw handle 有效，会把创建过的全部中间节点保留到整个 bulk simplify 结束。
+
+## 第一阶段：局部 CompactType builder（已完成）
+
+只实现简单的批量聚合，不重写 CompactType，也不做递归子 builder。
+
+- `external/binarysub/include/binarysub/binarysub.h:441-446` 新增
+  `CompactTypeArena::mergeAll()`；`external/binarysub/include/binarysub/binarysub.h:689-692` 和
+  `src/binarysub.cpp:1696-1699` 增加对应的 `TypeSimplifier` 入口。
+- `external/binarysub/src/binarysub.cpp:621-790` 新增局部 `CompactTypeBuilder`。它原地维护顶层
+  vars/prims、size、record、function、ptrLoad/ptrStore/psize；正极性 record 仍取交集，负极性仍取
+  并集，函数参数仍使用反极性，ptrStore 仍使用反极性。字段、参数和指针槽位的嵌套冲突继续调用
+  原 `CompactTypeArena::merge()`，因此没有改变递归类型语义。每次 append 后执行和旧 `make()/merge()`
+  相同的 direct-pointer/field-0 归一化，最后只在 `freeze()` 生成一个 arena-owned 不可变结果。
+- `src/binarysub.cpp:1853-1869` 将 `canonicalizeType()` 中的
+  `empty -> merge(bound) -> merge(bound)` left-fold 改为先收集非变量 bounds，再调用 `mergeAll()`。
+  空输入仍返回 empty；新增记录字段在此前交集为空后仍可重新出现。
+- `include/binarysub/binarysub-test.h:13`、`src/binarysub-test-main.cpp:42`、
+  `src/binarysub-test.cpp:508-580` 新增结构等价回归，覆盖空输入、正负极性、record 交集、直接指针
+  折入字段 0、函数参数逆变和 ptrStore 逆变，并逐项对比旧 left-fold 结果。
+
+### 第一阶段测量结果
+
+使用同一 frozen stage-B bitcode、同一单线程设置和同一 Heaptrack 采样口径：
+
+| 指标 | 旧版 | builder 版 | 变化 |
+| --- | ---: | ---: | ---: |
+| `CompactTypeArena::make()` 调用 | 688,954 | 389,124 | -43.5% |
+| `CompactType` 构造峰值分配 | 176.37M | 99.62M | -43.5% |
+| Heaptrack peak live heap | 727.56M | 636.89M | -12.5% |
+| Heaptrack peak RSS | 996.56M | 911.89M | -8.5% |
+| 原生目标 RSS（阶段采样） | 61,904,992 KiB（约 59.0 GiB，120 s） | 62,319,308 KiB（约 59.4 GiB，80 s） | 未下降 |
+
+builder 确实减少了 canonicalize 的早期 `CompactType` 中间对象，但在这两个不同停止时刻的原生采样中，
+目标进程仍达到约 59 GiB；这不是严格同一时刻的性能 A/B，不能声称最终峰值有改善。
+Heaptrack 中剩余主要分配仍来自 `CompactTypeBuilder::mergeRecord()` 调用的旧递归
+`CompactTypeArena::merge()`，也就是重叠 record/function/pointer 子槽位的二元合并，以及多个
+canonicalize 状态分别保留大结果。不能把这次局部收益解释为已经解决总体峰值。递归子 builder、结果缓存和
+arena 生命周期重做留到后续阶段，本次不实现。
 
 ## 验证
 
@@ -173,3 +211,18 @@ bound 或重做 arena 生命周期。单纯把 `std::set` 换成更紧凑的容�
 - UAF 修复理解成本：2/10。只记录初始长度并在递归前复制一个 handle。
 - UAF 修复维护成本：2/10。需要继续保持 extrusion 对源 bound vector 只追加；若以后允许删除或重排，
   这里应改为整表快照。
+- 第一阶段 builder 实现效果：7/10。减少了 43.5% 的 `CompactType` 构造和约 12.5% 的采样 live heap，
+  但没有降低 memcached 的最终原生峰值；它是有测量支持的局部优化，不是完整解决方案。
+- 第一阶段 builder 理解成本：4/10。新增一个只在 `mergeAll()` 生命周期内存在的可变顶层聚合器，
+  nested merge 仍复用旧实现，边界清楚。
+- 第一阶段 builder 维护成本：4/10。需要保证 builder 的字段规则与 `CompactTypeArena::merge()`
+  同步；因此测试保留了旧 left-fold 结构等价对比。
+
+## 第一阶段验证（2026-08-01）
+
+- `cmake --build build --target binarysub notdec TypeBuilderTest -j4`：通过。
+- `./build/binarysub`：通过，包含 `test_compact_type_builder_merge_all`。
+- `./build/bin/TypeBuilderTest`：9/9 通过。
+- `./build/bin/MLsubGeneratorTest`：18/18 通过。
+- `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure`：通过。
+- binarysub 工作树 `git diff --check`：通过。
