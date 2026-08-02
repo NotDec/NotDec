@@ -376,3 +376,48 @@ jemalloc smoke test 均通过；`git diff --check` 通过。此前手工 native 
 本轮复杂度评估：实现效果 8/10（固定命令和停止口径可复用，且修正了监控 PID 问题）；理解成本 3/10（参数、
 进程组、CSV 输出均在一个脚本内）；维护成本 3/10（默认路径仍可通过参数覆盖，新增 allocator 时只需扩展
 环境数组和帮助文本）。
+
+## expanded builder 后段复测（2026-08-02）
+
+用新脚本运行同一 frozen stage-B 输入、同一 RelWithDebInfo 可执行文件、单线程和 16 GiB RSS 阈值：
+
+```text
+scripts/profile-memcached-memory.sh \
+  --output-dir /tmp/notdec-memcached-profile-latest-20260802
+```
+
+脚本在 69.423 s 主动停止，RSS 为 16,837,748 KiB，PSS 为 16,834,234 KiB；最后 heap dump 是
+`jeprof.2571339.29.i29.heap`。`/opt/addr2line` 生成的
+`/tmp/jeprof-gimli-latest-16g.txt` 显示 live heap 为 16,753,245,533 B（15.603 GiB）。上一版 field-0
+builder 在相近 RSS（16,856,112 KiB）下为 49.425 s、16,970,871,387 B（15.805 GiB）。因此当前能确认的是：
+到达同一 RSS 阈值慢了 40.5%，最后采样 live heap 小了约 207.5 MiB（1.28%）；不能据此声称最终峰值已下降。
+
+direct-pointer 局部优化有效且稳定：`makeDirectPointer` 已不在主要 live 调用树中；
+`normalizeDirectPointer` 从 8.618 GB（50.8%）降到 1.157 GB（6.9%），约少 86.6%。但低层分配从
+`std::make_unique`（11.127 GB -> 6.244 GB）转移到 `std::__new_allocator::allocate`
+（5.810 GB -> 10.467 GB），后者主要是 `SimpleVarSet` 的 `std::set` 红黑树节点，说明问题已从反复发布
+direct-pointer `CompactType` 转为复制/保存变量集合。
+
+最新行级 profile 给出了当前热点的确切位置，以下 cumulative 数值在调用关系上会重叠，不能相加：
+
+| 位置 | live heap | 含义 |
+| --- | ---: | --- |
+| `CompactTypeBuilder::append()` 第 689 行 | 3.601 GB | 对每个输入的 `rhs->vars` 做 `std::set::insert`。 |
+| `CompactTypeBuilder::mergeRecord()` 路径 | 2.939 GB | record 子字段递归累积；其中会再调用 child builder。 |
+| `CompactTypeArena::merge()` 第 1148 行 | 2.197 GB | `SimpleVarSet vars = lhs->vars` 的整集合复制。 |
+| 同一 `merge()` 第 1185 行 | 0.454 GB | record map 的赋值复制，不是首要问题。 |
+| 同一 `merge()` 第 1245 行 | 1.506 GB | 复制后发布的不可变 `CompactType`。 |
+| `canonicalizeType()` 第 2205 行 | 3.451 GB | 用 `res->vars`、`res->prims` 按值重建 adapted type。 |
+
+`canonicalizeType()` 第 2151 行的 bounds fold 已使用 `mergeAll()`（7.477 GB cumulative），但紧接着第
+2153 行仍调用二元 `mergeCompactTypes(pol, ty, bound)`（4.157 GB cumulative）。这正是上表第 1148/1185/1245
+行的来源：先 freeze `bound`，再复制 `ty` 的集合、生成另一个 `res`。下一步较小的候选是先用测试证明
+`merge(ty, mergeAll(bounds))` 和同一左到右 builder 内 `ty + bounds` 等价，再让两者在同一个 builder 中完成，
+从而去掉该中间 `bound` 与二元 merge。它仍不能解决第 2205 行的 immutable `SimpleVarSet` 复制。
+
+第 2205 行说明更大的后续问题：`CompactType` 的 `vars` 是
+`external/binarysub/include/binarysub/binarysub.h:280-307` 中按值保存的 `const std::set`。只要 adapted type
+保留相同变量集合，就必须完整复制红黑树。若小范围 builder 合并后仍是主热点，应单独设计共享的不可变
+`SimpleVarSet` 表示；简单链式 union 不合适，因为查找、遍历、hash 和 equality 会随链深变慢。引用计数的
+共享集合没有明显的所有权环（集合内只是 non-owning `SimpleType` handle），但会增加 shared ownership 和
+API 改造成本，需先做语义/性能对照后再实施。
