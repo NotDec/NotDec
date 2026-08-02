@@ -335,3 +335,44 @@ jemalloc 的 arena 元数据和未归还给内核的页。
 dump 已量到约 11.4 GiB 的 `SimpleVarSet` 节点和约 3.3 GiB 的 `CompactType` 对象。要继续降峰值，
 优先应消除 `normalizeDirectPointer()` 中反复 freeze 后调用 `makeDirectPointer()` 的路径，再考虑
 扩大可变 builder 的覆盖范围或按安全生命周期拆分 arena。
+
+## 扩大 mutable builder（2026-08-02，已完成）
+
+本轮把第一阶段 builder 从顶层 bounds 扩大到 record 子字段、field-0 和 direct-pointer 的 load/store
+累积。`external/binarysub/src/binarysub.cpp:626-769` 的 `CompactTypeSlot` 和
+`CompactTypeBuilder` 支持移动合并私有状态；`mergeRecord()`（827-902）在同级字段冲突时直接合并子
+slot，`normalizeDirectPointer()`（971-994）把 pointer load/store slot 移入 field 0，只有最终
+`freeze()`（772-808）才生成不可变 arena 节点。`CompactTypeArena::mergeAll()`（1250-1257）仍保持
+左到右语义。`external/binarysub/include/binarysub/binarysub.h:443-451` 增加 `nodeCount()`，
+`external/binarysub/src/binarysub-test.cpp:621-681` 增加未规范化 record/direct-pointer 输入，分别检查正、
+负极性与旧 left-fold 等价，并确认最终只发布 5 个节点。
+
+同一 frozen stage-B 输入、同一 RelWithDebInfo 可执行文件和单线程下，jemalloc 16 GiB 截止采样为
+`/tmp/notdec-memcached-expanded-builder-20260802-yBU1cH`，到达 16 GiB 用时 69.744 s；最后 live heap
+为 16,931,255,366 B。`makeDirectPointer` 不再出现在主要存活调用栈，`normalizeDirectPointer` 和
+`appendDirectPointer` 各约 1.181 GB（7.0%），`CompactTypeArena::merge` 约 4.196 GB（24.8%），
+`mergeRecord` 约 2.970 GB（17.5%）。与旧 field-0 builder 在同一 RSS 阈值的 48.4 s 相比，新版为
+69.7 s；这是路径分配减少但总体运行变慢，剩余主因已集中到 `SimpleVarSet` 的 set 节点复制，不能把
+局部 direct-pointer 收益当作峰值已经下降。
+
+## Profiling 脚本（2026-08-02，已完成）
+
+新增 `scripts/profile-memcached-memory.sh:11-169`，封装当前 profiling 命令，默认使用
+`/tmp/notdec-memcached-stage-b-20260801.bc`、`build-relwithdebinfo-20260731/bin/notdec`、单线程、
+16 GiB RSS 阈值和 jemalloc 采样；`--native` 可切换回原生 allocator。脚本接受 `--input`、`--notdec`、
+`--output-dir`、`--threshold-gib` 和 `--threads`，并把完整展开后的命令写入 `command.txt`。
+
+`scripts/profile-memcached-memory.sh:165-249` 用 `setsid` 建立独立进程组，沿 `/proc` 子进程树找到真正的
+`notdec` PID 后读取 `smaps_rollup`，避免只监控 `/usr/bin/time` 外壳；达到阈值时同时终止外壳和目标进程。
+脚本写出 `rss-pss.csv`、`events.log`、`pid`、`target-pid`、`exit-code`、标准输出/错误和 work/eval 目录；
+主动达到阈值时脚本返回 0，但保留目标进程的实际信号退出码。native 模式会清除继承的 `MALLOC_CONF` 和
+`LD_PRELOAD`，避免 allocator 口径被环境变量悄悄改变。
+
+验证：`bash -n scripts/profile-memcached-memory.sh`、`--help`，以及用 `/bin/echo` 分别跑 native 和
+jemalloc smoke test 均通过；`git diff --check` 通过。此前手工 native 命令监控了 `time` wrapper 而不是
+目标进程，未在 16 GiB 停止，最终约 62,778,100 KiB RSS 后以 137 结束；该目录
+`/tmp/notdec-memcached-expanded-native-20260802-ovEdiJ` 只作失败的过程记录，后续应使用新脚本。
+
+本轮复杂度评估：实现效果 8/10（固定命令和停止口径可复用，且修正了监控 PID 问题）；理解成本 3/10（参数、
+进程组、CSV 输出均在一个脚本内）；维护成本 3/10（默认路径仍可通过参数覆盖，新增 allocator 时只需扩展
+环境数组和帮助文本）。
