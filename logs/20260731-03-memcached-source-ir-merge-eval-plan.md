@@ -421,3 +421,66 @@ direct-pointer `CompactType` 转为复制/保存变量集合。
 `SimpleVarSet` 表示；简单链式 union 不合适，因为查找、遍历、hash 和 equality 会随链深变慢。引用计数的
 共享集合没有明显的所有权环（集合内只是 non-owning `SimpleType` handle），但会增加 shared ownership 和
 API 改造成本，需先做语义/性能对照后再实施。
+
+## CompactType 持久集合与独立 arena（2026-08-02，已完成）
+
+本轮只改变 `CompactType` 的临时生命周期；`UType`、`HType` 的分配器和所有权没有改变。
+
+`external/binarysub/include/binarysub/binarysub.h:285-400` 新增 `CompactVarSet`，用 LLVM
+`ImmutableSet` 保存变量集合，并保留原 `SimpleVarSet` 的 `(variable id, level)` 排序和相等语义。
+每个集合根用共享 `ArenaState` 保住其 AVL factory 和 `BumpPtrAllocator`，所以 adapted node 可以安全复用
+旧集合根。`Storage` 中 `owner` 必须声明在 `set` 前（381-388）：成员逆序析构时先释放 set root，后释放
+factory。最初顺序相反，ASan 在 source arena `clear()` 后 destination arena 仍持有集合根的回归中报 UAF；
+现已修复。
+
+`external/binarysub/CMakeLists.txt:36-45` 为 standalone build 补上 LLVM Support，顶层 build 继续复用
+`notdec_llvm_deps`。`src/binarysub.cpp:667-670` 保持 builder 自己的 `SimpleVarSet` 可变，第一次导入
+persistent root 时按迭代器复制，避免 builder 的每次 append 都做 AVL 路径复制。
+
+`CompactTypeArena` 在同一头文件 544-607 改为
+`SpecificBumpPtrAllocator<CompactType>`，不再保存 `vector<unique_ptr<CompactType>>`。
+`external/binarysub/src/binarysub.cpp:1104-1148` 在 arena 内构造和合并 persistent var set；二元 merge
+复用左侧根，只为新增变量创建 AVL 路径。1175-1228 的 `makeFromCompactVars()` / `makeImpl()` 让
+`canonicalizeType()` 在 2321-2326 只改 child 时复用 `res->vars`，不再重建整个变量集合。2250-2271 还把
+`bounds` 与 `ty` 放入同一个 `mergeAll()`，但严格保持旧顺序 `bounds` 在前、`ty` 在后，避免正极性 record
+intersection 改变结果。3383-3390 在 `UType` 都已 materialize 后调用 `TypeSimplifier::clear()`，一次释放
+CompactType、递归缓存和对应两套 arena。
+
+`external/binarysub/src/binarysub-test.cpp:724-759` 新增跨 arena 生命周期回归；900-985 进一步检查真实
+`bulkSimplifyDetailed()` 返回后 `TypeSimplifier::isClear()` 为真。测试覆盖 source/destination arena 共享
+集合根、合并、清理和 serial/parallel bulk 返回；`src/binarysub-test-main.cpp:42-46` 已接入。
+
+同一 frozen stage-B input、同一 RelWithDebInfo binary、jemalloc、单线程、16 GiB RSS 阈值的复测目录为
+`/tmp/notdec-memcached-immutable-set-20260802`。旧 expanded-builder 基线是
+`/tmp/notdec-memcached-profile-latest-20260802`：
+
+| 时间 | 旧 RSS | persistent-set RSS |
+| --- | ---: | ---: |
+| 30 s | 4.887 GiB | 2.456 GiB |
+| 50 s | 10.681 GiB | 5.157 GiB |
+| 69.4 s | 16.058 GiB（停止） | 7.784 GiB |
+
+新版本在 130.049 s 才到 16.025 GiB RSS，旧版在 69.423 s 到 16.058 GiB；相同时间点 RSS 约减半，达到固定
+阈值前可多运行 87.3%。两次最后 jemalloc live heap 分别为 15.607 GiB 和 15.603 GiB，几乎相同，因为两者
+都被同一个 RSS 阈值打断，不能据此声称完整运行的最终峰值已经下降。此次 memcached 没有走到
+`bulkSimplifyDetailed()` 返回，因此 arena 的整块释放由单元回归验证，而非这次被主动终止的 profile。
+
+最后 dump 的旧 `std::set` 红黑树热点已经消失；新的调用树主要是 `ImmutableSet::Factory::add` 10.182 GB
+（60.8%）和 `SpecificBumpPtrAllocator::Allocate` 4.811 GB（28.7%）。两项在调用树上有重叠，不能相加。
+它说明路径复制已替代整棵红黑树复制，但 builder 的 mutable `SimpleVarSet` 在最终 freeze 时仍由
+`makeVarSet()` 逐元素导入 persistent set（10.863 GB cumulative）。下一步若继续，应先测量“builder 直接
+构造 persistent set”的插入路径；那会把当前一次 freeze 的全量导入变成每次 append 的路径复制，不应凭直觉
+直接改。
+
+验证：`cmake --build build --target binarysub -j4`、`./build/binarysub`（含 ASan 生命周期回归）、
+`./build/bin/TypeBuilderTest`（9/9）和
+`ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure` 均通过；
+`cmake -S external/binarysub -B /tmp/notdec-binarysub-standalone-20260802 -G Ninja` 的 standalone 配置、
+构建和 `binarysub` 全量测试也通过；
+Release `notdec` 已重建并完成上述 profile，`git -C external/binarysub diff --check` 通过。
+系统符号化工具已把 `/usr/bin/addr2line` 指向 `/opt/addr2line` 0.23.0，原 Binutils 链接保留为
+`/usr/bin/addr2line.binutils`；完整 `jeprof` 符号化耗时 59.04 s。
+
+本轮评估：实现效果 8/10（相同时间的在途内存约减半，并真正复用集合子树）；理解成本 6/10（集合根与
+factory 生命周期需要明确维护）；后期维护成本 5/10（新 API 集中在 CompactType，不影响 UType/HType，
+但必须保留跨 arena 生命周期回归）。
