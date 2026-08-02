@@ -83,8 +83,6 @@ constexpr llvm::StringLiteral kMLsubInputAnchorFile =
 constexpr llvm::StringLiteral kPNDiffAnnotatedFile = "03-pndiff-final.ll";
 constexpr llvm::StringLiteral kBinarysubTraceFile = "binarysub-trace.log";
 constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
-constexpr llvm::StringLiteral kBinarysubCanonicalizeModeEnv =
-    "NOTDEC_BINARYSUB_CANONICALIZE_MODE";
 constexpr llvm::StringLiteral kMallocWrappersFile = "MallocWrappers.txt";
 constexpr llvm::StringLiteral kPolymorphicBufferFunctionsFile =
     "PolymorphicBufferFunctions.txt";
@@ -6142,10 +6140,6 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   }
   binarysub::BulkSimplifyOptions BulkOptions;
   BulkOptions.enableParallel = true;
-  if (auto *Mode = std::getenv(kBinarysubCanonicalizeModeEnv.data());
-      Mode != nullptr && llvm::StringRef(Mode).equals_insensitive("folded")) {
-    BulkOptions.canonicalizeMode = binarysub::CanonicalizeMode::Folded;
-  }
   auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
   const auto &Res = BulkResult.types;
 
