@@ -303,9 +303,9 @@ allocator 校准。
 `/opt/addr2line` 完整符号化成功，耗时 1:00.27，报告为
 `/tmp/jeprof-gimli-field0-16g.txt`，校正后的最后 dump live heap 为 16,970,871,387 B（15.805 GiB）。
 
-累计分配热点仍集中在 direct-pointer 和不可变集合复制：
+当前 live heap 的调用树累计归因仍集中在 direct-pointer 和不可变集合复制；这些不是进程生命周期的累计分配量：
 
-| 路径 | 累计分配 |
+| 路径 | 调用树累计 live heap |
 | --- | ---: |
 | `normalizeDirectPointer` | 8.618 GB（50.8%） |
 | `CompactTypeArena::makeDirectPointer` | 7.855 GB（46.3%） |
@@ -317,3 +317,20 @@ allocator 校准。
 可执行文件和监控脚本不完全相同，因此只能作方向性参考。当前结果没有证明峰值下降，且
 `normalizeDirectPointer` 仍是首要优化目标；field-0 仍在反复创建不可变 direct-pointer 节点。完整命令和
 RSS/PSS 时间序列保留在上述目录中。
+
+### 指标和释放语义
+
+最新 heap 文件的 `heap_v2` 记录使用 `curobjs:curbytes` 表示当前存活采样对象；本轮没有设置
+`prof_accum:true`，所以每条记录的 `[cumobjs:cumbytes]` 都是 `[0:0]`。`jeprof` 默认显示
+`--inuse_space`，表格中的 `cum` 是调用树的包含子调用累计值，不是进程生命周期累计分配量。因此
+`mergeAll` 包含其内部的 `normalizeDirectPointer`、`makeDirectPointer` 和最终 `make`，这些百分比不能相加。
+当前采样在对象释放后会从 `curbytes` 中扣除，但它看不到已经分配又释放的瞬时峰值；RSS/PSS 还会保留
+jemalloc 的 arena 元数据和未归还给内核的页。
+
+`CompactTypeArena::types` 保存每个 `make()` 产生的 `unique_ptr<CompactType>`，`CompactTypePtr`/`TypeRef`
+只是非拥有指针。`merge()` 产生新节点后，旧节点及其 record/set 容器不会按引用计数回收，只有 arena
+整体 `clear()` 或析构才释放。因此被合并节点的子节点指针本身通常只有指针大小，真正占空间的是旧
+`CompactType` 对象以及复制出的 `SimpleVarSet`/`SimplePrimSet` 红黑树和 record map 节点；此前 15 GiB
+dump 已量到约 11.4 GiB 的 `SimpleVarSet` 节点和约 3.3 GiB 的 `CompactType` 对象。要继续降峰值，
+优先应消除 `normalizeDirectPointer()` 中反复 freeze 后调用 `makeDirectPointer()` 的路径，再考虑
+扩大可变 builder 的覆盖范围或按安全生命周期拆分 arena。
