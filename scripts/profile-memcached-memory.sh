@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run the memcached source-IR recovery with a reproducible allocator profile and
-# a lightweight RSS/PSS time series. The jemalloc profile explains live-object
-# ownership; smaps_rollup remains the reference for the process memory limit.
+# Profile source-IR recovery with a reproducible allocator profile and a
+# lightweight RSS/PSS time series. The default input is memcached, but callers
+# can supply another input and mark an emitted stage-B input as frozen.
+# The jemalloc profile explains live-object ownership; smaps_rollup remains the
+# reference for the process memory limit.
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROJECT_ROOT=$(dirname "${SCRIPT_DIR}")
@@ -21,13 +23,15 @@ output_dir=
 threshold_gib=${DEFAULT_THRESHOLD_GIB}
 threads=${DEFAULT_THREADS}
 native_allocator=0
+frozen_tr_input=0
 
 usage() {
   cat <<EOF
 Usage: $0 [options]
 
-Run memcached's frozen stage-B IR through notdec while recording RSS/PSS and,
-by default, jemalloc live-allocation samples.
+Run source-IR type recovery through notdec while recording RSS/PSS and, by
+default, jemalloc live-allocation samples. Use --frozen-tr-input-ir when the
+input was previously emitted with --emit-tr-input-ir.
 
 Options:
   --input PATH          Input bitcode (default: ${DEFAULT_INPUT})
@@ -36,6 +40,7 @@ Options:
   --threshold-gib N     Stop at N GiB RSS (default: ${DEFAULT_THRESHOLD_GIB})
   --threads N           NOTDEC_BINARYSUB_THREADS value (default: ${DEFAULT_THREADS})
   --native              Use the native allocator instead of jemalloc
+  --frozen-tr-input-ir  Treat --input as --emit-tr-input-ir output
   -h, --help            Show this help
 
 The run directory contains command.txt, rss-pss.csv, events.log, pid,
@@ -87,6 +92,10 @@ while [[ $# -gt 0 ]]; do
       native_allocator=1
       shift
       ;;
+    --frozen-tr-input-ir)
+      frozen_tr_input=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -133,6 +142,9 @@ run_args=(
   --merge-eval-dir="${output_dir}/eval"
   -o "${output_dir}/out.ll"
 )
+if (( frozen_tr_input )); then
+  run_args+=(--frozen-tr-input-ir)
+fi
 
 env_args=()
 if (( native_allocator )); then
@@ -159,8 +171,9 @@ fi
   printf '\n'
 } >"${output_dir}/command.txt"
 
-printf 'START threshold_gib=%s threads=%s allocator=%s\n' \
+printf 'START threshold_gib=%s threads=%s allocator=%s input_mode=%s\n' \
   "${threshold_gib}" "${threads}" "$([[ ${native_allocator} -eq 1 ]] && echo native || echo jemalloc)" \
+  "$([[ ${frozen_tr_input} -eq 1 ]] && echo frozen || echo normal)" \
   >>"${output_dir}/events.log"
 
 # setsid gives the time wrapper and notdec one process group. We can therefore

@@ -484,3 +484,34 @@ Release `notdec` 已重建并完成上述 profile，`git -C external/binarysub d
 本轮评估：实现效果 8/10（相同时间的在途内存约减半，并真正复用集合子树）；理解成本 6/10（集合根与
 factory 生命周期需要明确维护）；后期维护成本 5/10（新 API 集中在 CompactType，不影响 UType/HType，
 但必须保留跨 arena 生命周期回归）。
+
+## vsftpd 完整 profile（2026-08-02，已完成）
+
+为了在一个能完整结束的较小 Bench2 项目上确认 `CompactType` arena 的释放，使用
+`/sn640/NotDec-Exp/Bench2/source-ir/ir/vsftpd/vsftpd.bc` 生成 stage-B 输入
+`/tmp/notdec-vsftpd-stage-b-20260802.bc`。stage A 用时 2.11 s、最大 RSS 158,580 KiB；该 BC 经 LLVM 22
+`opt -passes=verify` 验证，含 550 个定义函数。
+
+`scripts/profile-memcached-memory.sh` 的注释和 usage 改为通用 source-IR profile，并新增
+`--frozen-tr-input-ir`（第 26、43、95、145、174 行）。此前脚本虽然创建了 stage-B 输入，却没有把该标志
+传给 notdec；默认仍是 normal input，只有显式传该选项才启用 frozen 模式，因此不会改变历史 memcached 命令。
+
+完整运行目录是 `/tmp/notdec-vsftpd-profile-20260802`，命令使用 RelWithDebInfo `notdec`、jemalloc、
+单线程和 `--frozen-tr-input-ir`。运行正常结束：wall 12.74 s，`/usr/bin/time` 最大 RSS 588,748 KiB
+（约 575 MiB），RSS/PSS 逐秒采样的最高点是 9.548 s 的 571,976 KiB（约 558.6 MiB）。后者低于 time 的
+峰值是采样间隔遗漏短暂峰值，不是两种内存口径冲突。merge eval 为 `wall_ms=10725`、`peak_rss_mb=574`、
+`nodes_created=13124`、`representative_nodes=12217`、`merged_nodes=907`，且 `bad_unions=0`；输出
+`out.ll` 已经 LLVM 22 verifier 验证，SHA-256 为
+`0fe289fe5b135ecd5003940e2a45601f72482d2c8ff24b2d66a14ba5df66063c`。
+
+jemalloc 的接近峰值阶段 dump `jeprof.2756606.4.i4.heap` 有 377,705,832 B（约 360.2 MiB）live heap，
+其中调用树经过 `CompactTypeArena::make` 的 cumulative 分配为 254,589,974 B（67.4%），经过
+`canonicalizeType` 的为 286,033,595 B（75.7%），经过 `ImmutableSet::Factory::add` 的为 184,602,749 B
+（48.9%）。这些是同一调用树的 cumulative 值，彼此重叠，不能相加。退出 dump
+`jeprof.2756606.5.i5.heap` 只剩 87,931,551 B（约 83.9 MiB），不再有显著的 `CompactTypeArena` 或
+`ImmutableSet` 路径，主要是最终 UType/HType 转换。峰值阶段到退出少了约 276 MiB live heap，说明临时
+`CompactType` 与 persistent set arena 在类型恢复完成后确实不再存活。退出前 RSS 仍约 542 MiB，是 jemalloc
+保留已分配页的正常表现，不能把 RSS 未回落误判为 arena 没有释放。
+
+vsftpd 因此适合作为 13 秒左右的完整回归输入，用来检查释放、输出验证和错误合并；它没有复现 memcached
+的多 GiB 压力，不能代替后者评估峰值内存优化。
