@@ -289,3 +289,31 @@ allocator 校准。
 - `./build/bin/MLsubGeneratorTest`：18/18 通过。
 - `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure`：通过。
 - binarysub 工作树 `git diff --check`：通过。
+
+## field-0 builder 重跑（2026-08-02）
+
+使用当前 field-0 builder 版本、同一 frozen stage-B 输入和单线程 binarysub，重新跑到 RSS 约 16 GiB：
+
+```text
+/tmp/notdec-memcached-field0-builder-20260802-16g-055911
+```
+
+运行 49.425 s 后主动发送 `SIGTERM`，RSS 为 16,856,112 KiB，最近一次 PSS 为 16,854,742 KiB；共生成
+24 个 jemalloc dump，最后一个是 `jeprof.2475165.23.i23.heap`。`jeprof` 使用固定的
+`/opt/addr2line` 完整符号化成功，耗时 1:00.27，报告为
+`/tmp/jeprof-gimli-field0-16g.txt`，校正后的最后 dump live heap 为 16,970,871,387 B（15.805 GiB）。
+
+累计分配热点仍集中在 direct-pointer 和不可变集合复制：
+
+| 路径 | 累计分配 |
+| --- | ---: |
+| `normalizeDirectPointer` | 8.618 GB（50.8%） |
+| `CompactTypeArena::makeDirectPointer` | 7.855 GB（46.3%） |
+| `CompactTypeBuilder::mergeRecord` | 1.471 GB（8.7%） |
+| `mergePointerSlot` | 0.743 GB（4.4%） |
+| `CompactTypeArena::mergeAll` | 12.365 GB（72.9%） |
+
+上一轮 record-builder dump 的校正 live heap 为 16,114,838,378 B；两轮均以 RSS 16 GiB 停止，但使用的
+可执行文件和监控脚本不完全相同，因此只能作方向性参考。当前结果没有证明峰值下降，且
+`normalizeDirectPointer` 仍是首要优化目标；field-0 仍在反复创建不可变 direct-pointer 节点。完整命令和
+RSS/PSS 时间序列保留在上述目录中。
