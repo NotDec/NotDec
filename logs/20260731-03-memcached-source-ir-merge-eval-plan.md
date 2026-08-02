@@ -212,7 +212,7 @@ allocator 校准。
 的 live heap 为 16,079,792,680 B（14.975 GiB），和同一时段 PSS 接近，因此已经覆盖后段主要私有内存，
 不是早停 Heaptrack 的亚 GiB 局部结果。
 
-| dump | 约经过时间 | 校正 live heap | `SimpleVarSet` 节点 | `CompactType` 本体 |
+| dump | 约经过时间 | 校正 live heap | `SimpleVarSet` 的 `std::set` 红黑树节点 | `CompactType` 本体 |
 | --- | ---: | ---: | ---: | ---: |
 | i4 | 17.71 s | 4.101 GiB | 3.291 GiB | 0.670 GiB |
 | i8 | 21.10 s | 8.088 GiB | 6.270 GiB | 1.632 GiB |
@@ -223,12 +223,13 @@ allocator 校准。
 
 | 分配对象 | 校正存活量 | 占 live heap | 估算数量 |
 | --- | ---: | ---: | ---: |
-| `SimpleVarSet` 红黑树节点 | 11.397 GiB | 76.10% | 约 2.55 亿个 48 B 节点 |
+| `SimpleVarSet` 的 `std::set` 红黑树节点 | 11.397 GiB | 76.10% | 约 2.55 亿个 48 B 节点 |
 | `CompactType` | 3.297 GiB | 22.01% | 约 1383 万个 256 B 对象 |
 | arena 的 `types` vector 容量 | 0.125 GiB | 0.83% | 16,777,216 个指针槽位 |
 | record map 红黑树节点 | 0.037 GiB | 0.24% | 约 49 万个 80 B 节点 |
 
-`SimpleVarSet` 分配栈还能继续拆开：
+`SimpleVarSet` 的 `std::set` 分配栈还能继续拆开。这里的 `SimpleType` 只是指向 `TypeNode` 的指针大小
+handle；profile 中的“节点”是 `std::set` 为保存这个 handle 分配的红黑树节点，不是新的 `TypeNode`：
 
 | 路径 | 存活量 | 占总 live heap |
 | --- | ---: | ---: |
