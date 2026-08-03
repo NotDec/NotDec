@@ -398,6 +398,332 @@ bool containsRecursiveBinder(ast::HType *Ty, ast::RecursiveBinder *Target) {
 // both rec-binders and rec-refs straight to that body.
 using RecursiveBinderMap = std::map<ast::RecursiveBinder *, ast::HType *>;
 
+void refreshMemoryDecl(llvm2c::HTypeResult &Result);
+
+// A byte cursor loop is sometimes lowered as a by-value recursive record/union
+// graph instead of an array.  For example, a cursor with +1 and +4 backedges
+// can become `R { byte; union { R; { byte; byte; R; } }; }`.  This checker only
+// accepts a strongly connected graph whose material leaves are byte-sized.  It
+// deliberately rejects pointers, wider fields, and other recursive binders so
+// that linked lists and structured records keep their recovered layout.
+class ByteBufferRecursiveSCC {
+public:
+  explicit ByteBufferRecursiveSCC(ast::TypedDecl *Root) : Root(Root) {}
+
+  bool matches() {
+    if (!checkDecl(Root) || !SawByte || !SawCycle) {
+      return false;
+    }
+
+    // Acyclic helper records may be byte-shaped too, but are real layout that
+    // should not disappear.  Every aggregate selected for replacement must be
+    // able to return to the root through a by-value aggregate edge.
+    for (auto *Decl : Decls) {
+      std::set<ast::TypedDecl *> Visiting;
+      if (!canReachRoot(Decl, Visiting)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  const std::set<ast::TypedDecl *> &getDecls() const { return Decls; }
+
+private:
+  bool isByteScalar(ast::HType *Ty) const {
+    if (auto *Top = llvm::dyn_cast_or_null<ast::TopType>(Ty)) {
+      return Top->getBitSize() == 8;
+    }
+    if (auto *Bottom = llvm::dyn_cast_or_null<ast::BottomType>(Ty)) {
+      return Bottom->getBitSize() == 8;
+    }
+    if (auto *Integer = llvm::dyn_cast_or_null<ast::IntegerType>(Ty)) {
+      return Integer->getBitSize() == 8;
+    }
+    if (auto *Variable = llvm::dyn_cast_or_null<ast::TypeVariableType>(Ty)) {
+      return Variable->getSizeBits() == std::optional<unsigned>(8);
+    }
+    return false;
+  }
+
+  bool isFixedByteArray(ast::HType *Ty, OffsetTy Size) const {
+    auto *Array = llvm::dyn_cast_or_null<ast::ArrayType>(Ty);
+    if (Array == nullptr || !Array->getNumElements().has_value() || Size <= 0) {
+      return false;
+    }
+    return static_cast<OffsetTy>(*Array->getNumElements()) == Size &&
+           isByteScalar(Array->getElementType());
+  }
+
+  ast::TypedDecl *getAggregateTarget(ast::HType *Ty) const {
+    if (auto *Record = llvm::dyn_cast_or_null<ast::RecordType>(Ty)) {
+      return Record->getDecl();
+    }
+    if (auto *Union = llvm::dyn_cast_or_null<ast::UnionType>(Ty)) {
+      return Union->getDecl();
+    }
+    if (auto *Binding = llvm::dyn_cast_or_null<ast::RecursiveBindingType>(Ty)) {
+      return Binding->getBinder()->getAnchorDecl();
+    }
+    if (auto *Ref = llvm::dyn_cast_or_null<ast::RecursiveRefType>(Ty)) {
+      return Ref->getBinder()->getAnchorDecl();
+    }
+    return nullptr;
+  }
+
+  bool checkAggregateType(ast::HType *Ty) {
+    auto *Target = getAggregateTarget(Ty);
+    if (Target == nullptr) {
+      return false;
+    }
+    return checkDecl(Target);
+  }
+
+  bool checkField(const ast::FieldDecl &Field) {
+    if (Field.R.Start < 0 || Field.R.Size <= 0) {
+      return false;
+    }
+    if (Field.isPadding) {
+      return true;
+    }
+    if (isByteScalar(Field.Type)) {
+      SawByte = true;
+      return Field.R.Size == 1;
+    }
+    if (isFixedByteArray(Field.Type, Field.R.Size)) {
+      SawByte = true;
+      return true;
+    }
+    return checkAggregateType(Field.Type);
+  }
+
+  bool checkDecl(ast::TypedDecl *Decl) {
+    if (Decl == nullptr) {
+      return false;
+    }
+    if (ActiveDecls.count(Decl) != 0) {
+      SawCycle = true;
+      return true;
+    }
+    if (!Decls.insert(Decl).second) {
+      return true;
+    }
+
+    ActiveDecls.insert(Decl);
+    bool Valid = true;
+    if (auto *Record = llvm::dyn_cast<ast::RecordDecl>(Decl)) {
+      for (const auto &Field : Record->getFields()) {
+        if (!checkField(Field)) {
+          Valid = false;
+          break;
+        }
+      }
+    } else if (auto *Union = llvm::dyn_cast<ast::UnionDecl>(Decl)) {
+      for (const auto &Member : Union->getMembers()) {
+        if (!checkField(Member)) {
+          Valid = false;
+          break;
+        }
+      }
+    } else {
+      Valid = false;
+    }
+    ActiveDecls.erase(Decl);
+    return Valid;
+  }
+
+  bool canReachRoot(ast::TypedDecl *Decl,
+                    std::set<ast::TypedDecl *> &Visiting) const {
+    if (Decl == Root) {
+      return true;
+    }
+    if (Decl == nullptr || !Visiting.insert(Decl).second) {
+      return false;
+    }
+
+    auto CanReachFromField = [&](const ast::FieldDecl &Field) {
+      auto *Target = getAggregateTarget(Field.Type);
+      return Target != nullptr && Decls.count(Target) != 0 &&
+             canReachRoot(Target, Visiting);
+    };
+
+    bool ReachesRoot = false;
+    if (auto *Record = llvm::dyn_cast<ast::RecordDecl>(Decl)) {
+      for (const auto &Field : Record->getFields()) {
+        if (CanReachFromField(Field)) {
+          ReachesRoot = true;
+          break;
+        }
+      }
+    } else if (auto *Union = llvm::dyn_cast<ast::UnionDecl>(Decl)) {
+      for (const auto &Member : Union->getMembers()) {
+        if (CanReachFromField(Member)) {
+          ReachesRoot = true;
+          break;
+        }
+      }
+    }
+    Visiting.erase(Decl);
+    return ReachesRoot;
+  }
+
+  ast::TypedDecl *Root;
+  std::set<ast::TypedDecl *> Decls;
+  std::set<ast::TypedDecl *> ActiveDecls;
+  bool SawByte = false;
+  bool SawCycle = false;
+};
+
+using ByteBufferDeclSet = std::set<ast::TypedDecl *>;
+
+ast::HType *rewriteByteBufferType(ast::HTypeContext &Ctx, ast::HType *Ty,
+                                  const ByteBufferDeclSet &ByteBufferDecls,
+                                  ast::HType *ByteBufferType) {
+  if (Ty == nullptr) {
+    return nullptr;
+  }
+  if (auto *Record = llvm::dyn_cast<ast::RecordType>(Ty)) {
+    return ByteBufferDecls.count(Record->getDecl()) != 0 ? ByteBufferType : Ty;
+  }
+  if (auto *Union = llvm::dyn_cast<ast::UnionType>(Ty)) {
+    return ByteBufferDecls.count(Union->getDecl()) != 0 ? ByteBufferType : Ty;
+  }
+  if (auto *Binding = llvm::dyn_cast<ast::RecursiveBindingType>(Ty)) {
+    return ByteBufferDecls.count(Binding->getBinder()->getAnchorDecl()) != 0
+               ? ByteBufferType
+               : Ty;
+  }
+  if (auto *Ref = llvm::dyn_cast<ast::RecursiveRefType>(Ty)) {
+    return ByteBufferDecls.count(Ref->getBinder()->getAnchorDecl()) != 0
+               ? ByteBufferType
+               : Ty;
+  }
+  if (auto *Pointer = llvm::dyn_cast<ast::PointerType>(Ty)) {
+    auto *Pointee = rewriteByteBufferType(Ctx, Pointer->getPointeeType(),
+                                          ByteBufferDecls, ByteBufferType);
+    return Pointee == Pointer->getPointeeType()
+               ? Ty
+               : Ctx.getPointerType(Ty->isConst(), Pointer->getBitSize(),
+                                    Pointee);
+  }
+  if (auto *Function = llvm::dyn_cast<ast::FunctionType>(Ty)) {
+    std::vector<ast::HType *> Returns;
+    std::vector<ast::HType *> Params;
+    bool Changed = false;
+    for (auto *Return : Function->getReturnType()) {
+      auto *NewReturn =
+          rewriteByteBufferType(Ctx, Return, ByteBufferDecls, ByteBufferType);
+      Changed |= NewReturn != Return;
+      Returns.push_back(NewReturn);
+    }
+    for (auto *Param : Function->getParamTypes()) {
+      auto *NewParam =
+          rewriteByteBufferType(Ctx, Param, ByteBufferDecls, ByteBufferType);
+      Changed |= NewParam != Param;
+      Params.push_back(NewParam);
+    }
+    return Changed ? Ctx.getFunctionType(Ty->isConst(), Returns, Params) : Ty;
+  }
+  if (auto *Pointer = llvm::dyn_cast<ast::DualPointerType>(Ty)) {
+    auto *Load = rewriteByteBufferType(Ctx, Pointer->getLoadType(),
+                                       ByteBufferDecls, ByteBufferType);
+    auto *Store = rewriteByteBufferType(Ctx, Pointer->getStoreType(),
+                                        ByteBufferDecls, ByteBufferType);
+    return Load == Pointer->getLoadType() && Store == Pointer->getStoreType()
+               ? Ty
+               : Ctx.getDualPointerType(Ty->isConst(), Pointer->getAccessSize(),
+                                        Load, Store);
+  }
+  if (auto *Set = llvm::dyn_cast<ast::SetUnionType>(Ty)) {
+    std::vector<ast::HType *> Terms;
+    bool Changed = false;
+    for (auto *Term : Set->getTypes()) {
+      auto *NewTerm =
+          rewriteByteBufferType(Ctx, Term, ByteBufferDecls, ByteBufferType);
+      Changed |= NewTerm != Term;
+      Terms.push_back(NewTerm);
+    }
+    return Changed ? Ctx.getSetUnionType(Ty->isConst(), std::move(Terms)) : Ty;
+  }
+  if (auto *Set = llvm::dyn_cast<ast::SetInterType>(Ty)) {
+    std::vector<ast::HType *> Terms;
+    bool Changed = false;
+    for (auto *Term : Set->getTypes()) {
+      auto *NewTerm =
+          rewriteByteBufferType(Ctx, Term, ByteBufferDecls, ByteBufferType);
+      Changed |= NewTerm != Term;
+      Terms.push_back(NewTerm);
+    }
+    return Changed ? Ctx.getSetInterType(Ty->isConst(), std::move(Terms)) : Ty;
+  }
+  if (auto *Array = llvm::dyn_cast<ast::ArrayType>(Ty)) {
+    auto *Element = rewriteByteBufferType(Ctx, Array->getElementType(),
+                                          ByteBufferDecls, ByteBufferType);
+    return Element == Array->getElementType()
+               ? Ty
+               : Ctx.getArrayType(Ty->isConst(), Element,
+                                  Array->getNumElements());
+  }
+  return Ty;
+}
+
+void normalizeByteBufferRecursiveSCCs(llvm2c::HTypeResult &Result) {
+  if (!Result.HTCtx) {
+    return;
+  }
+
+  ByteBufferDeclSet ByteBufferDecls;
+  for (const auto &Ent : Result.HTCtx->getDecls()) {
+    auto *Decl = Ent.second.get();
+    if (ByteBufferDecls.count(Decl) != 0 ||
+        (llvm::dyn_cast<ast::RecordDecl>(Decl) == nullptr &&
+         llvm::dyn_cast<ast::UnionDecl>(Decl) == nullptr)) {
+      continue;
+    }
+    ByteBufferRecursiveSCC Candidate(Decl);
+    if (!Candidate.matches()) {
+      continue;
+    }
+    ByteBufferDecls.insert(Candidate.getDecls().begin(),
+                           Candidate.getDecls().end());
+  }
+  if (ByteBufferDecls.empty()) {
+    return;
+  }
+
+  auto *ByteBufferType =
+      Result.HTCtx->getArrayType(false, Result.HTCtx->getChar(), std::nullopt);
+  auto Rewrite = [&](ast::HType *Ty) {
+    return rewriteByteBufferType(*Result.HTCtx, Ty, ByteBufferDecls,
+                                 ByteBufferType);
+  };
+  for (auto &Ent : Result.ValueTypesLower) {
+    Ent.second = Rewrite(Ent.second);
+  }
+  for (auto &Ent : Result.ValueTypesUpper) {
+    Ent.second = Rewrite(Ent.second);
+  }
+  Result.MemoryType = Rewrite(Result.MemoryType);
+  Result.StorageType = Rewrite(Result.StorageType);
+  for (const auto &Ent : Result.HTCtx->getDecls()) {
+    if (auto *Record = llvm::dyn_cast<ast::RecordDecl>(Ent.second.get())) {
+      for (auto &Field : Record->getFields()) {
+        Field.Type = Rewrite(Field.Type);
+      }
+    } else if (auto *Union = llvm::dyn_cast<ast::UnionDecl>(Ent.second.get())) {
+      for (auto &Member : Union->getMembers()) {
+        Member.Type = Rewrite(Member.Type);
+      }
+    } else if (auto *Typedef =
+                   llvm::dyn_cast<ast::TypedefDecl>(Ent.second.get())) {
+      Typedef->setType(Rewrite(Typedef->getType()));
+    }
+  }
+  refreshMemoryDecl(Result);
+  llvm::errs() << "Info: normalized " << ByteBufferDecls.size()
+               << " recursive byte-buffer decl(s) to i8[]\n";
+}
+
 ast::HType *rewriteCollapsedRecursiveType(ast::HTypeContext &Ctx, ast::HType *Ty,
                                           const RecursiveBinderMap &Replacements,
                                           std::set<ast::RecursiveBinder *>
@@ -748,6 +1074,7 @@ void normalizeHTypeResult(llvm2c::HTypeResult &Result) {
     return;
   }
   auto TailNormalizedDecls = normalizeTailValueRecursiveRecords(*Result.HTCtx);
+  normalizeByteBufferRecursiveSCCs(Result);
   normalizeCollapsedRecursiveBinders(Result, TailNormalizedDecls);
   normalizeTransparentSingleFieldRecords(Result);
 }

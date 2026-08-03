@@ -130,6 +130,12 @@
       "input": "cases/21_PointerAnalysisBranchingFieldCycle.ll",
       "expected": "expected/tr-level-2/21_PointerAnalysisBranchingFieldCycle.htypes",
       "status": "pass"
+    },
+    {
+      "name": "22_PointerAnalysisWideFieldCycle",
+      "input": "cases/22_PointerAnalysisWideFieldCycle.ll",
+      "expected": "expected/tr-level-2/22_PointerAnalysisWideFieldCycle.htypes",
+      "status": "pass"
     }
   ]
 }

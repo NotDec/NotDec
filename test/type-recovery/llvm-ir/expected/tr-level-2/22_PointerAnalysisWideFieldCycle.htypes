@@ -1,0 +1,43 @@
+# HTypeResult
+
+[decls]
+struct struct_0 {
+  'r:32 field_0; /* at offset: 0 */
+  struct_0 field_1; /* at offset: 4 */
+  top:32 field_2; /* at offset: 8 */
+};
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:32
+[+] @main => lower=(bottom:32 (*)(top:32, bool, bool))* ; upper=top:32
+[+] @malloc => lower=(bottom:32 (*)(top:32))* ; upper=top:32
+[+] const(i32 0)@main::%bb.exit.i0:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@main::%i:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 1)@main::%bb.short_step.i2:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 4)@main::%bb.wide_left.i2:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 5)@main::%bb.wide_right.i2:0 => lower=bottom:32 ; upper=top:32
+[-] main::%base => lower=bottom:32 ; upper=struct_0*
+[+] main::%done => lower=bool ; upper=bool
+[+] main::%echo.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::%i => lower=bottom:32 ; upper=top:32
+[+] main::%i.next => lower=bottom:32 ; upper=top:32
+[+] main::%loaded => lower=bottom:32 ; upper=top:32
+[+] main::%next => lower=bottom:32 ; upper=struct_0*
+[+] main::%next.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::%p => lower=bottom:32 ; upper=struct_0*
+[+] main::%short.next => lower=bottom:32 ; upper=struct_0*
+[+] main::%short.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::%wide.left.next => lower=bottom:32 ; upper=struct_0*
+[+] main::%wide.left.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::%wide.right.next => lower=bottom:32 ; upper=struct_0*
+[+] main::%wide.right.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::<ret> => lower=bottom:32 ; upper=top:32
+[-] main::arg0 => lower=bottom:32 ; upper=top:32
+[-] main::arg1 => lower=bool ; upper=bool
+[-] main::arg2 => lower=bool ; upper=bool
+[+] malloc::<ret> => lower=bottom:32 ; upper=top:32
+[+] malloc::arg0 => lower=bottom:32 ; upper=top:32
+
+[memory]
+type => top:32

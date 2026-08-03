@@ -1,20 +1,6 @@
 # HTypeResult
 
 [decls]
-struct rec_33 {
-  struct_0 field_0; /* recursive body at offset: 0 */
-};
-
-struct struct_0 {
-  'r:8 field_0; /* at offset: 0 */
-  union_0 field_1; /* at offset: 1 */
-};
-
-union union_0 {
-  rec_33 field_0; /* at offset: 0 */
-  struct_0 field_1; /* at offset: 0 */
-};
-
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
@@ -25,21 +11,21 @@ union union_0 {
 [+] const(i8 1)@main::%bb.short_step.i2:0 => lower=bottom:8 ; upper=top:8
 [+] const(i8 4)@main::%bb.wide_left.i2:0 => lower=bottom:8 ; upper=top:8
 [+] const(i8 5)@main::%bb.wide_right.i2:0 => lower=bottom:8 ; upper=top:8
-[-] main::%base => lower=bottom:32 ; upper=rec_33*
+[-] main::%base => lower=bottom:32 ; upper=i8[]*
 [+] main::%done => lower=bool ; upper=bool
-[+] main::%echo.ptr => lower=bottom:32 ; upper=rec_33*
+[+] main::%echo.ptr => lower=bottom:32 ; upper=i8[]*
 [+] main::%i => lower=bottom:32 ; upper=top:32
 [+] main::%i.next => lower=bottom:32 ; upper=top:32
 [+] main::%loaded => lower=bottom:8 ; upper=top:8
-[+] main::%next => lower=bottom:32 ; upper=rec_33*
-[+] main::%next.ptr => lower=bottom:32 ; upper=rec_33*
-[+] main::%p => lower=bottom:32 ; upper=rec_33*
-[+] main::%short.next => lower=bottom:32 ; upper=rec_33*
-[+] main::%short.ptr => lower=bottom:32 ; upper=rec_33*
-[+] main::%wide.left.next => lower=bottom:32 ; upper=rec_33*
-[+] main::%wide.left.ptr => lower=bottom:32 ; upper=rec_33*
-[+] main::%wide.right.next => lower=bottom:32 ; upper=rec_33*
-[+] main::%wide.right.ptr => lower=bottom:32 ; upper=rec_33*
+[+] main::%next => lower=bottom:32 ; upper=i8[]*
+[+] main::%next.ptr => lower=bottom:32 ; upper=i8[]*
+[+] main::%p => lower=bottom:32 ; upper=i8[]*
+[+] main::%short.next => lower=bottom:32 ; upper=i8[]*
+[+] main::%short.ptr => lower=bottom:32 ; upper=i8[]*
+[+] main::%wide.left.next => lower=bottom:32 ; upper=i8[]*
+[+] main::%wide.left.ptr => lower=bottom:32 ; upper=i8[]*
+[+] main::%wide.right.next => lower=bottom:32 ; upper=i8[]*
+[+] main::%wide.right.ptr => lower=bottom:32 ; upper=i8[]*
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [-] main::arg0 => lower=bottom:32 ; upper=top:32
 [-] main::arg1 => lower=bool ; upper=bool
