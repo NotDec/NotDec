@@ -269,6 +269,9 @@ bool isFunctionPointerTable(const llvm::GlobalVariable &GV) {
     return false;
   }
 
+  if (!GV.hasInitializer()) {
+    return false;
+  }
   auto *Init = GV.getInitializer();
   if (Init == nullptr) {
     return false;
@@ -1634,6 +1637,11 @@ void loadOverrideFileImpl(llvm::Module &M, const char *Path,
     if (Spec.get("is_polymorphic") != nullptr &&
         !Spec.getBoolean("is_polymorphic")) {
       failSignatureOverride(appendJSONPath(FuncPath, "is_polymorphic"),
+                            "expected boolean");
+    }
+    if (Spec.get("opaque_body") != nullptr &&
+        !Spec.getBoolean("opaque_body")) {
+      failSignatureOverride(appendJSONPath(FuncPath, "opaque_body"),
                             "expected boolean");
     }
 
@@ -5479,6 +5487,21 @@ bool MLsubRecovery::isSummaryOverridePolymorphic(
   return false;
 }
 
+bool MLsubRecovery::isOpaqueBody(const llvm::Function &Func) const {
+  auto *Spec = getSummaryOverrideSpec(Func);
+  if (Spec == nullptr) {
+    return false;
+  }
+  const auto *Obj = Spec->getAsObject();
+  if (Obj == nullptr) {
+    return false;
+  }
+  if (auto Flag = Obj->getBoolean("opaque_body")) {
+    return *Flag;
+  }
+  return false;
+}
+
 const llvm::json::Value *
 MLsubRecovery::getSignatureOverrideSpec(const llvm::Function &Func) const {
   return getOverrideSpecImpl(SignatureOverrideDoc, SignatureOverrideFuncs,
@@ -5794,10 +5817,19 @@ void MLsubRecovery::bottomUpPhase() {
   // Iterate bottom up.
   for (std::size_t Ind = AG.AllSCCs.size(); Ind-- > 0;) {
     auto &Data = AG.AllSCCs.at(Ind);
+    std::set<llvm::Function *> OpaqueBodies;
+    for (auto *Func : Data.SCCSet) {
+      if (!isOpaqueBody(*Func)) {
+        continue;
+      }
+      OpaqueBodies.insert(Func);
+      llvm::errs() << "Info: opaque body skipped for " << Func->getName()
+                   << " (level " << Data.level << ")\n";
+    }
     Data.Generator = std::make_shared<ConstraintsGenerator>(
         Data.SCCName, PointerSize, Data.SCCSet, MemoryType, StorageType,
         &StorageFields, Data.level, BinarysubTraceFile.get(), MergeEval,
-        EnableStructPtrLoadStoreMerge);
+        EnableStructPtrLoadStoreMerge, std::move(OpaqueBodies));
     auto &G = Data.Generator;
     // insert ContraVariantValues
     if (Ind == 0) {
@@ -6159,8 +6191,14 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     // all_scc_iterator order consumed in reverse below.
     SCCResults.push_back(std::move(Component));
   };
-  for (auto &KV : *AG.CG) {
-    CallGraphNode *Node = KV.second.get();
+  // Iterate in module declaration order instead of CallGraph's
+  // std::map<const Function *, ...> (which sorts by function object address).
+  // Pointer-order iteration changes with ASLR/allocator layout, so Tarjan SCC
+  // numbering, variable ids and downstream simplification would otherwise
+  // differ between runs and make memory/results non-reproducible.
+  auto &Module = CG.getModule();
+  for (Function &F : Module) {
+    CallGraphNode *Node = CG[&F];
     if (Node->getFunction() == nullptr ||
         TarjanIndex.find(Node) != TarjanIndex.end()) {
       continue;
@@ -6168,8 +6206,8 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     VisitNode(Node);
   }
   // 遍历所有的CallGraphNode，然后构建一个反向的，从callee到所有caller的map
-  for (auto &KV : *AG.CG) {
-    CallGraphNode *Caller = KV.second.get();
+  for (Function &F : Module) {
+    CallGraphNode *Caller = CG[&F];
     for (auto &CallRecord : *Caller) {
       CallGraphNode *Callee = CallRecord.second;
       AG.Callee2Callers[Callee].insert(Caller);

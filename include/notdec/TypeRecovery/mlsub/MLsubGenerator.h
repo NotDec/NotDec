@@ -316,6 +316,11 @@ struct ConstraintsGenerator {
   void instantiateSummary(llvm::CallBase *Inst, llvm::Function *Target,
                           const ConstraintsGenerator &Summary);
 
+  // Bodies of these functions are excluded from constraint generation.  The
+  // summary override still supplies their interface, so callers keep a useful
+  // signature without paying for the body's internal constraints.
+  std::set<llvm::Function *> OpaqueBodies;
+
   ConstraintsGenerator(std::string Name, unsigned int pointer_size,
                        const std::set<llvm::Function *> &SCCs,
                        SimpleType MemoryType, SimpleType StorageType = nullptr,
@@ -324,12 +329,14 @@ struct ConstraintsGenerator {
                        int lvl = 0,
                        std::ostream *TraceStream = nullptr,
                        std::shared_ptr<MergePolicyEval> MergeEval = nullptr,
-                       bool EnableStructPtrLoadStoreMerge = false)
+                       bool EnableStructPtrLoadStoreMerge = false,
+                       std::set<llvm::Function *> OpaqueBodies = {})
       : PointerSize(pointer_size), Name(Name), PG(Name, pointer_size),
         SCCs(SCCs), lvl(lvl), MemoryType(MemoryType),
         StorageType(StorageType), StorageFields(StorageFields),
         TraceStream(TraceStream), MergeEval(std::move(MergeEval)),
-        EnableStructPtrLoadStoreMerge(EnableStructPtrLoadStoreMerge) {
+        EnableStructPtrLoadStoreMerge(EnableStructPtrLoadStoreMerge),
+        OpaqueBodies(std::move(OpaqueBodies)) {
     PG.TraceStream = TraceStream;
     configurePNDiffCallbacks();
     if (auto *Mode = std::getenv("NOTDEC_LOCAL_SUBTYPE_MERGE_MODE")) {
@@ -369,6 +376,9 @@ struct ConstraintsGenerator {
       addSubtype(binarysub::make_function(Args, Ret), F);
     }
     for (const llvm::Function *Func : SCCs) {
+      if (OpaqueBodies.count(const_cast<llvm::Function *>(Func)) != 0) {
+        continue;
+      }
       MLsubVisitor Visitor(*this);
       Visitor.visit(const_cast<llvm::Function *>(Func));
       Visitor.handlePHINodes();
@@ -710,6 +720,7 @@ public:
   const llvm::json::Value *getSummaryOverrideSpec(
       const llvm::Function &Func) const;
   bool isSummaryOverridePolymorphic(const llvm::Function &Func) const;
+  bool isOpaqueBody(const llvm::Function &Func) const;
   const llvm::json::Value *getSignatureOverrideSpec(
       const llvm::Function &Func) const;
   OverrideTypeRecipe buildOverrideType(const llvm::json::Value &Expr,

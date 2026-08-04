@@ -687,6 +687,38 @@ TEST(MLsub, PhiNodeCanBeUsedByAnEarlierListedBlock) {
   CG.releaseBinarysubState();
 }
 
+TEST(MLsub, OpaqueBodySkipsInstructionConstraints) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("opaque-body-test", Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *FTy = llvm::FunctionType::get(I32, {I32, I32}, false);
+  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "f",
+                                   M.get());
+  auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", F);
+  llvm::IRBuilder<> Builder(Entry);
+  auto *Add = Builder.CreateAdd(F->getArg(0), F->getArg(1), "sum");
+  Builder.CreateRet(Add);
+
+  static std::set<llvm::Function *> SCCs;
+  SCCs.clear();
+  SCCs.insert(F);
+
+  notdec::mlsub::ConstraintsGenerator CG(
+      "opaque-body-test", 32, SCCs, binarysub::make_variable(0, 32), nullptr,
+      nullptr, 0, nullptr, nullptr, false, {F});
+  CG.run();
+  EXPECT_EQ(CG.getNodeOrNull(Add), nullptr);
+  EXPECT_NE(CG.getNodeOrNull(F->getArg(0)), nullptr);
+  EXPECT_NE(CG.getNodeOrNull(F->getArg(1)), nullptr);
+  CG.releaseBinarysubState();
+
+  notdec::mlsub::ConstraintsGenerator CG2(
+      "opaque-body-test", 32, SCCs, binarysub::make_variable(0, 32));
+  CG2.run();
+  EXPECT_NE(CG2.getNodeOrNull(Add), nullptr);
+  CG2.releaseBinarysubState();
+}
+
 TEST(MLsub, EVMStorageDirectSlotConnectsStoreToLoad) {
   static std::set<llvm::Function *> SCCs;
   SCCs.clear();

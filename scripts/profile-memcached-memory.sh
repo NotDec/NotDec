@@ -24,6 +24,7 @@ threshold_gib=${DEFAULT_THRESHOLD_GIB}
 threads=${DEFAULT_THREADS}
 native_allocator=0
 frozen_tr_input=0
+summary_override=
 
 usage() {
   cat <<EOF
@@ -42,6 +43,8 @@ Options:
   --threads N           NOTDEC_BINARYSUB_THREADS value (default: ${DEFAULT_THREADS})
   --native              Use the native allocator instead of jemalloc
   --frozen-tr-input-ir  Treat --input as --emit-tr-input-ir output
+  --summary-override PATH
+                        Pass NOTDEC_SUMMARY_OVERRIDE to notdec
   -h, --help            Show this help
 
 The run directory contains command.txt, rss-pss.csv, events.log, pid,
@@ -97,6 +100,11 @@ while [[ $# -gt 0 ]]; do
       frozen_tr_input=1
       shift
       ;;
+    --summary-override)
+      require_value "$@"
+      summary_override=$2
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -111,6 +119,9 @@ done
 [[ -x "${notdec_path}" ]] || die "notdec executable does not exist or is not executable: ${notdec_path}"
 [[ "${threshold_gib}" =~ ^(0|[1-9][0-9]*)$ ]] || die "--threshold-gib must be a non-negative integer"
 [[ "${threads}" =~ ^[1-9][0-9]*$ ]] || die "--threads must be a positive integer"
+if [[ -n "${summary_override}" ]]; then
+  [[ -r "${summary_override}" ]] || die "summary override does not exist or is not readable: ${summary_override}"
+fi
 
 notdec_realpath=$(readlink -f "${notdec_path}") || die "cannot resolve notdec path: ${notdec_path}"
 threshold_kib=$((threshold_gib * 1024 * 1024))
@@ -163,6 +174,9 @@ else
     "MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_final:true,prof_prefix:${output_dir}/jeprof"
     "LD_PRELOAD=${JEMALLOC_PATH}"
   )
+fi
+if [[ -n "${summary_override}" ]]; then
+  env_args+=("NOTDEC_SUMMARY_OVERRIDE=${summary_override}")
 fi
 
 {

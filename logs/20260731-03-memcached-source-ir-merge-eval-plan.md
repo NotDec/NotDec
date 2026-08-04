@@ -568,3 +568,134 @@ canonicalize 中的 `CompactType`、persistent set 与 arena 块，而不是最�
 jemalloc `prof_final:true` 保留正常退出时的最后 heap dump；`bash -n` 和以 `/bin/true` 为 target 的启动/退出
 smoke 均通过。后续优化应针对 canonicalize 的递归 record 展开和 persistent set root 大小做计数归因；
 不要据这个切片直接切断 LRU/slab 的类型约束。
+
+## opaque_body：跳过函数体约束生成（2026-08-04，已完成）
+
+### 目标
+
+对分配/协议等大函数只保留接口摘要，跳过其函数内部值的类型推理，降低 constraint
+生成和求解阶段的峰值内存。
+
+### 设计
+
+`opaque_body` 是 summary override spec 上的布尔字段，与 `is_polymorphic` 正交：
+
+- 置为 true 的函数仍会创建 function/arg/ret 节点和 `make_function(Args, Ret) <: F`
+  签名约束（caller 侧照常实例化其摘要），但 `ConstraintsGenerator::run()` 不再对该
+  函数运行 `MLsubVisitor`，因此函数体内的 load/store/call/phi 等约束全部不生成。
+- spec 若同时给出 `args`/`ret`/`constraints`，`applySummaryOverride()` 仍照常应用，
+  作为该函数的摘要；若只给 `opaque_body`，摘要就是未约束变量组成的函数类型（top
+  签名），等价于把该函数当成外部声明。
+- 不改变 SCC 划分：是否 opaque 不影响 `prepareSCC()` 的 level/分组，只影响生成内容。
+
+### 实现
+
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:316-325` 新增
+  `ConstraintsGenerator::OpaqueBodies` 成员和构造函数参数（默认空集合，既有调用点不变）；
+  `run()` 的 body 循环跳过 opaque 函数。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5480-5494` 新增
+  `MLsubRecovery::isOpaqueBody()`，读取 spec 的 `opaque_body` 布尔值；
+  `loadOverrideFileImpl()` 校验该字段必须是布尔。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:5811-5825` 的 `bottomUpPhase()` 按 SCC
+  收集 opaque 集合传入 generator，并对每个函数打印 `Info: opaque body skipped`。
+- `unittests/Retypd/MLsubGeneratorTest.cpp` 新增
+  `MLsub.OpaqueBodySkipsInstructionConstraints`：同一函数分别以 opaque/非 opaque 运行，
+  验证 opaque 时指令节点不存在、arg 节点仍存在。
+
+### 验证
+
+- `cmake --build build-relwithdebinfo-20260731 --target notdec MLsubGeneratorTest`：通过。
+- `./build-relwithdebinfo-20260731/bin/MLsubGeneratorTest`：19/19 通过。
+- `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2`：通过。
+- 20 秒 memcached 冒烟：8 个 allocator wrapper 打印 opaque 日志，无崩溃。
+
+### 效果（同一 frozen stage-B 输入、同一 RelWithDebInfo 可执行文件、单线程、16 GiB 阈值）
+
+| 配置 | 结果 | 峰值 RSS | 时间 |
+| --- | --- | ---: | ---: |
+| 基线（memcached.source.summary.json） | 16 GiB 停止，未完成 | 16,793,056 KiB | 232.6 s |
+| opaque-alloc（8 个 cache/slab wrapper） | 16 GiB 停止，未完成 | 16,790,528 KiB | 214.7 s |
+| opaque-core（+ item/conn/resp/协议簇约 38 个函数） | 16 GiB 停止，未完成 | 16,790,404 KiB | 221.9 s |
+| opaque-all（401 个定义除 main 外全部 opaque） | 完整跑完 | 204,040 KiB | 6.15 s |
+
+- 8-38 个函数只带来 ~5-8% 的时间收益，峰值内存不变：当前内存瓶颈是 level-0
+  单态大组（533 节点）的约束求解，跳过几个包装函数影响很小。
+- 把 level-0 大组主体也标记 opaque 后，从「232.6 s 未完成、16 GiB 停止」变为
+  「6.15 s 完整跑完、约 200 MiB 峰值」，证明 opaque_body 机制有效，也量化了 level-0
+  大组在内存和时间上的占比（几乎全部）。
+- opaque-all 与基线/其他配置的 `SCCs.txt` 都是 38 个 SCC，level 结构不变，差异仅在
+  SCC0 内部按指针地址排序的函数名顺序。
+
+### 说明与后续
+
+- 当前 profiling 用 `-o out.ll`，不经过 llvm2c 的 ClangTypeResult 查询；若改为 `.c`
+  输出，opaque 函数体内指令没有 value type，`ClangTypeResult::getType()` 会断言。
+  后续需要时可在 `genTypes()` 里为 opaque 函数补 top 类型 fallback。
+- 实验用的 override 文件保留在
+  `test/type-recovery/realworld/support/memcached.opaque-alloc.summary.json` 和
+  `memcached.opaque-core.summary.json`；`scripts/profile-memcached-memory.sh` 新增
+  `--summary-override` 参数用于复现。
+
+## 确定性修复与 CompactType hash-cons（2026-08-04，已完成）
+
+### 确定性修复
+
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:6191-6213`：`prepareSCC()` 的 Tarjan 遍历从
+  CallGraph 的 `std::map<const Function*, ...>`（函数对象指针地址排序，ASLR 导致每次运行
+  SCC 编号和变量 id 不同）改为按 `Module` 声明顺序遍历，`SCCs.txt` 稳定。
+- `external/binarysub/include/binarysub/PNDiff.h`：`ConsNode` 新增递增 `Seq`，
+  `PNIGraph::Worklist` 从 `std::set<ConsNode *>`（指针序）改为按 `Seq` 排序；
+  `external/binarysub/src/PNDiff.cpp` 的 `addAddCons()/addSubCons()` 赋 `Seq`。
+- 顺带修复 `src/TypeRecovery/mlsub/MLsubGenerator.cpp:269` `isFunctionPointerTable()`
+  对无 initializer 全局变量的空指针访问。
+
+### CompactType hash-cons
+
+问题：canonicalize 反复 merge 不可变 `CompactType`，`CompactTypeArena::makeImpl()` 每次都
+创建新节点且 bump arena 不回收，相同内容被创建几千万份。诊断（`notdec-slice121-hcdiag`）：
+121 切片 canonicalize 共 make 33,949,481 次，唯一结构仅 23,628 个（重复率 1437x）。
+
+修改：
+
+- `external/binarysub/include/binarysub/binarysub.h:557-590`：`CompactTypeArena` 新增
+  `consIndex`（`unordered_map<size_t, vector<CompactTypePtr>>`，按内容 hash 分桶）和临时
+  诊断字段 `hashConsHistogram`/`hashConsCreatedTotal`；`TypeSimplifier::clear()` dump 并清空。
+- `external/binarysub/src/binarysub.cpp:642-765`：新增 `compactSimpleTypeHash()`、
+  `compactContentHash()`、`compactContentEquals()`；`makeImpl()`（1514 行起）先按内容查
+  `consIndex`，命中直接返回已有节点，未命中才 `typeStorage->create()` 并登记。共享安全
+  因为 CompactType 内容不含极性（极性只是 merge 时参数）。
+
+效果（同一 frozen stage-B 输入、opaque-slabs override、单线程）：
+
+| 切片 | hash-cons 前 | hash-cons 后 |
+| --- | ---: | ---: |
+| 121 | 18.2 GB / 3:10 | 3.53 GB / 2:55 |
+| 166 | 16.4–35 GB（运行间不稳定） | 3.2 GB / 2:43 |
+
+两次完整跑完，`ValueTypes.txt`/`out.ll` 与旧 run 一致（语义无损）。
+
+### 增量切片测量（2026-08-04，32 GiB 阈值）
+
+固定 `memcached.opaque-slabs.summary.json`（8 个 cache/slab opaque）：
+
+| 切片 | 函数数 | SCC0 成员 | wall | 峰值 RSS |
+| --- | ---: | ---: | ---: | ---: |
+| crawler | 121 | — | 2:55 | 3.45 GB |
+| assoc_init | 166 | 248 | 2:43 / 5:58 | 3.2 / 7.8 GB |
+| +hash | 186 | — | 2:55 | 3.26 GB |
+| +ssl | 199 | — | 2:57 | 3.26 GB |
+| +extstore | 235 | 344 | 4:12 | 4.7 GB |
+| 全量 | 401 | 533 | >55 min 未完成 | 0.23 GB（flat） |
+
+结论：
+
+- 121→235 全部跑完、峰值 3.2→4.7 GB，没有单函数触发点。
+- 全量 401 卡在 canonicalize：jeprof i50–i330 live heap 逐字节相同（87.7 MB）、RSS 228 MB
+  不动，55 分钟未离开该阶段。hash-cons 消除了 arena 膨胀，瓶颈从内存转为 CPU。
+- perf 热点：`CompactTypeBuilder::append` 23%、`lookupGo0Cache` 8%、CompactVarSet 红黑树插入。
+  原因是 `canonicalizeType::go1` 无结果缓存，共享递归类型被每个 root 重复展开，SCC0 规模
+  248→344→533 时近似超线性。
+- 235 峰值 dump 82.8% live heap 在 `coalesceCompactType`（UType 构建），canonicalize 仅 0.1%：
+  各切片峰值来自最后的 CompactType→UType 转换。
+- 下一步候选：环检测 + 非环 go1 缓存（递归折叠依赖 DFS 路径，简单按 (ty,pol) 缓存不 sound，
+  只有不在引用图环上的节点结果与路径无关）。
