@@ -40,7 +40,6 @@
 
 #include "TypeRecovery/mlsub/MLsubGraph.h"
 #include "TypeRecovery/mlsub/MergePolicyEval.h"
-#include "TypeRecovery/mlsub/PointerAnalysis.h"
 #include "binarysub/PNDiff.h"
 #include "binarysub/binarysub-core.h"
 #include "notdec-llvm2c/Interface.h"
@@ -57,13 +56,6 @@ using binarysub::SimpleType;
 using ExtValueLabelCache = std::map<ExtValuePtr, std::string>;
 
 struct ConstraintsGenerator;
-
-struct RecordedLoad {
-  ExtValuePtr Addr;
-  SimpleType ResultTy = nullptr;
-  unsigned BitSize = 0;
-  llvm::Instruction *Source = nullptr;
-};
 
 struct RecordedStore {
   ExtValuePtr Addr;
@@ -82,23 +74,11 @@ struct EVMStoreEvidence {
   llvm::Instruction *Source = nullptr;
 };
 
-/// Records IR memory events and gives each explicit MemoryLocKey a content
-/// SimpleType. The records are kept outside PointerAnalysis so PA only answers
-/// object identity, while BinarySub still owns the actual content type.
-struct MemoryAccessRecords {
-  std::map<MemoryLocKey, SimpleType> LocTypes;
-  std::map<ExtValuePtr, std::vector<RecordedLoad>> LoadsByAddr;
+/// EVM semantic passes need the original store instructions after BinarySub
+/// state has been converted into HType. This is evidence collection only; it
+/// does not model aliases or create any pointer-analysis constraints.
+struct EVMStoreRecords {
   std::map<ExtValuePtr, std::vector<RecordedStore>> StoresByAddr;
-  std::set<std::pair<MemoryLocKey, SimpleType>> EmittedLoadConstraints;
-  std::set<std::pair<SimpleType, MemoryLocKey>> EmittedStoreConstraints;
-  std::set<std::tuple<ExtValuePtr, SimpleType, unsigned>> EmittedLoadViews;
-  std::set<std::tuple<ExtValuePtr, SimpleType, unsigned>> EmittedStoreViews;
-  std::set<std::tuple<MemoryLocKey, llvm::Instruction *, llvm::Instruction *>>
-      EmittedStoreLoadRelations;
-  std::set<std::tuple<SimpleType, SimpleType, unsigned>> ObservedOldRelations;
-
-  SimpleType getOrCreateLocType(ConstraintsGenerator &CG,
-                                const MemoryLocKey &Loc);
 };
 
 struct ConstraintsGenerator {
@@ -106,7 +86,6 @@ struct ConstraintsGenerator {
   std::string Name;
   // ConstraintGraph CG;
   PNIGraph PG;
-  PointerAnalysis PA;
   const std::set<llvm::Function *> &SCCs;
   int lvl = 0;
   SimpleType MemoryType = nullptr;
@@ -117,7 +96,7 @@ struct ConstraintsGenerator {
   std::map<std::string, SimpleType> *StorageFields = nullptr;
 
   DSUMap<ExtValuePtr, SimpleType> V2N;
-  MemoryAccessRecords MemoryAccesses;
+  EVMStoreRecords EVMStoreAccesses;
   std::map<ExtValuePtr, ast::HType *> ValueTypesLower;
   // Keep both solved bounds per value. ValueTypesLower is the pos=true result;
   // ValueTypesUpper is the pos=false result.
@@ -159,7 +138,6 @@ struct ConstraintsGenerator {
   std::vector<ReturnValueMergeCandidate> ReturnValueMergeCandidates;
   bool EnablePNDiffTypeVariableClosureUnification = true;
   std::ostream *TraceStream = nullptr;
-  PointerAnalysisMode PAMode = PointerAnalysisMode::Original;
   std::shared_ptr<MergePolicyEval> MergeEval;
   bool EnableStructPtrLoadStoreMerge = false;
 
@@ -354,16 +332,6 @@ struct ConstraintsGenerator {
         EnableStructPtrLoadStoreMerge(EnableStructPtrLoadStoreMerge) {
     PG.TraceStream = TraceStream;
     configurePNDiffCallbacks();
-    if (auto *Mode = std::getenv("NOTDEC_POINTER_ANALYSIS_MODE")) {
-      if (std::strcmp(Mode, "shadow") == 0) {
-        PAMode = PointerAnalysisMode::Shadow;
-      } else if (std::strcmp(Mode, "replace") == 0) {
-        PAMode = PointerAnalysisMode::Replace;
-      } else if (std::strcmp(Mode, "original") != 0) {
-        llvm::errs() << "Warning: unknown NOTDEC_POINTER_ANALYSIS_MODE='"
-                     << Mode << "', using original.\n";
-      }
-    }
     if (auto *Mode = std::getenv("NOTDEC_LOCAL_SUBTYPE_MERGE_MODE")) {
       if (std::strcmp(Mode, "pointer") == 0) {
         LocalSubtypeMode = LocalSubtypeMergeMode::Pointer;
@@ -412,10 +380,6 @@ struct ConstraintsGenerator {
       assert(F->getAsVariableState() != nullptr);
     }
     PG.solve();
-    if (isPointerAnalysisEnabled()) {
-      PA.solve();
-      flushPointerDerivedTypeConstraints();
-    }
     {
       auto Merged = applyCallInterfaceMergePolicy();
       llvm::errs() << "Info: transactional call interface merge policy merged "
@@ -451,7 +415,6 @@ struct ConstraintsGenerator {
   void unifyPNDiffValueGroups(llvm::ArrayRef<ExtValuePtr> LeftValues,
                               llvm::ArrayRef<ExtValuePtr> RightValues,
                               const SimpleType &Lhs, const SimpleType &Rhs);
-  void observeOldMemoryTypeEdge(const SimpleType &Lhs, const SimpleType &Rhs);
   void emitMappingTrace(llvm::StringRef Event, ExtValuePtr Val,
                         const SimpleType &Ty);
   void emitRemapTrace(llvm::StringRef Event, ExtValuePtr Val,
@@ -459,7 +422,6 @@ struct ConstraintsGenerator {
   void emitMergeTrace(llvm::StringRef Event, SimpleType From, SimpleType To,
                       llvm::ArrayRef<ExtValuePtr> MovedValues);
   void emitTypeRecoveryTrace(const std::string &Message);
-  void emitPointerAnalysisTrace(const std::string &Message);
   PNIValue getPNIValue(const ExtValuePtr &Val);
   const ExtValuePtr &getPNIExtValue(PNIValue Val) const;
   PNTy getPNILatticeType(const ExtValuePtr &Val) const;
@@ -503,7 +465,6 @@ struct ConstraintsGenerator {
         lhs, rhs, cache,
         [this](const SimpleType &Lhs, const SimpleType &Rhs) {
           maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
-          observeOldMemoryTypeEdge(Lhs, Rhs);
         },
         ContextPtr);
     if (!Result) {
@@ -552,42 +513,11 @@ struct ConstraintsGenerator {
   unsigned getSize(ExtValuePtr Val) {
     return notdec::getSize(Val, PointerSize);
   }
-  bool isPointerAnalysisEnabled() const {
-    return PAMode != PointerAnalysisMode::Original;
-  }
-  bool isPointerAnalysisReplacingBinarysubMemory() const {
-    return PAMode == PointerAnalysisMode::Replace;
-  }
-  bool shouldTracePointerAnalysis() const {
-    return isPointerAnalysisEnabled() && TraceStream != nullptr;
-  }
-  MemoryLocKey withAccessSize(MemoryLocKey Loc, unsigned BitSize) const {
-    Loc.BitSize = BitSize;
-    return Loc;
-  }
-  MemoryLocKey getRootMemoryObject(ExtValuePtr Root, unsigned BitSize = 0) {
-    return PA.getRootObject(Root, BitSize);
-  }
-  void addAddressOf(ExtValuePtr Dst, MemoryLocKey Obj) {
-    if (isPointerAnalysisEnabled()) {
-      PA.addAddrOf(Dst, Obj);
-    }
-  }
-  void addPointerCopy(ExtValuePtr Dst, ExtValuePtr Src) {
-    if (isPointerAnalysisEnabled()) {
-      PA.addCopy(Dst, Src);
-    }
-  }
-  void recordLoad(ExtValuePtr Addr, SimpleType ResultTy, unsigned BitSize,
-                  llvm::Instruction *Source);
   void recordStore(ExtValuePtr Addr, SimpleType ValueTy, unsigned BitSize,
                    llvm::Instruction *Source);
   void addEVMConstantMemoryField(ExtValuePtr Addr, SimpleType ValueTy);
   SimpleType getOrCreateStorageField(llvm::StringRef FieldName,
                                      unsigned BitSize = 0);
-  void onPointsToDelta(ExtValuePtr Addr, MemoryLocKey Loc);
-  void addPointerAccessViews();
-  void flushPointerDerivedTypeConstraints();
 
   void onUpdatePNType(ExtValuePtr Val) {}
   void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off) {
@@ -603,9 +533,6 @@ struct ConstraintsGenerator {
     fields.emplace_back(Off.str(), ResultNode);
     addSubtype(BaseNode, binarysub::make_record(std::move(fields)));
     addSubtype(ResultNode, binarysub::make_record({}));
-    if (isPointerAnalysisEnabled()) {
-      PA.addField(result, basePtr, Off, getSize(result));
-    }
   }
 
 public:

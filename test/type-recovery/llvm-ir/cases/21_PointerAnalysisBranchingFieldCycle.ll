@@ -1,9 +1,10 @@
-; This case extracts the shape behind fortune's hot malloc loop.
+; This case extracts the shape behind fortune's hot malloc loop and exercises
+; recursive field recovery.
 ; The loop-carried pointer %p feeds three backedge candidates:
 ; - one +1 step
 ; - two distinct +4 steps from different branch sites
-; Current PA path dedup keeps ptradd site tags, so the two +4 edges are
-; different atoms even though they print as the same "@4" offset in traces.
+; The two +4 edges come from different branch sites and must remain distinct
+; even though they print as the same "@4" offset in the recovered shape.
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
 target triple = "wasm32-unknown-wasi"
 

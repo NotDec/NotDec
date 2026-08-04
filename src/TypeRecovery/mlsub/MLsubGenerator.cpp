@@ -2921,49 +2921,6 @@ void ConstraintsGenerator::emitTypeRecoveryTrace(const std::string &Message) {
   binarysub::binarysub_trace(Message);
 }
 
-SimpleType
-MemoryAccessRecords::getOrCreateLocType(ConstraintsGenerator &CG,
-                                        const MemoryLocKey &Loc) {
-  auto It = LocTypes.find(Loc);
-  if (It != LocTypes.end()) {
-    return It->second;
-  }
-  auto Ty = binarysub::fresh_variable(CG.lvl, Loc.BitSize);
-  LocTypes.insert({Loc, Ty});
-  CG.emitPointerAnalysisTrace("[pa:obj-type] loc=" + formatMemoryLocKey(Loc) +
-                              " ty=" + binarysub::debug_string(Ty));
-  return Ty;
-}
-
-void ConstraintsGenerator::emitPointerAnalysisTrace(
-    const std::string &Message) {
-  if (!shouldTracePointerAnalysis()) {
-    return;
-  }
-  *TraceStream << Message << "\n";
-  TraceStream->flush();
-}
-
-void ConstraintsGenerator::observeOldMemoryTypeEdge(const SimpleType &Lhs,
-                                                    const SimpleType &Rhs) {
-  if (PAMode != PointerAnalysisMode::Shadow || TraceStream == nullptr) {
-    return;
-  }
-  auto *Store = Lhs->getAsPtrStore();
-  auto *Load = Rhs->getAsPtrLoad();
-  if (Store == nullptr || Load == nullptr || Store->Size != Load->Size) {
-    return;
-  }
-  auto Key = std::make_tuple(Store->to, Load->to, Store->Size);
-  if (!MemoryAccesses.ObservedOldRelations.insert(Key).second) {
-    return;
-  }
-  emitPointerAnalysisTrace(
-      "[pa:old-store-load] size=" + std::to_string(Store->Size) +
-      " store=" + binarysub::debug_string(Store->to) +
-      " load=" + binarysub::debug_string(Load->to));
-}
-
 bool ConstraintsGenerator::configureConstraintContext(
     binarysub::ConstraintContext &Context) {
   bool HasHook = true;
@@ -3021,7 +2978,6 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
       From, Into,
       [this](const SimpleType &Lhs, const SimpleType &Rhs) {
         maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
-        observeOldMemoryTypeEdge(Lhs, Rhs);
       },
       ContextPtr);
   if (!Result) {
@@ -3913,7 +3869,6 @@ struct PendingPNDiffUnify {
 };
 
 struct PendingCallMergeEffects {
-  std::vector<std::pair<SimpleType, SimpleType>> ConstraintPairs;
   std::vector<PendingCallPolicyMerge> PolicyMerges;
   std::vector<PendingPNDiffUnify> PNDiffUnifies;
   std::vector<std::string> MergeAttempts;
@@ -4430,7 +4385,6 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
             From, Into,
             [&](const SimpleType &Lhs, const SimpleType &Rhs) {
               QueuePNDiffUnify(Lhs, Rhs);
-              Effects.ConstraintPairs.emplace_back(Lhs, Rhs);
             },
             &Context);
         ActiveExplicitFrom = nullptr;
@@ -4477,9 +4431,6 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
     }
 
     Transaction.commit();
-    for (const auto &Pair : Effects.ConstraintPairs) {
-      CG.observeOldMemoryTypeEdge(Pair.first, Pair.second);
-    }
     for (const auto &Pending : Effects.PNDiffUnifies) {
       CG.unifyPNDiffValueGroups(Pending.LeftValues, Pending.RightValues,
                                Pending.Lhs, Pending.Rhs);
@@ -4974,33 +4925,16 @@ std::size_t ConstraintsGenerator::applyStructPtrLoadStoreMergePolicy() {
   return Merged;
 }
 
-void ConstraintsGenerator::recordLoad(ExtValuePtr Addr, SimpleType ResultTy,
-                                      unsigned BitSize,
-                                      llvm::Instruction *Source) {
-  if (!isPointerAnalysisEnabled()) {
-    return;
-  }
-  MemoryAccesses.LoadsByAddr[Addr].push_back(
-      RecordedLoad{.Addr = Addr, .ResultTy = ResultTy, .BitSize = BitSize,
-                   .Source = Source});
-  emitPointerAnalysisTrace("[pa:record-load] addr=" + toStableString(Addr) +
-                           " size=" + std::to_string(BitSize));
-}
-
 void ConstraintsGenerator::recordStore(ExtValuePtr Addr, SimpleType ValueTy,
                                        unsigned BitSize,
                                        llvm::Instruction *Source) {
-  bool KeepForEVMEvidence =
-      Source != nullptr && Source->getModule() != nullptr &&
-      isEVMModule(*Source->getModule());
-  if (!isPointerAnalysisEnabled() && !KeepForEVMEvidence) {
+  if (Source == nullptr || Source->getModule() == nullptr ||
+      !isEVMModule(*Source->getModule())) {
     return;
   }
-  MemoryAccesses.StoresByAddr[Addr].push_back(
+  EVMStoreAccesses.StoresByAddr[Addr].push_back(
       RecordedStore{.Addr = Addr, .ValueTy = ValueTy, .BitSize = BitSize,
                     .Source = Source});
-  emitPointerAnalysisTrace("[pa:record-store] addr=" + toStableString(Addr) +
-                           " size=" + std::to_string(BitSize));
 }
 
 void ConstraintsGenerator::addEVMConstantMemoryField(ExtValuePtr Addr,
@@ -5047,138 +4981,6 @@ SimpleType ConstraintsGenerator::getOrCreateStorageField(
     TraceStream->flush();
   }
   return FieldTy;
-}
-
-void ConstraintsGenerator::onPointsToDelta(ExtValuePtr Addr,
-                                           MemoryLocKey Loc) {
-  if (auto LoadsIt = MemoryAccesses.LoadsByAddr.find(Addr);
-      LoadsIt != MemoryAccesses.LoadsByAddr.end()) {
-    for (const auto &Load : LoadsIt->second) {
-      auto AccessLoc = withAccessSize(Loc, Load.BitSize);
-      auto ObjTy = MemoryAccesses.getOrCreateLocType(*this, AccessLoc);
-      if (MemoryAccesses.EmittedLoadConstraints.insert({AccessLoc, Load.ResultTy})
-              .second) {
-        emitPointerAnalysisTrace(
-            "[pa:new-load-edge] loc=" + formatMemoryLocKey(AccessLoc) +
-            " load=" + binarysub::debug_string(Load.ResultTy));
-        if (isPointerAnalysisReplacingBinarysubMemory()) {
-          addSubtype(ObjTy, Load.ResultTy);
-        }
-      }
-    }
-  }
-
-  if (auto StoresIt = MemoryAccesses.StoresByAddr.find(Addr);
-      StoresIt != MemoryAccesses.StoresByAddr.end()) {
-    for (const auto &Store : StoresIt->second) {
-      auto AccessLoc = withAccessSize(Loc, Store.BitSize);
-      auto ObjTy = MemoryAccesses.getOrCreateLocType(*this, AccessLoc);
-      if (MemoryAccesses.EmittedStoreConstraints.insert({Store.ValueTy, AccessLoc})
-              .second) {
-        emitPointerAnalysisTrace(
-            "[pa:new-store-edge] store=" +
-            binarysub::debug_string(Store.ValueTy) +
-            " loc=" + formatMemoryLocKey(AccessLoc));
-        if (isPointerAnalysisReplacingBinarysubMemory()) {
-          addSubtype(Store.ValueTy, ObjTy);
-        }
-      }
-    }
-  }
-}
-
-void ConstraintsGenerator::addPointerAccessViews() {
-  if (!isPointerAnalysisReplacingBinarysubMemory()) {
-    return;
-  }
-  for (const auto &[Addr, Loads] : MemoryAccesses.LoadsByAddr) {
-    auto PtrTy = getNodeOrNull(Addr);
-    if (PtrTy == nullptr) {
-      continue;
-    }
-    for (const auto &Load : Loads) {
-      auto Key = std::make_tuple(Addr, Load.ResultTy, Load.BitSize);
-      if (!MemoryAccesses.EmittedLoadViews.insert(Key).second) {
-        continue;
-      }
-      emitPointerAnalysisTrace(
-          "[pa:view-load] addr=" + toStableString(Addr) +
-          " ty=" + binarysub::debug_string(Load.ResultTy) +
-          " size=" + std::to_string(Load.BitSize));
-      addSubtype(PtrTy, binarysub::make_ptr_load(Load.ResultTy, Load.BitSize));
-    }
-  }
-  for (const auto &[Addr, Stores] : MemoryAccesses.StoresByAddr) {
-    auto PtrTy = getNodeOrNull(Addr);
-    if (PtrTy == nullptr) {
-      continue;
-    }
-    for (const auto &Store : Stores) {
-      auto Key = std::make_tuple(Addr, Store.ValueTy, Store.BitSize);
-      if (!MemoryAccesses.EmittedStoreViews.insert(Key).second) {
-        continue;
-      }
-      emitPointerAnalysisTrace(
-          "[pa:view-store] addr=" + toStableString(Addr) +
-          " ty=" + binarysub::debug_string(Store.ValueTy) +
-          " size=" + std::to_string(Store.BitSize));
-      addSubtype(PtrTy,
-                 binarysub::make_ptr_store(Store.ValueTy, Store.BitSize));
-    }
-  }
-}
-
-void ConstraintsGenerator::flushPointerDerivedTypeConstraints() {
-  std::map<MemoryLocKey, std::vector<const RecordedLoad *>> LoadsByLoc;
-  std::map<MemoryLocKey, std::vector<const RecordedStore *>> StoresByLoc;
-
-  for (const auto &[Slot, Locs] : PA.pointsTo()) {
-    for (const auto &Loc : Locs) {
-      emitPointerAnalysisTrace("[pa:pts] slot=" + formatPointerSlotKey(Slot) +
-                               " loc=" + formatMemoryLocKey(Loc));
-    }
-
-    const auto *Addr = std::get_if<ExtValuePtr>(&Slot);
-    if (Addr == nullptr) {
-      continue;
-    }
-    for (const auto &Loc : Locs) {
-      onPointsToDelta(*Addr, Loc);
-
-      if (auto LoadsIt = MemoryAccesses.LoadsByAddr.find(*Addr);
-          LoadsIt != MemoryAccesses.LoadsByAddr.end()) {
-        for (const auto &Load : LoadsIt->second) {
-          LoadsByLoc[withAccessSize(Loc, Load.BitSize)].push_back(&Load);
-        }
-      }
-      if (auto StoresIt = MemoryAccesses.StoresByAddr.find(*Addr);
-          StoresIt != MemoryAccesses.StoresByAddr.end()) {
-        for (const auto &Store : StoresIt->second) {
-          StoresByLoc[withAccessSize(Loc, Store.BitSize)].push_back(&Store);
-        }
-      }
-    }
-  }
-
-  for (const auto &[Loc, Stores] : StoresByLoc) {
-    auto LoadsIt = LoadsByLoc.find(Loc);
-    if (LoadsIt == LoadsByLoc.end()) {
-      continue;
-    }
-    for (const auto *Store : Stores) {
-      for (const auto *Load : LoadsIt->second) {
-        auto Key = std::make_tuple(Loc, Store->Source, Load->Source);
-        if (!MemoryAccesses.EmittedStoreLoadRelations.insert(Key).second) {
-          continue;
-        }
-        emitPointerAnalysisTrace(
-            "[pa:new-store-load] loc=" + formatMemoryLocKey(Loc) +
-            " store=" + binarysub::debug_string(Store->ValueTy) +
-            " load=" + binarysub::debug_string(Load->ResultTy));
-      }
-    }
-  }
-  addPointerAccessViews();
 }
 
 void ConstraintsGenerator::addMergeNode(SimpleType From, SimpleType To) {
@@ -5280,11 +5082,6 @@ SimpleType ConstraintsGenerator::createNode(ExtValuePtr Val) {
   getOrInsertPNINode(Val);
   if (std::get_if<ConstantAddr>(&Val)) {
     setPointer(Val);
-    addAddressOf(Val, getRootMemoryObject(Val));
-  } else if (auto *V = std::get_if<llvm::Value *>(&Val)) {
-    if (llvm::isa<llvm::GlobalVariable>(*V)) {
-      addAddressOf(Val, getRootMemoryObject(Val));
-    }
   }
   return N;
 }
@@ -5298,7 +5095,6 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
     attachExternalValueHandle(Ty, Val);
     emitRemapTrace("remap-alias", Val, Target, Ty);
     remapPNINode(Val, Target);
-    addPointerCopy(Val, Target);
     return N;
   }
   auto It = V2N.insert(Val, Ty);
@@ -5315,7 +5111,6 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
     MergeEval->observeValueNode(Val, Ty);
   }
   remapPNINode(Val, Target);
-  addPointerCopy(Val, Target);
   return It.first->second;
 }
 
@@ -6238,7 +6033,7 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
         Data.Generator->SnapshotContraVariantValues.begin(),
         Data.Generator->SnapshotContraVariantValues.end());
     if (isEVMModule(M)) {
-      for (const auto &Ent : Data.Generator->MemoryAccesses.StoresByAddr) {
+      for (const auto &Ent : Data.Generator->EVMStoreAccesses.StoresByAddr) {
         for (const RecordedStore &Store : Ent.second) {
           auto *StoreInst =
               llvm::dyn_cast_or_null<llvm::StoreInst>(Store.Source);
@@ -8730,11 +8525,10 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
 
   // TODO if is allocation function, treat as alloca inst
   if (isHeapAllocationCall(I)) {
-    auto Node = cg.createNode(&I);
+    cg.createNode(&I);
     // set as pointer type
     cg.setPointer(&I);
     cg.ContraVariantValues.insert(&I);
-    cg.addAddressOf(&I, cg.getRootMemoryObject(HeapObject{.Allocator = &I}));
   } else if (handleEVMMarkerCall(I)) {
     return;
   } else if (shouldIgnoreRuntimeCall(I)) {
@@ -8814,7 +8608,6 @@ void ConstraintsGenerator::MLsubVisitor::handlePHINodes() {
       auto *Src = I->getIncomingValue(i);
       auto SrcVar = cg.getOrInsertNode(getExtValuePtr(Src, I, i));
       cg.addSubtype(SrcVar, P);
-      cg.addPointerCopy(I, getExtValuePtr(Src, I, i));
     }
   }
 }
@@ -8850,16 +8643,10 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   auto BitSize = cg.getLLVMTypeSize(I.getType());
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 0);
 
-  cg.recordLoad(Addr, RetVal, BitSize, &I);
   if (I.getModule() != nullptr && isEVMModule(*I.getModule())) {
     cg.addEVMConstantMemoryField(Addr, RetVal);
   }
-  if (cg.isPointerAnalysisEnabled() && I.getType()->isPointerTy()) {
-    cg.PA.addLoadPtr(&I, Addr);
-  }
-  if (!cg.isPointerAnalysisReplacingBinarysubMemory()) {
-    cg.addSubtype(PtrVal, binarysub::make_ptr_load(RetVal, BitSize));
-  }
+  cg.addSubtype(PtrVal, binarysub::make_ptr_load(RetVal, BitSize));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
@@ -8888,27 +8675,19 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   auto BitSize = cg.getLLVMTypeSize(I.getValueOperand()->getType());
   auto StoreVal = cg.getOrInsertNode(getExtValuePtr(I.getValueOperand(), &I, 0));
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 1);
-  auto Value = getExtValuePtr(I.getValueOperand(), &I, 0);
 
   cg.recordStore(Addr, StoreVal, BitSize, &I);
   if (I.getModule() != nullptr && isEVMModule(*I.getModule())) {
     cg.addEVMConstantMemoryField(Addr, StoreVal);
   }
-  if (cg.isPointerAnalysisEnabled() &&
-      I.getValueOperand()->getType()->isPointerTy()) {
-    cg.PA.addStorePtr(Addr, Value);
-  }
-  if (!cg.isPointerAnalysisReplacingBinarysubMemory()) {
-    cg.addSubtype(PtrVal, binarysub::make_ptr_store(StoreVal, BitSize));
-  }
+  cg.addSubtype(PtrVal, binarysub::make_ptr_store(StoreVal, BitSize));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {
-  auto Node = cg.createNode(&I);
+  cg.createNode(&I);
   // set as pointer type
   cg.setPointer(&I);
   cg.ContraVariantValues.insert(&I);
-  cg.addAddressOf(&I, cg.getRootMemoryObject(StackObject{.Allocator = &I}));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitGetElementPtrInst(
@@ -8983,8 +8762,6 @@ void ConstraintsGenerator::MLsubVisitor::visitSelectInst(SelectInst &I) {
   // Not generate boolean constraints. Because it must be i1.
   cg.addSubtype(Src1Var, DstVar);
   cg.addSubtype(Src2Var, DstVar);
-  cg.addPointerCopy(&I, getExtValuePtr(Src1, &I, 1));
-  cg.addPointerCopy(&I, getExtValuePtr(Src2, &I, 2));
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAdd(BinaryOperator &I) {

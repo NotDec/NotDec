@@ -1,7 +1,7 @@
-; This small loop is meant to stress replace-mode PointerAnalysis.
+; This small loop exercises recursive pointer-arithmetic field recovery.
 ; The phi copies %next back into %p, while %next is %p plus one byte.
-; In PA terms this forms p <- field(p), which can keep extending MemoryLocKey
-; paths if the solver does not cap or merge recursive field paths.
+; The recursive BinarySub field constraints must converge without losing the
+; load/store evidence at the two adjacent addresses.
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
 target triple = "wasm32-unknown-wasi"
 
