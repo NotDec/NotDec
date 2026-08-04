@@ -64,3 +64,41 @@ go1 在折叠检查之后查缓存，未命中时先合并 bounds、`exportSnaps
    优于 360s（期望接近 28s），峰值 RSS 优于 7.6GB。
 3. 全量 401：canonicalize 阶段能跑完或显著加速；若仍卡住，报告 go1 缓存命中率并分析
    剩余热点。
+
+## 完整展开缓存（第二轮，已实现）
+
+merged 快照缓存提交（6ed5bb6）后，按用户"也可以试试吧"继续试"无折叠完整展开缓存"：
+对展开中没有任何折叠（`!anyChildFolding && result == adapted`）的 go1 帧缓存整棵结果树，
+命中时跳过子树展开。
+
+### 实现要点
+
+- `TypeSimplifier` 新增 `go1FullCache`（`ConcurrentPolarCompactTypeMap<Go1FullCacheEntry>`），
+  条目为 `{result, missingKeys}`：`missingKeys` 记录展开过程中对全局 `recursive` 表查询
+  为"不存在"的所有 key。`recursive` 表在 canonicalize 期间只增不减，因此命中时逐个验证
+  这些 key 仍不在表里，结果就与重新展开一致。
+- 命中还需满足：顶层 key 不在 `recursive` 表（否则本帧 finalize 会折叠）、merged 输入树
+  与当前 root 的 `inProcess` 活动路径无重叠（`overlapsActivePath`）、输入树不物理引用自身
+  根（`treeContainsNode`，自引用 DAG 展开时折叠依赖表状态）。验证通过立即返回，**不能在
+  验证后继续重算**：重算会向 `recursive` 表插入子树折叠创建的 key，污染后续 root 的展开。
+- 存储用拷贝而非 move：`outMissing` 是调用方 `childMissing` 的引用，move 会清空它，父帧
+  随后合并到的依赖集合为空，导致命中验证漏检（实测 mismatch 从 24189 次降到 4 次）。
+
+### 调试结论
+
+- 展开结果不仅依赖 `inProcess` 路径，还依赖全局 `recursive` 表对每个 descendant 的
+  存在性；缓存复用必须记录并验证这些依赖（`missingKeys`）。
+- ValueTypes.txt 与无缓存基线有 791 行差异（递归变量折叠位置/编号不同），但 **out.ll
+  与基线逐字节一致**，差异是等价的递归节点选择，不影响最终产物。之前"merged 缓存逐字节
+  一致"的验证实际上只在 out.ll 层面成立。
+
+### 实测（166 切片，1 线程，无 jemalloc）
+
+| 版本 | wall | 峰值 RSS | out.ll vs 无缓存基线 |
+|---|---|---|---|
+| 无 go1 缓存（nocache） | 361s | 7.6GB | - |
+| merged 快照缓存（6ed5bb6） | 125.8s | 7.35GB | 一致 |
+| merged + full cache（本轮） | 70.2s | 6.26GB | 一致 |
+
+时间再降 44%，内存降 15%，输出 IR 一致。`TypeBuilderTest` 通过；
+`ctest notdec.type_recovery.*` 的 3 个失败在 stash 前后一致，属既有失败。
