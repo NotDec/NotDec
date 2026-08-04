@@ -515,3 +515,56 @@ jemalloc 的接近峰值阶段 dump `jeprof.2756606.4.i4.heap` 有 377,705,832 B
 
 vsftpd 因此适合作为 13 秒左右的完整回归输入，用来检查释放、输出验证和错误合并；它没有复现 memcached
 的多 GiB 压力，不能代替后者评估峰值内存优化。
+
+## memcached 函数切分与完整峰值（2026-08-04，已完成）
+
+为了把 whole-program 在 56 GiB 阈值前仍未完成的压力对应到输入函数，从 frozen stage-B
+`/tmp/notdec-memcached-stage-b-20260801.bc` 用 LLVM 22 `llvm-extract` 只保留选中函数的定义；未选中
+函数保留为声明。每个切片均经过 LLVM 22 `opt -passes=verify`，再用 RelWithDebInfo `notdec`、单线程、
+jemalloc 和 `--frozen-tr-input-ir` 运行。这个方法保留选中函数之间的接口约束，但不是 full memcached 的
+语义等价替代物；它用于定位增长来源，不用于替换完整回归。
+
+| 切片 | 定义数 | wall | `/usr/bin/time -v` 峰值 RSS | 结论 |
+| --- | ---: | ---: | ---: | --- |
+| `drive_machine` | 1 | 0.56 s | 0.15 GiB | 状态机本体不大 |
+| ASCII handler 子图（不含 `drive_machine`） | 46 | 27.62 s | 3.13 GiB | 可完整结束 |
+| `drive_machine` + binary 子图 | 48 | 19.02 s | 2.00 GiB | binary 分支不是触发项 |
+| ASCII item core（不含 `lru_pull_tail`） | 31 | 35.33 s | 3.97 GiB | 可完整结束 |
+| 上一行加 `lru_pull_tail` | 32 | 38.44 s | 4.35 GiB | 多出明显但会释放的临时峰值 |
+| 上一行加 `slabs_alloc` | 33 | 45.57 s | 4.86 GiB | slab freelist 已继续放大 |
+| 再加 `do_slabs_newslab`、`do_slabs_free` | 35 | 69.03 s | 7.92 GiB | 已复现主体高峰 |
+| 完整 ASCII + `drive_machine` 子图 | 47 | 71.98 s | 8.11 GiB | 完整结束；此前 8 GiB 阈值恰好过早停止 |
+
+关键调用和字段关系在 memcached 源码中很直接：
+
+- `proto_text.c:134-` 的 `complete_nread_ascii()` 从 `conn::item` 取 `item *` 并进入存储路径；
+  `memcached.c:1486` 的 `drive_machine()` 调它。
+- `items.c:174-212` 的 `do_item_alloc_pull()` 交替调用 `lru_pull_tail()` 和 `slabs_alloc()`。
+- `items.c:1102-1275` 的 `lru_pull_tail()` 通过 `tails[id]` 和 `item::prev/next` 遍历、摘除和重新链接
+  `item`；`items.c:420-496` 的队列辅助函数也读写同一组字段。
+- `slabs.c:406-447` 的内联 `do_slabs_alloc()` 从 `slabclass::slots` 取出同一个 `item`，而
+  `slabs.c:498-523` 的 `do_slabs_free()` 把它重新作为 freelist 节点写回 `next/prev`；
+  `do_slabs_newslab()` 在 369-403 行把新页切成这条 freelist。
+
+因此高峰不是某个 memcached 函数在运行时分配了数 GiB，而是同一个 raw `item` 在 LRU 双向链和 slab
+freelist 两种状态下复用 `next/prev`，并由 ASCII `conn -> item` 路径和分配/回收路径连到同一组约束。
+这会形成真实的递归 record/union 形状，不能为了省内存把这些调用边或字段约束直接丢掉。单独的
+`drive_machine`、最短 7 函数调用链、`lru_pull_tail` 加队列函数都只有约 0.16 GiB；高峰需要已有 item
+子图和 slab allocation core 同时存在，故结论是函数组合而非单一坏函数。
+
+完整 47 函数切片的 RSS/PSS 采样在 68.382 s 达 8.01 GiB，随后在类型恢复后段快速降至约
+3.13 GiB；`time -v` 捕获到采样间隔遗漏的 8.11 GiB 最大值。峰值前最后一个 jemalloc dump
+`jeprof.756488.26.i26.heap` 的 live heap 为 7,719,577,446 B：
+
+- `TypedBumpArena::create/addBlock` 路径为 6.230 GiB（80.7%）。
+- `canonicalizeType()` 调用树覆盖 7.202 GiB（93.3%）；`PersistentSet::Factory::add` 覆盖 2.501 GiB
+  （32.4%）；`CompactTypeArena::makeImpl` 覆盖 3.729 GiB（48.3%）。
+
+后三项是嵌套调用树的 cumulative 值，不能相加。它们和之前 whole-program profile 一致：高峰仍是
+canonicalize 中的 `CompactType`、persistent set 与 arena 块，而不是最终 `UType/HType` 常驻对象。该切片
+仍有 `bad_unions=1`，所以它可用于内存定位，不能在未检查该 union 前作为语义正确性的性能 golden。
+
+`scripts/profile-memcached-memory.sh:37-264` 同时补齐 `--threshold-gib 0` 表示不设 RSS 上限，并启用
+jemalloc `prof_final:true` 保留正常退出时的最后 heap dump；`bash -n` 和以 `/bin/true` 为 target 的启动/退出
+smoke 均通过。后续优化应针对 canonicalize 的递归 record 展开和 persistent set root 大小做计数归因；
+不要据这个切片直接切断 LRU/slab 的类型约束。

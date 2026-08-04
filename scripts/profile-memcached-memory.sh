@@ -37,7 +37,8 @@ Options:
   --input PATH          Input bitcode (default: ${DEFAULT_INPUT})
   --notdec PATH         notdec executable (default: ${DEFAULT_NOTDEC})
   --output-dir PATH     Run directory (default: a new /tmp directory)
-  --threshold-gib N     Stop at N GiB RSS (default: ${DEFAULT_THRESHOLD_GIB})
+  --threshold-gib N     Stop at N GiB RSS; use 0 for no RSS limit
+                        (default: ${DEFAULT_THRESHOLD_GIB})
   --threads N           NOTDEC_BINARYSUB_THREADS value (default: ${DEFAULT_THREADS})
   --native              Use the native allocator instead of jemalloc
   --frozen-tr-input-ir  Treat --input as --emit-tr-input-ir output
@@ -108,11 +109,16 @@ done
 
 [[ -r "${input_path}" ]] || die "input does not exist or is not readable: ${input_path}"
 [[ -x "${notdec_path}" ]] || die "notdec executable does not exist or is not executable: ${notdec_path}"
-[[ "${threshold_gib}" =~ ^[1-9][0-9]*$ ]] || die "--threshold-gib must be a positive integer"
+[[ "${threshold_gib}" =~ ^(0|[1-9][0-9]*)$ ]] || die "--threshold-gib must be a non-negative integer"
 [[ "${threads}" =~ ^[1-9][0-9]*$ ]] || die "--threads must be a positive integer"
 
 notdec_realpath=$(readlink -f "${notdec_path}") || die "cannot resolve notdec path: ${notdec_path}"
 threshold_kib=$((threshold_gib * 1024 * 1024))
+if (( threshold_gib == 0 )); then
+  threshold_label=none
+else
+  threshold_label=${threshold_gib}
+fi
 
 if [[ -z "${output_dir}" ]]; then
   output_dir=$(mktemp -d "/tmp/notdec-memcached-profile-${RUN_DATE}-XXXXXX")
@@ -154,7 +160,7 @@ else
   [[ -r "${JEMALLOC_PATH}" ]] || die "jemalloc is unavailable: ${JEMALLOC_PATH} (use --native)"
   env_args+=(
     "NOTDEC_BINARYSUB_THREADS=${threads}"
-    "MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_prefix:${output_dir}/jeprof"
+    "MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_final:true,prof_prefix:${output_dir}/jeprof"
     "LD_PRELOAD=${JEMALLOC_PATH}"
   )
 fi
@@ -172,7 +178,7 @@ fi
 } >"${output_dir}/command.txt"
 
 printf 'START threshold_gib=%s threads=%s allocator=%s input_mode=%s\n' \
-  "${threshold_gib}" "${threads}" "$([[ ${native_allocator} -eq 1 ]] && echo native || echo jemalloc)" \
+  "${threshold_label}" "${threads}" "$([[ ${native_allocator} -eq 1 ]] && echo native || echo jemalloc)" \
   "$([[ ${frozen_tr_input} -eq 1 ]] && echo frozen || echo normal)" \
   >>"${output_dir}/events.log"
 
@@ -254,7 +260,7 @@ while kill -0 "${launcher_pid}" 2>/dev/null; do
       "${elapsed_ms}" "${rss_kib}" "${pss_kib}" "${private_kib}" \
       >>"${output_dir}/rss-pss.csv"
 
-    if (( rss_kib >= threshold_kib )); then
+    if (( threshold_gib > 0 && rss_kib >= threshold_kib )); then
       printf 'STOP reason=rss-%sg elapsed_ms=%s rss_kib=%s pss_kib=%s private_kib=%s\n' \
         "${threshold_gib}" "${elapsed_ms}" "${rss_kib}" "${pss_kib}" "${private_kib}" \
         | tee -a "${output_dir}/events.log"
