@@ -713,16 +713,18 @@ set + RAII erase，但 `coalesceCompactType` 没跟着改：
 `external/binarysub/src/binarysub.cpp:3687` 仍 `auto newInProcess = inProcess;` 每层整体复制
 `unordered_map<(CompactType,pol), std::function>`，`std::function` 闭包超过 SBO 每次拷贝都堆分配，
 返回时整表析构。SimpleType 版 `coalesceType`（`binarysub.cpp:2037`）同模式，但只在调试打印
-（`binarysub.cpp:4203`）被调，本次不动。
+（`binarysub.cpp:4203`）被调；确认主路径收益后，也按同样方式一并改了。
 
 修改（`external/binarysub/src/binarysub.cpp`）：
 
-- `ScopedPolarCompactTypePathEntry`（文件顶部）模板化为 `PathT`（set 或 map 都能按 key erase，
-  避免嵌套 insert rehash 后迭代器失效）；go1 处 CTAD 推导，无需改动。
+- `ScopedPolarCompactTypePathEntry`（文件顶部）模板化为 `PathT` + `KeyT`（set 或 map 都能按
+  key erase，避免嵌套 insert rehash 后迭代器失效）；各使用处 CTAD 推导，无需改动。
 - `coalesceCompactType` 的 `go`（3586 行起）：3687-3688 改为
   `inProcess.emplace(key, std::move(recVarGetter))` + `ScopedPolarCompactTypePathEntry`，7 处子调用
   （3697/3714/3731/3740/3743/3753/3755）从 `newInProcess` 改传 `inProcess`。路径上同 key 唯一
   （递归检测在 emplace 前），emplace 必成功；getter 只被更深的帧调用，父帧存活，闭包引用安全。
+- SimpleType 版 `coalesceType`（1970 行起）：2037-2040 改为 `inProcess.insert(key)` +
+  `ScopedPolarCompactTypePathEntry`，2055 行改传 `inProcess`。仅在调试打印路径生效，输出不变。
 
 验证：
 
