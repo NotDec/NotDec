@@ -45,6 +45,7 @@
 #include <llvm/Transforms/Utils/SimplifyCFGOptions.h>
 
 #include "Passes/AllocAnnotator.h"
+#include "Passes/DangerousTypePatternScan.h"
 #include "Passes/MemOpMatcher.h"
 #include "Passes/evm/MemoryBufferAnalysis.h"
 #include "Passes/PassManager.h"
@@ -464,6 +465,8 @@ void PassEnv::add_type_recovery_passes(int level, bool SplitFreePhi) {
   if (SplitFreePhi) {
     MPM.addPass(createModuleToFunctionPassAdaptor(FreePhiSplitPass()));
   }
+  // 类型推理前扫描危险模式：对可能让推理爆炸的函数报 warning。
+  MPM.addPass(DangerousTypePatternScan());
   MPM.addPass(mlsub::MLsubRecoveryMain(*TR));
 
   // level 3 with additional optimization and cleanup.
