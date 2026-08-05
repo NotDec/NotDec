@@ -106,3 +106,26 @@ GEP。实测确认后，重写为完全不用类型/DebugInfo 的方案。
 
 已知限制：只覆盖"unroll 成常量等差偏移"的大数组展开；未 unroll 的循环（动态索引）
 暂不计分。检测是启发式，warning 提示性质，阈值可按项目调。
+
+## 补充：约束生成中间点统计（NOTDEC_CONSTRAINT_STATS）
+
+用户建议在"函数内部约束生成完、跨函数调用边未连接"的中间点评估函数复杂度。
+结论：好弄，但单看约束图规模预警不了爆炸。
+
+实现（`MLsubRecovery::bottomUpPhase`，`G->run()` 之后、`applyDeferredCallConstraints()`
+之前）：
+
+- `ConstraintsGenerator::emitFunctionConstraintStats()`：遍历 V2N（ExtValuePtr→SimpleType），
+  用 `getExtValueFunction` 按函数归属，统计每个函数的节点数、边数
+  （lowerBounds+upperBounds）、自引用节点数、最大 bounds 数。`NOTDEC_CONSTRAINT_STATS=1`
+  开启，stderr 输出按节点数降序。
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h` 与
+  `src/TypeRecovery/mlsub/MLsubGenerator.cpp` 各加对应声明/实现/调用。
+
+验证（259 不爆 vs 260c 爆，中间点统计）：
+
+- resp_allocate 从 declare 变定义后：nodes 2→172、edges 86→2054，排第 33。
+- 但最大的是 drive_machine（1341 nodes / 10527 edges），259 里不爆。
+- 结论：爆炸发生在跨函数边连接 + merge 之后的递归×数组展开，中间点约束图规模
+  本身不显示爆炸迹象；该统计作为"每个函数贡献多少约束"的调试工具保留，
+  自动预警仍靠 DangerousTypePatternScan 的等差偏移+挂链信号。

@@ -3083,6 +3083,54 @@ llvm::Function *ConstraintsGenerator::getExtValueFunction(
   return nullptr;
 }
 
+void ConstraintsGenerator::emitFunctionConstraintStats() const {
+  std::map<llvm::Function *, std::pair<size_t, size_t>> NodesEdges;
+  std::map<llvm::Function *, size_t> SelfRefs;
+  std::map<llvm::Function *, size_t> MaxBounds;
+  for (auto &Entry : V2N) {
+    llvm::Function *F = getExtValueFunction(Entry.first);
+    if (F == nullptr) {
+      continue;
+    }
+    SimpleType Ty = binarysub::resolve_variable(Entry.second);
+    auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+    if (Var == nullptr) {
+      continue;
+    }
+    size_t Edges = Var->lowerBounds.size() + Var->upperBounds.size();
+    auto &P = NodesEdges[F];
+    ++P.first;
+    P.second += Edges;
+    size_t Self = 0;
+    for (const auto &B : Var->lowerBounds) {
+      if (binarysub::resolve_variable(B).get() == Ty.get()) {
+        ++Self;
+      }
+    }
+    for (const auto &B : Var->upperBounds) {
+      if (binarysub::resolve_variable(B).get() == Ty.get()) {
+        ++Self;
+      }
+    }
+    SelfRefs[F] += Self;
+    MaxBounds[F] = std::max(MaxBounds[F], Edges);
+  }
+  std::vector<std::pair<llvm::Function *, size_t>> Order;
+  for (auto &E : NodesEdges) {
+    Order.emplace_back(E.first, E.second.first);
+  }
+  std::sort(Order.begin(), Order.end(),
+            [](const auto &A, const auto &B) { return A.second > B.second; });
+  llvm::errs() << "Info: constraint stats for SCC " << Name
+               << " (funcs=" << NodesEdges.size() << "):\n";
+  for (auto &[F, Nodes] : Order) {
+    auto &P = NodesEdges[F];
+    llvm::errs() << "  func=" << F->getName() << " nodes=" << P.first
+                 << " edges=" << P.second << " self_ref=" << SelfRefs[F]
+                 << " max_bounds=" << MaxBounds[F] << "\n";
+  }
+}
+
 static bool hasTypedPointerExternalValue(const ExtValuePtr &Val) {
   llvm::Type *Ty = nullptr;
   if (auto *V = std::get_if<llvm::Value *>(&Val)) {
@@ -5857,6 +5905,12 @@ void MLsubRecovery::bottomUpPhase() {
     }
 
     G->run();
+
+    // 函数内部约束生成完、跨函数调用边未连接：按函数统计约束图规模，
+    // 用于评估哪些函数把图撑大。NOTDEC_CONSTRAINT_STATS=1 开启。
+    if (std::getenv("NOTDEC_CONSTRAINT_STATS") != nullptr) {
+      G->emitFunctionConstraintStats();
+    }
 
     for (auto *Func : Data.SCCSet) {
       if (auto *ExtraSpec = getExtraConstraintsSpec(*Func)) {

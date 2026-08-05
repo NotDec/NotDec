@@ -445,6 +445,11 @@ struct ConstraintsGenerator {
   // Create Node of both variance
   SimpleType createNode(ExtValuePtr Val);
 
+  // 约束生成中间点（函数内部约束已生成、跨函数调用边未连接）按函数统计
+  // 约束图规模：节点数、边数、自引用节点数。用于评估"哪些函数把约束图
+  // 撑大"，预警类型推理爆炸。由 NOTDEC_CONSTRAINT_STATS=1 开启。
+  void emitFunctionConstraintStats() const;
+
   SimpleType getNodeOrNull(ExtValuePtr Val) {
     if (V2N.count(Val)) {
       return V2N.at(Val);
