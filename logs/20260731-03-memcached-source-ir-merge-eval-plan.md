@@ -699,3 +699,37 @@ smoke 均通过。后续优化应针对 canonicalize 的递归 record 展开和 
   各切片峰值来自最后的 CompactType→UType 转换。
 - 下一步候选：环检测 + 非环 go1 缓存（递归折叠依赖 DFS 路径，简单按 (ty,pol) 缓存不 sound，
   只有不在引用图环上的节点结果与路径无关）。
+
+## coalesceCompactType inProcess 路径栈（2026-08-05，已完成）
+
+166 切片 perf 分析（`/tmp/notdec-slice166-profile-20260805`，cycles 采样，1 线程 native）：
+self 热点最大项是 glibc allocator 内部（`_int_free` 7.7% + `_int_malloc` 7.7% + `malloc` 6.9% +
+`cfree` 3.7% + `malloc_consolidate` 2.7% 等合计约 32%），调用路径全部落在
+`canonicalizeType` 的 go1 与 `coalesceCompactType` 下；`coalesceCompactType` 的
+`_Hashtable::clear` 占 children 9.18%。jemalloc 对照 wall -12.4%（50.9s→44.6s，输出 md5 一致）。
+
+问题：`canonicalizeType` 的 go1 在 `5493948` 已把 active path 从"每层复制"改成
+set + RAII erase，但 `coalesceCompactType` 没跟着改：
+`external/binarysub/src/binarysub.cpp:3687` 仍 `auto newInProcess = inProcess;` 每层整体复制
+`unordered_map<(CompactType,pol), std::function>`，`std::function` 闭包超过 SBO 每次拷贝都堆分配，
+返回时整表析构。SimpleType 版 `coalesceType`（`binarysub.cpp:2037`）同模式，但只在调试打印
+（`binarysub.cpp:4203`）被调，本次不动。
+
+修改（`external/binarysub/src/binarysub.cpp`）：
+
+- `ScopedPolarCompactTypePathEntry`（文件顶部）模板化为 `PathT`（set 或 map 都能按 key erase，
+  避免嵌套 insert rehash 后迭代器失效）；go1 处 CTAD 推导，无需改动。
+- `coalesceCompactType` 的 `go`（3586 行起）：3687-3688 改为
+  `inProcess.emplace(key, std::move(recVarGetter))` + `ScopedPolarCompactTypePathEntry`，7 处子调用
+  （3697/3714/3731/3740/3743/3753/3755）从 `newInProcess` 改传 `inProcess`。路径上同 key 唯一
+  （递归检测在 emplace 前），emplace 必成功；getter 只被更深的帧调用，父帧存活，闭包引用安全。
+
+验证：
+
+- `./build-relwithdebinfo-20260731/binarysub` 全过；`MLsubGeneratorTest` 19/19；
+  `ctest -R notdec.type_recovery.llvm_ir.tr_level_2` 通过。
+- 166 切片（同输入/override/单线程/frozen）perf stat 同环境对比：cycles 2157 亿→1397 亿
+  （-35.2%）、instructions 3488 亿→1932 亿（-44.6%）、wall（含 stat 开销）54.9s→37.8s。
+  纯 wall 受机器负载波动（旧版 51-73s、新版 36-44s），以 cycles/instructions 为准。
+- `out.ll` 与 `ValueTypes.txt` 均与旧版 md5 逐字节一致
+  （`568216bdec2f56c376007a5b5e8831cd` / `28cb9aa96cf75c63e8863be8c539f838`）。
