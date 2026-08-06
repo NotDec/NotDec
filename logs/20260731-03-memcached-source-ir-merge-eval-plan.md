@@ -735,3 +735,74 @@ set + RAII erase，但 `coalesceCompactType` 没跟着改：
   纯 wall 受机器负载波动（旧版 51-73s、新版 36-44s），以 cycles/instructions 为准。
 - `out.ll` 与 `ValueTypes.txt` 均与旧版 md5 逐字节一致
   （`568216bdec2f56c376007a5b5e8831cd` / `28cb9aa96cf75c63e8863be8c539f838`）。
+
+## 比较/分配快速路径优化与 process_get_command 切片定位（2026-08-06，已完成/验证中）
+
+### 性能优化（已提交）
+
+`external/binarysub` commit `8b65571`，顶层 commit `73e86cf9`（含
+`src/TypeRecovery/mlsub/MLsubGenerator.cpp`）：
+
+- `CompactVarSet`：`Storage` 缓存内容 hash（`hash()` 懒计算，`binarysub.h`），
+  `compactContentHash` 不再逐元素遍历 vars（`binarysub.cpp`）；`operator==` 加 size
+  快速路径；`operator<` 加持久化 root 相同快速路径；`PersistentSet` 增加
+  `sameRootAs`（`detail/PersistentSet.h`）。
+- `CompactType::operator</operator==`：先比较 cachedHash，hash 不同直接短路
+  （`binarysub.h:420` 附近），避免红黑树/哈希相等比较走全字段 tie。
+- `utype_pool` 从 `vector<unique_ptr<UType>>` 改为 `deque<UType>`
+  （`binarysub.h:110` 附近），去掉每个 UType 节点的独立堆分配。
+- `UTypeVariable::originIds` 从 `std::set<uint32_t>` 改为有序 `vector<uint32_t>`
+  （`binarysub.h:52`），`make_utypevariable` 提供 set/vector 两个重载。
+- UType 遍历 visited 集合从 `std::set<const UType*>` 改为
+  `std::unordered_set`（`binarysub.cpp` visit_utype_variables、
+  `MLsubGenerator.cpp` collectUTypeVariableDetails）；collect 的 Out map 改
+  `unordered_map<uint32_t, UTypeVariableDetail>`。
+
+验证（260c 切片 = base166 + 前 95 个函数 + resp_allocate opaque，1 线程 frozen）：
+
+| 版本 | wall | peak RSS |
+|---|---|---|
+| 优化前 | 93s | 17.7 GB |
+| 快速路径后 | 95s | 17.7 GB |
+| +deque/unordered_set | 90.6s | 16.1 GB |
+| +originIds vector | 85s | 11.2 GB |
+
+连续两次跑 85.1s/84.4s、11.15/11.15 GB，`out.ll` 与 `03-pndiff-final.ll` 逐字节一致。
+`binarysub` 自测与 `TypeBuilderTest` 全过。
+
+### 切片定位：process_get_command 是最小时间爆炸源
+
+累积切片（base166 + 声明序，resp_allocate opaque，1 线程 frozen）：
+
+| 切片 | 新增 | wall | peak RSS |
+|---|---|---|---|
+| 260c | — | 85s | 11.2 GB |
+| 261 | — | 85s | 11.2 GB |
+| 266 | +main 等 5 个 | 101s | 13.2 GB |
+| 271 | +usage 等 5 个 | 98s | 13.2 GB |
+| 281 | — | 93s | 11.9 GB |
+| 286 | — | 93s | 11.8 GB |
+| 316 | +30 个 process_*_command | >15 min rc=124 | ~5.8 GB |
+| 346/376 | 更多 | >15 min rc=124 | ~5.7 GB |
+
+- main 单独加入 266 复现突增（101s/13.2 GB），但 main opaque 无效：突增来自 main
+  作为调用者把约 30 个初始化函数与 SCC0 连接，不是函数体本身。
+- process_command_ascii 单加 106s/13.6 GB（小增量），try_read_command_ascii 单加
+  93s/12.0 GB（几乎无变化）；process_get_command + process_update_command、
+  process_command_ascii + process_get_command 均 >10 min 超时。
+- **process_get_command 单独加入 286 即 >10 min 超时（rc=124），是最小爆炸集合**；
+  process_update_command 单独 rc=0。process_get_command 从 conn/item 密集访问大量
+  偏移（conn+216/480/8、item+32/38/41/48 等）、do-while 循环 + memcpy，是 item
+  查询路径（limited_get→do_item_get→assoc_find）与 resp 响应路径的枢纽。
+- 把 process_get_command 标 `opaque_body`（`/tmp/memcached.opaque-resp-get.summary.json`，
+  22 个函数）后 286+get 切片 55s/4.8 GB 完成，比 286 本身（93s/11.8 GB）更快更省。
+
+### 全量验证（验证中）
+
+resp + process_get_command 双 opaque 全量 401，1 线程 native，threshold 32 GiB
+（`/tmp/opaque-full-get-profile`）：
+
+- 35 min 内 RSS 从 4.7 GB 跳到 11.6 GB（阶段突增，34.4→34.7 min），后回落到 ~9.1 GB。
+- 53 min 时 12.1 GB，仍在 simplify/canonicalize 阶段；旧全量 55 min 12.7 GB。
+- 结论：get opaque 消除了 316 切片的早期时间爆炸，但全量剩余 29 个 process 函数
+  组合仍造成线性内存增长，尚未跑完。
