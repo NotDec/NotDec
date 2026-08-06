@@ -2228,8 +2228,8 @@ std::string formatExtValueMappingLabel(ExtValuePtr Value,
 }
 
 void collectUTypeVariableDetailsImpl(
-    const binarysub::UTypePtr &Ty, std::map<std::uint32_t, UTypeVariableDetail> &Out,
-    std::set<const binarysub::UType *> &Seen) {
+    const binarysub::UTypePtr &Ty, std::unordered_map<std::uint32_t, UTypeVariableDetail> &Out,
+    std::unordered_set<const binarysub::UType *> &Seen) {
   if (!Ty || !Seen.insert(Ty).second) {
     return;
   }
@@ -2267,10 +2267,10 @@ void collectUTypeVariableDetailsImpl(
       Ty->v);
 }
 
-std::map<std::uint32_t, UTypeVariableDetail>
+std::unordered_map<std::uint32_t, UTypeVariableDetail>
 collectUTypeVariableDetails(const binarysub::UTypePtr &Ty) {
-  std::map<std::uint32_t, UTypeVariableDetail> Details;
-  std::set<const binarysub::UType *> Seen;
+  std::unordered_map<std::uint32_t, UTypeVariableDetail> Details;
+  std::unordered_set<const binarysub::UType *> Seen;
   collectUTypeVariableDetailsImpl(Ty, Details, Seen);
   return Details;
 }
