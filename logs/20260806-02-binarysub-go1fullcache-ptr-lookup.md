@@ -52,3 +52,60 @@ canonicalize 时间爆炸。perf 采样（sudo gdb attach 确认卡点 + perf re
 - 复杂度：低（返回类型 + 调用点各一处）。
 - 维护成本：低，生命周期注释已写明前提（canonicalize 期间不 erase）。
 - 更优方案：none（本次就是针对该热点的最小改动）。
+
+## 追加：SelfRef 过度拒绝修复（2026-08-06，已提交）
+
+### 背景（fc 探针数据，286+get 切片 300s 内）
+
+`lookupGo1FullCache` 命中校验失败原因分布（1.55 亿次 lookup）：
+
+| 失败原因 | 次数 | 占比 |
+|---|---|---|
+| SelfRef（merged 树含自身） | 9889 万 | 63.7% |
+| DepsInvalid（missingKeys 失效） | 763 万 | 4.9% |
+| InputOverlap（输入与 active path 重叠） | 399 万 | 2.6% |
+| AlreadyRecursive | 84 万 | 0.5% |
+| 有效命中 | 4383 万 | 28.3% |
+
+进一步统计：**SelfRef 拒绝 6419 万次中 6419 万次（99.99998%）是
+`MergedCached->base == pty.first`**——`treeContainsNode` 的 `ty == target`
+匹配了 base 自身。
+
+### 根因
+
+`transformChildren` 展开的是 merged base 的 **children**（record 字段等），
+**从不重新展开 base 自身**。因此 `base == pty.first` 时展开中根本不会折叠
+自身——缓存条目是路径无关的，却被 SelfRef 检查误拒，每个 root 都重新展开
+（6419 万次重复）。只有 **children 引用自身**（base 的后代含 pty.first）才
+会在展开中折叠自身，需要拒绝。
+
+### 修改内容
+
+### external/binarysub/src/binarysub.cpp（commit 182406a）
+
+- `canonicalizeType` go1 的 SelfRef 检查（原 `treeContainsNode(MergedCached->base,
+  pty.first, ...)`）：改为只遍历 base 的 record 字段 / function args+result /
+  ptrLoad / ptrStore 子树查找 pty.first（base 自身不参与匹配）。
+- 保留"自身 key 已在 recursive 表时缓存可复用"的豁免（freshVar 身份固定；
+  该分支当前为防御性死代码——真正的 children 自引用展开从不 store 无折叠缓存）。
+
+### 验证
+
+- fc 探针：SelfRef 从 6419 万 → **1**，有效命中率从 28% → **88.2%**。
+- 166 切片（`/tmp/slice-cum-assoc_init.bc`，1 线程 frozen，RelWithDebInfo）：
+  `out.ll` md5 `568216bdec2f56c376007a5b5e8831cd`、`ValueTypes.txt` md5
+  `2547a3241083f68513fd7a7bf2516134` 与修复前逐字节一致。
+- binarysub 自测全过。
+- **286+get 仍超时**：剩余 miss（DI 1850 万 + OV 966 万 + AR 203 万 ≈ 3000 万）
+  全部是折叠展开（展开中会折叠，无折叠缓存天生覆盖不了），是下一步的主目标。
+
+### 思路 A（折叠展开缓存）实验结论（已回退）
+
+- 实现：probe 预测 DFS（按展开规则遍历 merged 树收集折叠集合）+ 按 (key,
+  foldSet) 分条目缓存 + 展开后实际折叠对比才 store。
+- 失败原因（数据）：probe 完整遍历成本 ≈ 展开成本（perf 热点 ~67%）；foldSet
+  分化（fs3+ 为主，命中率仅 11.5%）；probe 与展开系统性不一致（mismatch
+  315 万/341 万展开：normalizeDirectPointer 树差异、展开动态 inProcess 等）。
+- 结论：折叠展开的 foldSet 展开前不可知（子帧递归折叠），probe 是唯一预测
+  途径但成本不可接受。**后续方向**：类型图 SCC 预折叠（环上节点预折叠成
+  递归变量，环外全部可缓存）或工程化 opaque 缓解。
