@@ -1,10 +1,10 @@
 # Type Recovery Merge Policies（类型恢复节点合并策略盘点）
 
-本文档盘点 NotDec 类型恢复（MLsub / binarysub）中所有"合并节点"相关的机制，
-按语义保证强度分三层：求解器必然合并、IR 语义强相等、启发式策略。
-新增合并策略前先读本文档，确认与现有机制不重复、不冲突。
+本文档盘点 NotDec 类型恢复（MLsub / binarysub）中所有"合并节点"相关的机制：
+求解器内置的必然合并，以及 NotDec 接入层的启发式策略。新增合并策略前先读本文档，
+确认与现有机制不重复、不冲突。
 
-## 层 0：求解器内置的必然合并（binarysub，无需策略）
+## 求解器内置的必然合并（binarysub，无需策略）
 
 这些是类型系统本体行为，不是"策略"，任何情况下都不应重复实现：
 
@@ -24,22 +24,7 @@
 组成的"结构引用环"（canonicalize 折叠展开面对的环）不是子类型边，环上节点不一定
 等价（record↔function 互引即为反例，见 `logs/20260808-01`）。两层"环"不要混淆。
 
-## 层 1：IR 语义强相等的 copy（NotDec 接入层）
-
-这些节点对在 C / LLVM 语义上必然相等，合并 sound，不需要证据。目前覆盖不全：
-
-| 来源 | 现状 | 位置 |
-| --- | --- | --- |
-| `phi` | 只生成单向子类型边 `incoming <: result`，未专门合并 | `MLsubGenerator.cpp:8696` `handlePHINodes` |
-| `select` | 只生成单向子类型边 `src <: dst`，未专门合并 | `MLsubGenerator.cpp:8848` `visitSelectInst` |
-| load/store 同槽 | 仅在双方都有结构体指针证据时合并（保守） | 见下 |
-
-LLVM IR 强制 phi/select 的 incoming 与 result 类型完全一致，因此它们不依赖
-"图结构恰好成环"就必然相等。当前只在图结构恰好形成子类型环时被层 0 兜住合并；
-不成环时保持单向子类型（sound 但保守，类型碎片化）。load/store 同槽的 C 语义
-同样不区分 load/store 类型，见 `--merge-struct-ptr-load-store` 策略。
-
-## 层 2：启发式策略（证据驱动 / 事务化）
+## NotDec 接入层的合并策略（启发式 / 事务化）
 
 按触发时机排序：
 
@@ -51,6 +36,14 @@ LLVM IR 强制 phi/select 的 incoming 与 result 类型完全一致，因此它
 | struct field follow-up merge | `applyStructPtrFieldFollowupMergePolicy`（`MLsubGenerator.cpp:3655`） | post-summary | 合并后字段布局变化带来的新候选 | 默认开启 |
 | level-0 SCC 合并 | `prepareSCC()`（`MLsubGenerator.cpp:5125`） | 约束生成前 | 所有 level-0 raw SCC 合成一个 generator（模块级单态作用域，保全局变量跨函数约束） | 固定行为 |
 | `opaque_body` | `ConstraintsGenerator::run()`（`MLsubGenerator.cpp:5480` 附近） | 约束生成时 | summary override 标记的函数跳过函数体约束，只保留接口摘要 | summary JSON 字段 |
+
+补充说明：
+
+- var-var 子类型边（含 phi/select 生成的 `incoming <: result`）统一由"同函数
+  struct-ptr subtype merge"检查：满足门槛的生成时直接合并；不满足门槛的靠求解器
+  的环闭合（见上）兜住，其余保持单向子类型。
+- 注意：默认的 struct-pointer 模式只合并 pointer-size 的变量；放宽到所有 pointer-like
+  或所有同层同位宽局部值在实验中不更快（`logs/20260729-02`）。
 
 ## 历史教训（设计新策略前必读）
 
