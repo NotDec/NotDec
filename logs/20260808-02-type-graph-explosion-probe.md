@@ -131,3 +131,35 @@ merged snapshot 构建前返回），静态结构图里看不到环。结构规�
   不同源）。
 - 166 在当前 build/bin（8-06 起）上 canonicalize 从 40s 退化到 >10min，
   未排查是否与探针 hook 相关（不带探针也超时，疑似版本退化或环境差异）。
+
+## 追加：折叠 key bound 等价类量化（2026-08-08 第二轮）
+
+在 `finalizeRecursiveVar` 设置 bound 后记录 `B <freshVar> <pol> <bound>` 行
+（`recordCompactBound()`，输出 bound 树到 N/E 行），量化折叠 key 的结构等价类
+与重复展开。修复两处探针 bug：`recordCompactBound` 持锁调 `emitCompactTree`
+导致单线程死锁（futex_wait 卡死）；B 行与 N 行共享 seen 导致 F 行被抑制。
+
+实测（166 完成 / 286+get 前 892 root）：
+
+| 指标 | 166 | 286+get |
+|---|---|---|
+| 折叠 key（F 去重） | 153 | 74 |
+| B 记录（折叠 key 重复终结次数） | 5819 | 62904 |
+| bound 结构去重（hash-cons 后） | 180 | 88 |
+| 单 key 最多重复终结 | 459 | 18435 |
+| 单 key 最多不同 bound | 3 | 6 |
+| 单 bound 的 key 占比 | 128/153 (84%) | 66/74 (89%) |
+
+结论：
+
+1. **折叠 key 之间几乎没有合并空间**：bound 结构数（180/88）≈ 折叠 key 数
+   （153/74），跨 key 共享结构极少。"合并得够多"在折叠 key 层不成立。
+2. **爆炸 = 单个折叠 key 的高频重复展开**：286+get 的 top key 被正常展开
+   1.8 万次（B 记录 = finalizeRecursiveVar 调用数），166 top 仅 459 次。
+3. **展开结果高度可复用**：66/74 的 key 全程只有 1 个 distinct bound，最多
+   6 个变体。1.8 万次展开产生 ≤6 种结果——这是"折叠展开结果缓存"可行性的
+   铁证。此前 foldSet 缓存失败是因为依赖键过细（45.7 万种），而实际结果
+   多样性只有个位数，有效依赖远比 foldSet 小。
+4. 方向修正：下一步不是"合并折叠 key"，而是**缓存折叠展开结果**（按
+   (折叠 key, 结果变体/稳定依赖)），把 1.8 万次重复降到个位数展开 + 缓存
+   命中。
