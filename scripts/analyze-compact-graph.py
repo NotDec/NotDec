@@ -24,6 +24,7 @@ def parse(path):
     roots = set()
     folds = set()
     edges = defaultdict(list)
+    binds = []
     for line in open(path):
         parts = line.split()
         if not parts:
@@ -36,11 +37,13 @@ def parse(path):
             edges[(parts[1], parts[2])].append((parts[3], parts[4]))
         elif parts[0] == "F" and len(parts) >= 3:
             folds.add((parts[1], parts[2]))
-    return nodes, roots, folds, edges
+        elif parts[0] == "B" and len(parts) >= 4:
+            binds.append((parts[1], parts[2], parts[3]))
+    return nodes, roots, folds, edges, binds
 
 
 def analyze(path):
-    nodes, roots, folds, edges = parse(path)
+    nodes, roots, folds, edges, binds = parse(path)
     all_keys = (set(nodes) | set(folds) | set(roots) |
                 set(edges) | {w for ss in edges.values() for w in ss})
     in_edges = defaultdict(list)
@@ -128,6 +131,16 @@ def analyze(path):
     fold_to_fold = sum(1 for k in folds for w in edges.get(k, []) if w in folds)
     fold_ways = [(k, ways_to[scc_of[k]]) for k in folds]
     fold_ways.sort(key=lambda x: -x[1])
+    # 折叠 key 的 bound 等价类（B 行：freshVar, pol, boundPtr；hash-cons 后
+    # boundPtr 相同即结构相同）
+    from collections import Counter
+    per_key = defaultdict(list)
+    for fv, pol, bptr in binds:
+        per_key[(fv, pol)].append(bptr)
+    bound_classes = len(set(b for _, _, b in binds))
+    bound_repeat = Counter(b for _, _, b in binds)
+    multi_bound_keys = sum(1 for v in per_key.values() if len(set(v)) > 1)
+    max_repeat = bound_repeat.most_common(1)[0][1] if bound_repeat else 0
     return {
         "path": path,
         "nodes": len(nodes),
@@ -148,15 +161,19 @@ def analyze(path):
         "max_ways_to_log10": (
             (max(ways_to.values()).bit_length() - 1) * 0.30103
             if ways_to else 0),
+        "bind_records": len(binds),
+        "bound_classes": bound_classes,
+        "multi_bound_keys": multi_bound_keys,
+        "max_bound_repeat": max_repeat,
+        "fold_density": (len(folds) / len(roots)) if roots else 0,
     }
 
 
 def main():
     results = [analyze(p) for p in sys.argv[1:]]
-    fields = ["nodes", "edges", "roots", "fold_keys", "sccs",
-              "nontrivial_sccs", "max_scc_size", "fold_scc_with_ring",
-              "fold_to_fold_edges", "fold_max_in_deg",
-              "fold_max_ways_log10", "max_ways_to_log10"]
+    fields = ["nodes", "edges", "roots", "fold_keys", "fold_density",
+              "bind_records", "bound_classes", "multi_bound_keys",
+              "max_bound_repeat", "sccs", "nontrivial_sccs", "max_scc_size"]
     print(f"{'metric':<24}" + "".join(f"{r['path'].split('/')[-1]:>18}"
                                       for r in results))
     for f in fields:
