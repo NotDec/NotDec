@@ -6021,6 +6021,16 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   }
   binarysub::BulkSimplifyOptions BulkOptions;
   BulkOptions.enableParallel = true;
+  // 静态图分析探针：canonicalize 之前 dump roots 可达的引用图，用于
+  // 折叠展开爆炸的预检（SCC/路径计数/节点贡献），见 logs/20260731-03。
+  if (const char *DumpPath = std::getenv("NOTDEC_DUMP_TYPE_GRAPH")) {
+    binarysub::dumpTypeGraph(Tys, DumpPath);
+  }
+  // CompactType 层图探针：go1 构建 merged snapshot 时记录引用边，用于
+  // 折叠展开爆炸的预检（见 logs/20260731-03）。
+  if (const char *DumpPath = std::getenv("NOTDEC_DUMP_COMPACT_GRAPH")) {
+    Ts.setCompactGraphDump(DumpPath);
+  }
   auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
   const auto &Res = BulkResult.types;
 
