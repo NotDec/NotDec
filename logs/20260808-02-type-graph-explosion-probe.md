@@ -264,3 +264,87 @@ pol，两者不匹配）。
    TypeBuilder 转换）。
 4. 166 慢的真相（前期遗留）：build/ 是 Debug+ASan，RelWithDebInfo 下
    39.8s；性能实验一律用 build-relwithdebinfo-20260731。
+
+## 追加：DAG 展开/合并/打印去重（2026-08-09 实现与验证）
+
+### 背景
+
+记忆化消除了折叠重复展开后，剩余爆炸点全是**共享 DAG 按引用路径重复展开**：
+1. canonicalize go1 单 root 大展开：含折叠的树从不缓存（go1FullCache 只存
+   folding-free），递归类型共享大树每次重展开。286 卡在 32072 root（G 行
+   1.6 亿节点），286+get 超时 53GB。
+2. coalesceCompactType 只有路径级 inProcess、无全局 memo：DAG 共享节点按
+   引用路径重复展开，递归类型下输出随引用次数倍增（RSS 16.5GB，
+   ValueTypes.txt 16.8GB）。
+3. analyzeOccurrences/collectVars/printTypeImpl 无 visited：DAG 指数遍历。
+
+### 实现（external/binarysub）
+
+- 含折叠树可缓存：`Go1FullCacheEntry` 加 `foldingKeys`（
+  include/binarysub/binarysub.h:862-864）。折叠 key 展开恒为 V(freshVar)
+  （表只增、决策单调、freshVar 固定），命中只需 missingKeys（DepsInvalid）
+  检查；全局版本检查会把"只作路径内递归引用、从未重新 finalize"的折叠
+  key 判为过期，导致含折叠树缓存永远无法成立（src/binarysub.cpp:3222-3225
+  注释）。`storeGo1FullCache`（binarysub.cpp:2315）改 upsert 覆盖，否则
+  过期条目永久挡住新条目（R=227 曾卡住）。
+- 非 owner 记忆化无需版本检查：`finalizeRecursiveVar` 非 owner 不更新
+  bound/boundVersion，boundVersion 永久停在 owner 展开时刻；若对非 owner
+  也做版本检查，每个折叠 key 每次重展开（binarysub.cpp:3125-3133）。
+- InputOverlap 放宽：输入树∩路径的 key 若在缓存生成时已在表中（不在
+  missingKeys），命中/展开都不更新 bound，可安全复用。`Go1MergedSnapshot`
+  加 `selfRef`/`nodeKeys`（binarysub.h:842-851），storeGo1Cache 时一次
+  遍历算好，命中路径 O(路径) 求交集，替代每次全树遍历。
+- coalesceCompactType 加 `varMemo`（折叠变量 bound 展开结果，key =
+  (bound, pol)）+ `treeMemo`（pathHit=false 的普通节点展开结果）：
+  binarysub.cpp:4023-4029、4097-4104、4051、4201。输出 UType 由此成为
+  共享 DAG。
+- analyzeOccurrences 加 (节点, 极性) visited（binarysub.cpp:3502-3508）、
+  collectVars 加 visited（binarysub.cpp:3610 附近）、printTypeImpl 加
+  seen 共享检测，重复引用打印省略号（binarysub.cpp:551-566）。
+
+### 验证
+
+| 场景 | 修改前 | 修改后 |
+|---|---|---|
+| 166 切片 | 39.8s | ~10s，IDENTICAL |
+| 286 切片 | 卡 32072 root | ~19s 完成，IDENTICAL |
+| 286+get | 8:11（超时 53GB） | ~22s，IDENTICAL |
+| 完整 memcached | 20+min / RSS 7.6GB | ~4min / RSS 400MB，IDENTICAL |
+
+286 go1 节点 1.6 亿 → 12 万（R 完毕时）；ValueTypes.txt 16.8GB → 7.4MB。
+ctest `llvm_ir.tr_level_2` 通过；`sysy` 9 失败与 `realworld/fortune` 失败为
+预存问题（HEAD 同失败）。
+
+### 图规律总结（用户初始诉求的落点）
+
+1. 爆炸本质：递归类型展开是**幂集式路径遍历**。输入是 hash-cons DAG，
+   无全局 visited 时同一节点按引用路径指数重复——canonicalize/coalesce/
+   analyze/print 四个阶段是同一 DAG-explosion 模式，只是输出载体不同
+   （CompactType 树、UType 树、统计、文本）。
+2. 关键规律：**折叠决策单调**（递归表只增、freshVar 固定），折叠输出全局
+   确定，重复的是路径相关的祖先重建。这是"含折叠树可缓存 + 只需
+   missingKeys 失效检查"的正确性基础。
+3. "合并节点够多就能降时间/内存"的直觉成立，但合并点是**展开结果的
+   记忆化**（四个粒度：fold 记忆化、含折叠树缓存、coalesce memo、
+   遍历/打印去重），不是改变类型的节点合并——不动语义、输出 IDENTICAL。
+4. 可复用规律：凡"同一 key 重复展开结果确定"处，缓存时只需追踪输入依赖
+   （missingKeys），不需要追踪全部上下文。
+
+### 评分
+
+- 实现效果：9/10。四个爆炸点全部消除，四个场景输出与基线 IDENTICAL，
+  内存降 20 倍以上。
+- 复杂度：7/10。四类缓存各有一套正确性论证（折叠单调、非 owner 版本、
+  InputOverlap 放宽、pathHit 判定），理解成本高；注释已尽量写明前提。
+- 维护成本：6/10。foldingKeys 目前仅诊断用，缓存命中只查 missingKeys；
+  后续如需精确失效可改用 foldingKeys（当前保守策略已足够）。
+- 更优方案：varMemo 假设"折叠变量 bound 展开结果与调用路径无关"，互递归
+  环多入口时理论上有路径依赖风险，实测 IDENTICAL 未触发；若未来出现
+  差异输出，需在 varMemo key 中区分路径或对 pathHit 的展开禁止缓存。
+
+### 遗留
+
+- sysy/realworld 预存失败与本次无关（fortune 为 extra constraints anchor
+  sha256 过期）。
+- 探针文件与脚本（analyze-type-graph.py 等）仍在仓库；SimpleType 层探针
+  无效已确认，compact 探针保留可删。
