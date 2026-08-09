@@ -2,7 +2,7 @@
 """分析 CompactType 层图探针（NOTDEC_DUMP_COMPACT_GRAPH）输出。
 
 行格式：
-  N <ptr> <kind> <detail>    merged 结构节点（V/R/F/P）
+  N <ptr> <pol> <kind> <detail>   merged 结构节点（V/R/F/P）
   R <ptr> <pol>              canonicalize root
   E <src> <spol> <dst> <dpol>  结构引用边
   F <ptr> <pol>              折叠 key（go1 折叠事件，去重输出）
@@ -29,8 +29,9 @@ def parse(path):
         parts = line.split()
         if not parts:
             continue
-        if parts[0] == "N" and len(parts) >= 3:
-            nodes[(parts[1], parts[2])] = parts[3] if len(parts) > 3 else ""
+        if parts[0] == "N" and len(parts) >= 4:
+            nodes[(parts[1], parts[2])] = (
+                parts[3], parts[4] if len(parts) > 4 else "")
         elif parts[0] == "R" and len(parts) >= 3:
             roots.add((parts[1], parts[2]))
         elif parts[0] == "E" and len(parts) >= 5:
