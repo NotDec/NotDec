@@ -221,3 +221,46 @@ pol，两者不匹配）。
   实验一律用 RelWithDebInfo 构建。
 - 286 尾部卡住未定位（折叠密度正常，疑似非折叠热点）。
 - 低频变体（1-49 次）的来源与语义必要性未分析。
+
+## 追加：折叠展开记忆化（2026-08-09 实现与验证）
+
+### 背景
+
+第三轮结论：变体差异由 recursive 表状态决定（166 上 22/22 个多变体 key
+的变体按表大小完全分离）；同一折叠 key 被重复展开 1994 万次（286+get），
+但同一表状态下展开结果唯一。据此实现"按表状态记忆化"。
+
+### 实现（external/binarysub）
+
+- `CanonicalRecursiveEntry::boundVersion`：产生当前 bound 时的 recursive
+  表版本号；`TypeSimplifier::recursiveVersion` 原子计数器，表插入时自增
+  （表只增不减，确定性 SCC 遍历下版本相同 = 表内容相同）。
+- go1 入口（`inProcess` 环检查之后）：entry 已 Stable 且版本号匹配时直接
+  返回 `make_compact(pol, {freshVar}, ...)`——与"展开后折叠"输出同一
+  hash-cons 节点，跳过整棵子树重复展开。版本读旧只会保守 miss。
+- `NOTDEC_DISABLE_FOLD_MEMOIZE=1` 关闭（对照实验）。
+- 探针：B 行追加 pathLen（展开深度）与 recSize（表大小）字段，用于验证
+  变体决定因素。
+- `get_size` 对 UUnion/UInter 成员取 max 而非断言一致：折叠记忆化改变
+  树形后，超时截断路径会产生成员 size 不同的 union（既有假设失效）。
+
+### 验证
+
+| 场景 | 结果 |
+|---|---|
+| 166（RelWithDebInfo） | 39.9s→43.5s，输出与 baseline diff=0 |
+| 286 记忆化 vs 无（4 分钟） | root 推进 32072 vs 231（139 倍），B 行 180 vs 24 万 |
+| 286+get 折叠展开 | 1994 万 → 190 次（B 行） |
+| 286+get + 60s 超时兜底 | 8:11 完成（峰值 53GB），输出与无记忆化+超时 IDENTICAL |
+| 小样例（06/11/16） | 记忆化 on/off 输出 IDENTICAL |
+
+### 结论
+
+1. 折叠爆炸（1994 万次重复展开）被消除：每次表状态变化最多展开一次。
+2. 语义等价有强证据：166 diff=0、286+get IDENTICAL、3 个小样例一致。
+3. 剩余热点：**单 root 大展开**（无折叠的大树，286 卡在 ~32073 root、
+   286+get 卡在 ~190 root），与折叠无关；60s 超时兜底可截断但输出粗糙、
+   峰值内存 53GB。下一步需定位单 root 展开慢的原因（大树 merge /
+   TypeBuilder 转换）。
+4. 166 慢的真相（前期遗留）：build/ 是 Debug+ASan，RelWithDebInfo 下
+   39.8s；性能实验一律用 build-relwithdebinfo-20260731。
