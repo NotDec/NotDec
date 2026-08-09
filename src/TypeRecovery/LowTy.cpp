@@ -102,6 +102,23 @@ std::string llvmType2Elem(llvm::Type *T) {
   if (T->isDoubleTy()) {
     return "double";
   }
+  // C 的 long double 在 x86-64 上是 x86_fp80（80 位扩展精度）；wrk 等
+  // 项目含此类型，缺分支会直接 assert 崩溃。
+  if (T->isX86_FP80Ty()) {
+    return "longdouble";
+  }
+  if (T->isFP128Ty()) {
+    return "fp128";
+  }
+  if (T->isPPC_FP128Ty()) {
+    return "ppcfp128";
+  }
+  if (T->isHalfTy()) {
+    return "half";
+  }
+  if (T->isBFloatTy()) {
+    return "bfloat";
+  }
   if (T->isPointerTy()) {
     return "ptr";
   }
