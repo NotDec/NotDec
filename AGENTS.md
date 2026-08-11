@@ -318,6 +318,10 @@ cmake --build ./build --target all
 `struct*` 这类有 ground truth 的值，类型推理结束后检查同一 DebugInfo 类型的节点是否
 合得够多，以及有没有把不同 DebugInfo 类型错误合并。
 
+源码级 IR 统一存放在 `/sn640/NotDec-Exp/Bench2/source-ir/ir/<project>/{<project>.ll,
+<project>.bc}`，项目清单、构建方式和已知问题见该目录的
+`/sn640/NotDec-Exp/Bench2/source-ir/README.md`（不在本仓库内）。
+
 典型 fortune 命令：
 
 ```bash
