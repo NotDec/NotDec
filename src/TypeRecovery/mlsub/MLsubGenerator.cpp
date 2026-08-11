@@ -192,8 +192,9 @@ std::optional<OffsetRange> matchPNDiffOffsetRange(llvm::Value *I) {
   }
   if (llvm::isa<llvm::ConstantInt>(Src1) && !llvm::isa<llvm::ConstantInt>(Src2) &&
       Opcode != llvm::Instruction::Shl) {
-    assert(false &&
-           "Constant cannot be at the left side. Run InstCombine first.");
+    // X64 源码级 IR 分支不跑 InstCombine，-O0 下 add/mul 的常量操作数
+    // 保持源码顺序可能在左侧；add/mul 可交换，swap 语义不变（shl 不
+    // 可交换，保持原样走 nullopt，不在这里 swap）。
     std::swap(Src1, Src2);
   }
 
@@ -2942,6 +2943,9 @@ bool ConstraintsGenerator::configureConstraintContext(
              binarysub::BoundPolarity Polarity,
              const binarysub::EnqueueMergeFn &EnqueueMerge)
       -> binarysub::expected<void, binarysub::Error> {
+    if (Var) {
+      StructEvidenceMemo.erase(Var.get());
+    }
     return onVariableNonVarBoundAdded(Var, Bound, Polarity, EnqueueMerge);
   };
   Context.onVariableNestedBoundRewritten =
@@ -2949,10 +2953,19 @@ bool ConstraintsGenerator::configureConstraintContext(
              const SimpleType &NewBound,
              const binarysub::EnqueueMergeFn &EnqueueMerge)
       -> binarysub::expected<void, binarysub::Error> {
+    if (User) {
+      StructEvidenceMemo.erase(User.get());
+    }
     return onVariableNestedBoundRewritten(User, OldBound, NewBound,
                                           EnqueueMerge);
   };
   Context.onVariableMerged = [this](const binarysub::MergeEvent &Event) {
+    if (Event.from) {
+      StructEvidenceMemo.erase(Event.from.get());
+    }
+    if (Event.into) {
+      StructEvidenceMemo.erase(Event.into.get());
+    }
     if (Event.reason == binarysub::MergeReason::PolicyReplaceBound) {
       ++LocalSubtypeReplaceBoundMergeEvents;
     } else if (Event.reason == binarysub::MergeReason::PolicyAuxiliary) {
@@ -3766,20 +3779,30 @@ bool ConstraintsGenerator::hasStructPointerEvidence(SimpleType Ty) const {
   if (Var == nullptr || Var->size != PointerSize) {
     return false;
   }
+  auto It = StructEvidenceMemo.find(Ty.get());
+  if (It != StructEvidenceMemo.end()) {
+    return It->second;
+  }
 
   // This query only needs existence. Avoid constructing the complete offset map
   // used by layout conflict checks, especially for large propagated records.
+  bool Result = false;
   for (const auto &Bound : Var->lowerBounds) {
     if (hasStructPointerEvidenceInBound(Bound)) {
-      return true;
+      Result = true;
+      break;
     }
   }
-  for (const auto &Bound : Var->upperBounds) {
-    if (hasStructPointerEvidenceInBound(Bound)) {
-      return true;
+  if (!Result) {
+    for (const auto &Bound : Var->upperBounds) {
+      if (hasStructPointerEvidenceInBound(Bound)) {
+        Result = true;
+        break;
+      }
     }
   }
-  return false;
+  StructEvidenceMemo.emplace(Ty.get(), Result);
+  return Result;
 }
 
 bool ConstraintsGenerator::hasPointerLikeEvidence(SimpleType Ty) const {
@@ -3952,6 +3975,20 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
     ConstraintsGenerator &CG, std::vector<CallSlotMergeEntry> Entries) {
   std::vector<CallFunctionMergePlan> Plans;
   std::map<llvm::Function *, std::size_t> TargetToPlan;
+  // Index V2N values by their resolved root once per policy application.
+  // The per-candidate scan below used to walk the whole reverse map for every
+  // root, which made resolve_variable dominate tmux call-slot merge time when
+  // one SCC produced many candidates over a large V2N. V2N itself does not
+  // change inside this function (merges are transactional and committed only
+  // through binarysub state), so the index stays valid for the whole call.
+  std::map<SimpleType, std::vector<ExtValuePtr>> ValuesByRoot;
+  for (const auto &Ent : CG.V2N.rev()) {
+    auto Root = binarysub::resolve_variable(Ent.first);
+    if (Root) {
+      auto &Values = ValuesByRoot[Root];
+      Values.insert(Values.end(), Ent.second.begin(), Ent.second.end());
+    }
+  }
 
   for (std::size_t EntryOrder = 0; EntryOrder < Entries.size(); ++EntryOrder) {
     auto &Entry = Entries[EntryOrder];
@@ -4426,11 +4463,9 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
             .From = From,
             .Into = Into,
             .Detail = GroupDetail};
-        for (const auto &Ent : CG.V2N.rev()) {
-          if (binarysub::resolve_variable(Ent.first).get() == From.get()) {
-            Pending.MovedValues.insert(Pending.MovedValues.end(),
-                                       Ent.second.begin(), Ent.second.end());
-          }
+        if (auto It = ValuesByRoot.find(From); It != ValuesByRoot.end()) {
+          Pending.MovedValues.insert(Pending.MovedValues.end(),
+                                     It->second.begin(), It->second.end());
         }
 
         binarysub::ConstraintContext Context;
@@ -4776,6 +4811,13 @@ ConstraintsGenerator::collectStructPtrSameAccessKindMergeCandidates(
                       const binarysub::TypeNode *, unsigned>>
       Seen;
 
+  // hasStructPointerEvidence 会全量走目标的 bound/field 证据；同一目标在
+  // 收集过程中不会变化（合并只发生在收集之后的候选循环里），成员级
+  // StructEvidenceMemo 直接提供每变量一次的 memo（无 merge 则无失效）。
+  auto HasStructEvidence = [&](SimpleType Ty) {
+    return hasStructPointerEvidence(Ty);
+  };
+
   for (const auto &[_, Node] : V2N) {
     auto Ptr = binarysub::resolve_variable(Node);
     auto *PtrVar = Ptr ? Ptr->getAsVariableState() : nullptr;
@@ -4783,28 +4825,52 @@ ConstraintsGenerator::collectStructPtrSameAccessKindMergeCandidates(
       continue;
     }
 
-    std::vector<std::pair<SimpleType, unsigned>> Accesses;
+    // 同一变量的 upperBounds 里同一访问目标常出现很多份 bound，直接按 bound
+    // 两两配对是 B^2；大输入（redis 数千 bound/变量）因此卡死。先解析并按
+    // (目标, 访问大小) 去重，只对不同目标配对。候选集合与旧实现一致：旧实现
+    // 本来就用 Seen 按解析后的目标对去重，且同目标对会被跳过。
+    std::vector<std::pair<SimpleType, unsigned>> Targets;
+    auto AddTarget = [&](SimpleType Target, unsigned Size) {
+      Target = binarysub::resolve_variable(Target);
+      if (Target && Target->getAsVariableState() != nullptr) {
+        Targets.push_back({Target, Size});
+      }
+    };
     for (const auto &Bound : PtrVar->upperBounds) {
       if (CollectLoads) {
         auto *Load = Bound ? Bound->getAsPtrLoad() : nullptr;
         if (Load != nullptr) {
-          Accesses.push_back({Load->to, Load->Size});
+          AddTarget(Load->to, Load->Size);
         }
       } else {
         auto *Store = Bound ? Bound->getAsPtrStore() : nullptr;
         if (Store != nullptr) {
-          Accesses.push_back({Store->to, Store->Size});
+          AddTarget(Store->to, Store->Size);
         }
       }
     }
+    std::sort(Targets.begin(), Targets.end(),
+              [](const auto &Lhs, const auto &Rhs) {
+                if (Lhs.first.get() != Rhs.first.get()) {
+                  return Lhs.first.get() < Rhs.first.get();
+                }
+                return Lhs.second < Rhs.second;
+              });
+    Targets.erase(
+        std::unique(Targets.begin(), Targets.end(),
+                    [](const auto &Lhs, const auto &Rhs) {
+                      return Lhs.first.get() == Rhs.first.get() &&
+                             Lhs.second == Rhs.second;
+                    }),
+        Targets.end());
 
-    for (std::size_t I = 0; I < Accesses.size(); ++I) {
-      for (std::size_t J = I + 1; J < Accesses.size(); ++J) {
-        if (Accesses[I].second != Accesses[J].second) {
+    for (std::size_t I = 0; I < Targets.size(); ++I) {
+      for (std::size_t J = I + 1; J < Targets.size(); ++J) {
+        if (Targets[I].second != Targets[J].second) {
           continue;
         }
-        auto FirstTarget = binarysub::resolve_variable(Accesses[I].first);
-        auto SecondTarget = binarysub::resolve_variable(Accesses[J].first);
+        auto FirstTarget = Targets[I].first;
+        auto SecondTarget = Targets[J].first;
         auto *FirstVar =
             FirstTarget ? FirstTarget->getAsVariableState() : nullptr;
         auto *SecondVar =
@@ -4818,8 +4884,8 @@ ConstraintsGenerator::collectStructPtrSameAccessKindMergeCandidates(
             FirstVar->size != PointerSize) {
           continue;
         }
-        if (!hasStructPointerEvidence(FirstTarget) ||
-            !hasStructPointerEvidence(SecondTarget)) {
+        if (!HasStructEvidence(FirstTarget) ||
+            !HasStructEvidence(SecondTarget)) {
           continue;
         }
 
@@ -4828,8 +4894,8 @@ ConstraintsGenerator::collectStructPtrSameAccessKindMergeCandidates(
         if (Second < First) {
           std::swap(First, Second);
         }
-        auto Key =
-            std::make_tuple(Ptr.get(), First, Second, Accesses[I].second);
+        auto Key = std::make_tuple(Ptr.get(), First, Second,
+                                   Targets[I].second);
         if (!Seen.insert(Key).second) {
           continue;
         }
@@ -4837,7 +4903,7 @@ ConstraintsGenerator::collectStructPtrSameAccessKindMergeCandidates(
             .Pointer = Ptr,
             .FromTarget = FirstTarget,
             .IntoTarget = SecondTarget,
-            .AccessSize = Accesses[I].second});
+            .AccessSize = Targets[I].second});
       }
     }
   }
@@ -4862,6 +4928,12 @@ ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
                       const binarysub::TypeNode *, unsigned>>
       Seen;
 
+  // 同 collectStructPtrSameAccessKindMergeCandidates：load×store 候选对是
+  // B^2 的，evidence 由成员级 StructEvidenceMemo 提供每变量一次 memo。
+  auto HasStructEvidence = [&](SimpleType Ty) {
+    return hasStructPointerEvidence(Ty);
+  };
+
   for (const auto &[_, Node] : V2N) {
     auto Ptr = binarysub::resolve_variable(Node);
     auto *PtrVar = Ptr ? Ptr->getAsVariableState() : nullptr;
@@ -4869,20 +4941,54 @@ ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
       continue;
     }
 
+    // 同 collectStructPtrSameAccessKindMergeCandidates：load×store 是 B^2，
+    // 先按 (解析后目标, 大小) 去重再配对，候选集合与旧实现一致。
+    std::vector<std::pair<SimpleType, unsigned>> LoadTargets;
+    std::vector<std::pair<SimpleType, unsigned>> StoreTargets;
+    auto AddTarget = [](std::vector<std::pair<SimpleType, unsigned>> &Out,
+                        SimpleType Target, unsigned Size) {
+      Target = binarysub::resolve_variable(Target);
+      if (Target && Target->getAsVariableState() != nullptr) {
+        Out.push_back({Target, Size});
+      }
+    };
     for (const auto &LoadBound : PtrVar->upperBounds) {
       auto *Load = LoadBound ? LoadBound->getAsPtrLoad() : nullptr;
-      if (Load == nullptr) {
-        continue;
+      if (Load != nullptr) {
+        AddTarget(LoadTargets, Load->to, Load->Size);
       }
-      for (const auto &StoreBound : PtrVar->upperBounds) {
-        auto *Store = StoreBound ? StoreBound->getAsPtrStore(Load->Size)
-                                 : nullptr;
-        if (Store == nullptr) {
+    }
+    for (const auto &StoreBound : PtrVar->upperBounds) {
+      auto *Store = StoreBound ? StoreBound->getAsPtrStore() : nullptr;
+      if (Store != nullptr) {
+        AddTarget(StoreTargets, Store->to, Store->Size);
+      }
+    }
+    auto DedupeTargets =
+        [](std::vector<std::pair<SimpleType, unsigned>> &Targets) {
+          std::sort(Targets.begin(), Targets.end(),
+                    [](const auto &Lhs, const auto &Rhs) {
+                      if (Lhs.first.get() != Rhs.first.get()) {
+                        return Lhs.first.get() < Rhs.first.get();
+                      }
+                      return Lhs.second < Rhs.second;
+                    });
+          Targets.erase(
+              std::unique(Targets.begin(), Targets.end(),
+                          [](const auto &Lhs, const auto &Rhs) {
+                            return Lhs.first.get() == Rhs.first.get() &&
+                                   Lhs.second == Rhs.second;
+                          }),
+              Targets.end());
+        };
+    DedupeTargets(LoadTargets);
+    DedupeTargets(StoreTargets);
+
+    for (const auto &[LoadTarget, LoadSize] : LoadTargets) {
+      for (const auto &[StoreTarget, StoreSize] : StoreTargets) {
+        if (LoadSize != StoreSize) {
           continue;
         }
-
-        auto LoadTarget = binarysub::resolve_variable(Load->to);
-        auto StoreTarget = binarysub::resolve_variable(Store->to);
         auto *LoadVar = LoadTarget ? LoadTarget->getAsVariableState() : nullptr;
         auto *StoreVar =
             StoreTarget ? StoreTarget->getAsVariableState() : nullptr;
@@ -4894,8 +5000,8 @@ ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
             LoadVar->size != StoreVar->size || LoadVar->size != PointerSize) {
           continue;
         }
-        if (!hasStructPointerEvidence(LoadTarget) ||
-            !hasStructPointerEvidence(StoreTarget)) {
+        if (!HasStructEvidence(LoadTarget) ||
+            !HasStructEvidence(StoreTarget)) {
           continue;
         }
 
@@ -4904,7 +5010,7 @@ ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
         if (Second < First) {
           std::swap(First, Second);
         }
-        auto Key = std::make_tuple(Ptr.get(), First, Second, Load->Size);
+        auto Key = std::make_tuple(Ptr.get(), First, Second, LoadSize);
         if (!Seen.insert(Key).second) {
           continue;
         }
@@ -4912,7 +5018,7 @@ ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
             .Pointer = Ptr,
             .FromTarget = LoadTarget,
             .IntoTarget = StoreTarget,
-            .AccessSize = Load->Size});
+            .AccessSize = LoadSize});
       }
     }
   }
@@ -4923,8 +5029,28 @@ ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
 std::size_t
 ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) {
   std::size_t Merged = 0;
+  // 候选循环里每对都要重新确认 evidence；同一轮内合并发生前目标状态不变，
+  // 按变量 memo。合并只会向目标变量增加 bound（evidence 单调：true 永不翻
+  // false，false 可能翻 true），所以每次成功合并只需要失效 Into 和所有
+  // false 条目，true 条目可以一直复用；全清会让每合并一对就把所有变量的
+  // 证据全量重算（redis 31 万候选的 load-load 轮次因此数分钟无进展）。
+  // evidence 只随 merge 把 From 的 ptrLoad/ptrStore bound 转移给 Into
+  // 而变化（onVariableMerged 已精确失效 From/Into），循环里直接走成员
+  // 级 memo，不需要每轮维护局部缓存，也避免了旧实现每合并一对就清空
+  // 全部 false 缓存导致剩余候选全量重算（redis 32 万候选轮次卡死）。
+  auto HasStructEvidence = [&](SimpleType Ty) {
+    return hasStructPointerEvidence(Ty);
+  };
   while (true) {
     bool Changed = false;
+    const bool SlotMergeDiag = std::getenv("NOTDEC_SLOT_MERGE_DIAG") != nullptr;
+    auto SlotMergeDiagStart = std::chrono::steady_clock::now();
+    auto SlotMergeDiagCollect = SlotMergeDiagStart;
+    auto SlotMergeDiagElapsedMs = [](std::chrono::steady_clock::time_point From) {
+      return std::chrono::duration_cast<std::chrono::milliseconds>(
+                 std::chrono::steady_clock::now() - From)
+          .count();
+    };
     std::vector<StructPtrSlotMergeCandidate> Candidates;
     if (Policy == "load-load-struct-ptr") {
       Candidates = collectStructPtrSameLoadMergeCandidates();
@@ -4933,6 +5059,13 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
     } else {
       Candidates = collectStructPtrLoadStoreMergeCandidates();
     }
+    if (SlotMergeDiag) {
+      llvm::errs() << "[slot-merge] " << Policy.str()
+                   << " round collect_ms=" << SlotMergeDiagElapsedMs(SlotMergeDiagStart)
+                   << " candidates=" << Candidates.size()
+                   << " merged_so_far=" << Merged << "\n";
+    }
+    SlotMergeDiagCollect = std::chrono::steady_clock::now();
 
     for (const auto &Candidate : Candidates) {
       auto FirstTarget = binarysub::resolve_variable(Candidate.FromTarget);
@@ -4949,8 +5082,8 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
           FirstVar->size != SecondVar->size || FirstVar->size != PointerSize) {
         continue;
       }
-      if (!hasStructPointerEvidence(FirstTarget) ||
-          !hasStructPointerEvidence(SecondTarget)) {
+      if (!HasStructEvidence(FirstTarget) ||
+          !HasStructEvidence(SecondTarget)) {
         continue;
       }
 
@@ -4965,10 +5098,25 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
 
       ++Merged;
       Changed = true;
-      break;
+      // 成员级 StructEvidenceMemo 已由 onVariableMerged 精确失效
+      // (From, Into)；这里的局部快照缓存已删除，避免全清 false。
+      // 一轮内尽量合并所有候选（break 会导致每合并一对就全量重收集，
+      // tmux/redis 这类大输入的 merge policy 因此卡数小时）；失效的
+      // 候选会在检查里被跳过，新出现的候选由外层 while 下一轮处理。
+      continue;
     }
     if (!Changed) {
+      if (SlotMergeDiag) {
+        llvm::errs() << "[slot-merge] " << Policy.str()
+                     << " round loop_ms=" << SlotMergeDiagElapsedMs(SlotMergeDiagCollect)
+                     << " merged=" << Merged << " done\n";
+      }
       return Merged;
+    }
+    if (SlotMergeDiag) {
+      llvm::errs() << "[slot-merge] " << Policy.str()
+                   << " round loop_ms=" << SlotMergeDiagElapsedMs(SlotMergeDiagCollect)
+                   << " merged=" << Merged << "\n";
     }
   }
 }
@@ -6059,10 +6207,28 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     return Converted;
   };
 
+  const bool ConvertProgress =
+      std::getenv("NOTDEC_CONVERT_PROGRESS") != nullptr;
+  auto convertStart = std::chrono::steady_clock::now();
+  auto reportConvertProgress = [&](std::size_t Done, std::size_t Total) {
+    if (!ConvertProgress) {
+      return;
+    }
+    auto Elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - convertStart)
+                       .count();
+    llvm::errs() << "[convert-progress] scc=" << Name << " done=" << Done
+                 << " total=" << Total << " elapsed_ms=" << Elapsed << "\n";
+  };
+  std::size_t ConvertCount = 0;
   for (auto &Ent : V2N) {
     auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
     auto *Lower = convertSolvedType(Ent.second, true, RootLabel + " lower");
     ValueTypesLower.insert({Ent.first, Lower});
+    ++ConvertCount;
+    if (ConvertCount % 5000 == 0) {
+      reportConvertProgress(ConvertCount, V2N.size());
+    }
   }
   if (SolveGlobals) {
     auto MemUTy = Res.at(PolMem);
@@ -6086,7 +6252,12 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
     auto *Upper = convertSolvedType(Ent.second, false, RootLabel + " upper");
     ValueTypesUpper.insert({Ent.first, Upper});
+    ++ConvertCount;
+    if (ConvertCount % 5000 == 0) {
+      reportConvertProgress(ConvertCount, V2N.size() * 2);
+    }
   }
+  reportConvertProgress(V2N.size() * 2, V2N.size() * 2);
 
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     appendDebugValueTypes(*WorkDir, Name, V2N, ContraVariantValues, Res,
@@ -6960,17 +7131,20 @@ static std::optional<std::uint64_t> getUInt64Constant(const Value *V) {
   return CI->getZExtValue();
 }
 
-static inline void ensureSequence(Value *&Src1, Value *&Src2) {
+static inline void ensureSequence(Value *&Src1, Value *&Src2,
+                                  unsigned &Src1Ind, unsigned &Src2Ind) {
   if (llvm::isa<llvm::ConstantInt>(Src1) &&
       llvm::isa<llvm::ConstantInt>(Src2)) {
     assert(false && "Constant at both sides. Run Optimization first!");
   }
   if (llvm::isa<llvm::ConstantInt>(Src1) &&
       !llvm::isa<llvm::ConstantInt>(Src2)) {
-    // because of InstCombine canonical form, this should not happen?
-    assert(false &&
-           "Constant cannot be at the left side. Run InstCombine first.");
+    // X64 源码级 IR 分支不跑 buildFunctionOptimizations（InstCombine），
+    // -O0 下 and/or 的常量操作数保持源码顺序可能在左侧；and/or 可交换，
+    // 换到右侧语义不变。操作数索引必须一起换，否则后续
+    // getExtValuePtr(Src, &I, OpInd) 的 user 检查会失败。
     std::swap(Src1, Src2);
+    std::swap(Src1Ind, Src2Ind);
   }
 }
 
@@ -7002,7 +7176,13 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
             cg.addSubtype(UintNode, N);
             return;
           }
-        } else if (Ind == 1) {
+        } else if (Ind == 1 &&
+                   (isWithOverflowIntrinsicSigned(Target->getIntrinsicID()) ||
+                    isWithOverflowIntrinsicUnsigned(
+                        Target->getIntrinsicID()))) {
+          // 只有 overflow intrinsic 的 field 1 是 i1；其他 aggregate 返回
+          // 的 intrinsic（如 llvm.modf.f64 的 {double, double}）走下面的
+          // 通用路径，避免对非 i1 断言崩溃。
           assert(I.getType()->isIntegerTy(1));
           cg.createNode(&I);
           return;
@@ -8641,6 +8821,15 @@ void ConstraintsGenerator::MLsubVisitor::visitCallBase(CallBase &I) {
   } else {
     // Call within the SCC:
     auto Func = Target;
+    // metadata 实参只出现在带 metadata 的 intrinsic（如
+    // llvm.experimental.noalias.scope.decl）里；这类调用没有可推理的
+    // 类型信息，直接跳过，避免 convertSimpleTypeVal 对 metadata 求
+    // size=0 崩溃。
+    for (unsigned i = 0; i < I.arg_size(); ++i) {
+      if (I.getArgOperand(i)->getType()->isMetadataTy()) {
+        return;
+      }
+    }
     std::vector<SimpleType> Args;
     for (unsigned i = 0; i < I.arg_size(); ++i) {
       auto ValVar = cg.getOrInsertNode(getExtValuePtr(I.getArgOperand(i), &I, i));
@@ -8828,7 +9017,9 @@ void ConstraintsGenerator::addAddConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
   auto Left = &getOrInsertPNINode(LHS);
   auto Right = &getOrInsertPNINode(RHS);
   getOrInsertPNINode(I);
-  if (Left->isPNRelated() || Right->isPNRelated()) {
+  // addAddCons 的求解规则表只覆盖 PN related 两侧（i/I/p/P）；一侧
+  // NotPN 时规则无法应用，跳过约束（与断言及 solve 前提保持一致）。
+  if (Left->isPNRelated() && Right->isPNRelated()) {
     PG.addAddCons(getPNIValue(LHS), getPNIValue(RHS), getPNIValue(I), I);
   }
 }
@@ -8839,7 +9030,7 @@ void ConstraintsGenerator::addSubConstraint(ExtValuePtr LHS, ExtValuePtr RHS,
   auto Left = &getOrInsertPNINode(LHS);
   auto Right = &getOrInsertPNINode(RHS);
   getOrInsertPNINode(I);
-  if (Left->isPNRelated() || Right->isPNRelated()) {
+  if (Left->isPNRelated() && Right->isPNRelated()) {
     PG.addSubCons(getPNIValue(LHS), getPNIValue(RHS), getPNIValue(I), I);
   }
 }
@@ -8884,10 +9075,12 @@ void ConstraintsGenerator::MLsubVisitor::visitAnd(BinaryOperator &I) {
   // llvm::errs() << "visiting " << __FUNCTION__ << " \n";
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
-  ensureSequence(Src1, Src2);
+  unsigned Src1Ind = 0;
+  unsigned Src2Ind = 1;
+  ensureSequence(Src1, Src2, Src1Ind, Src2Ind);
 
-  auto Src1Node = cg.getOrInsertNode(getExtValuePtr(Src1, &I, 0));
-  auto Src2Node = cg.getOrInsertNode(getExtValuePtr(Src2, &I, 1));
+  auto Src1Node = cg.getOrInsertNode(getExtValuePtr(Src1, &I, Src1Ind));
+  auto Src2Node = cg.getOrInsertNode(getExtValuePtr(Src2, &I, Src2Ind));
   auto RetNode = cg.getOrInsertNode(&I);
 
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
@@ -8901,8 +9094,8 @@ void ConstraintsGenerator::MLsubVisitor::visitAnd(BinaryOperator &I) {
     // llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
     //              << "Warn: And op without constant: " << I << "\n";
   }
-  cg.setNonPointer(getExtValuePtr(Src1, &I, 0));
-  cg.setNonPointer(getExtValuePtr(Src2, &I, 1));
+  cg.setNonPointer(getExtValuePtr(Src1, &I, Src1Ind));
+  cg.setNonPointer(getExtValuePtr(Src2, &I, Src2Ind));
   cg.setNonPointer(&I);
   return;
 }
@@ -8911,10 +9104,12 @@ void ConstraintsGenerator::MLsubVisitor::visitOr(BinaryOperator &I) {
   // llvm::errs() << "Visiting " << __FUNCTION__ << " \n";
   auto *Src1 = I.getOperand(0);
   auto *Src2 = I.getOperand(1);
-  ensureSequence(Src1, Src2);
+  unsigned Src1Ind = 0;
+  unsigned Src2Ind = 1;
+  ensureSequence(Src1, Src2, Src1Ind, Src2Ind);
 
-  auto Src1Node = cg.getOrInsertNode(getExtValuePtr(Src1, &I, 0));
-  auto Src2Node = cg.getOrInsertNode(getExtValuePtr(Src2, &I, 1));
+  auto Src1Node = cg.getOrInsertNode(getExtValuePtr(Src1, &I, Src1Ind));
+  auto Src2Node = cg.getOrInsertNode(getExtValuePtr(Src2, &I, Src2Ind));
   auto RetNode = cg.getOrInsertNode(&I);
 
   if (auto CI = dyn_cast<ConstantInt>(Src2)) {
@@ -8929,8 +9124,8 @@ void ConstraintsGenerator::MLsubVisitor::visitOr(BinaryOperator &I) {
     //              << "Warn: Or op without constant: " << I << "\n";
   }
   // view as numeric operation?
-  cg.setNonPointer(getExtValuePtr(Src1, &I, 0));
-  cg.setNonPointer(getExtValuePtr(Src2, &I, 1));
+  cg.setNonPointer(getExtValuePtr(Src1, &I, Src1Ind));
+  cg.setNonPointer(getExtValuePtr(Src2, &I, Src2Ind));
   cg.setNonPointer(&I);
   return;
 }

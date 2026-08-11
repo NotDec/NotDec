@@ -301,6 +301,13 @@ struct ConstraintsGenerator {
       SimpleType Ty, binarysub::BoundPolarity Polarity) const;
   bool hasStructPointerEvidence(SimpleType Ty) const;
   bool hasPointerLikeEvidence(SimpleType Ty) const;
+  // hasStructPointerEvidence 的版本化 memo。evidence 只依赖变量的
+  // ptrLoad/ptrStore 这类非变量 bound；merge 只把这些 bound 从 From
+  // 转移到 Into，其他变量的 evidence 不变，所以只需在 merge 成功时
+  // 失效 (From, Into)，新增/重写非变量 bound 时失效对应变量即可。
+  // slot-merge 循环里旧实现每合并一对就全清所有 false 缓存，巨型 SCC
+  // 下剩余候选全部重算 bound 证据，redis 32 万候选的轮次数分钟无进展。
+  mutable std::map<const binarysub::TypeNode *, bool> StructEvidenceMemo;
   std::size_t applyCallArgStructPtrMergePolicy();
   std::vector<StructPtrSlotMergeCandidate>
   collectStructPtrSameAccessKindMergeCandidates(bool CollectLoads) const;
