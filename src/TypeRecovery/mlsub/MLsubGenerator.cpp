@@ -5256,9 +5256,8 @@ PNINode &ConstraintsGenerator::getOrInsertPNINode(ExtValuePtr Val) {
   return PG.getOrInsertPNINode(getPNIValue(Val), getPNILatticeType(Val));
 }
 
-PNINode &ConstraintsGenerator::remapPNINode(ExtValuePtr Val,
-                                            ExtValuePtr Target) {
-  return PG.remapPNIVar(getPNIValue(Val), getPNIValue(Target));
+void ConstraintsGenerator::remapPNINode(ExtValuePtr Val, ExtValuePtr Target) {
+  PG.remapPNIVar(getPNIValue(Val), getPNIValue(Target));
 }
 
 void ConstraintsGenerator::unifyPNIValues(ExtValuePtr V1, ExtValuePtr V2) {

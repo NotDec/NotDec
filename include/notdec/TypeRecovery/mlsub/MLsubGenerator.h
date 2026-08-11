@@ -445,7 +445,7 @@ struct ConstraintsGenerator {
   PNINode *getPNINodeOrNull(ExtValuePtr Val);
   PNINode &getPNINode(ExtValuePtr Val);
   PNINode &getOrInsertPNINode(ExtValuePtr Val);
-  PNINode &remapPNINode(ExtValuePtr Val, ExtValuePtr Target);
+  void remapPNINode(ExtValuePtr Val, ExtValuePtr Target);
   void unifyPNIValues(ExtValuePtr V1, ExtValuePtr V2);
 
   public:
