@@ -352,6 +352,14 @@ canonicalize 默认已经并行，不需要再设置
 - `fragmentation.fragmented_nodes` / `fragmented_types`：同类型节点是否还分散。
 - `performance.wall_ms` / `peak_rss_mb`：类型恢复加评估链路的耗时和峰值内存。
 
+**类型推理结果的对比依据是 HType 文件，不是输出 IR**：workdir 的
+`ValueTypes.txt`（Final Value -> binarysub UType mapping）、`ValueHTypes.txt`、
+`ImportantHTypes.txt`、`VarOrigins.txt`，以及 eval 的 `DebugInfoValueTypes.txt`
+是类型推理的直接产物。输出 IR 不体现类型推理结果（类型恢复不重写 IR 指令，
+IR 基本不动是正常现象），**"输出 IR cmp SAME"不能作为推理等价性或回归通过
+的证据**。做 A/B 对照或回归验证时，必须对比 workdir/eval 的 HType 文件内容
+（或 `merge-eval-summary.json` 的指标），IR 只用来做 `llvm-as` 合法性检查。
+
 ### 源码级 IR 合并评估的固定流程
 
 对新的源码级项目做类型合并评估时，按下面顺序处理：
