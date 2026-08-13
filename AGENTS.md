@@ -398,6 +398,62 @@ NOTDEC_BINARYSUB_THREADS=8 /usr/bin/time -v ./build/bin/notdec \
   -o /tmp/notdec-source-project-out.ll
 ```
 
+### 大项目内存与时间开销分析
+
+Bench2 大项目（tmux 39MB、redis 55MB 等）的恢复链路常见小时级耗时或几十 GB
+内存爆炸。内存用 jemalloc profile 归因，时间用 perf attach 采样，两者结合
+`/usr/bin/time -v` 的 wall/峰值 RSS 划分阶段。
+
+**内存：jemalloc profile**
+
+- 现成脚本 `scripts/profile-memcached-memory.sh`：默认 memcached，`--input` 换
+  目标、`--threshold-gib 0` 不限内存、`--threads 8` 固定线程数；输出
+  `rss-pss.csv`（RSS/PSS 时间序列）和 jemalloc heap dump。脚本里用的是系统
+  `/usr/lib/x86_64-linux-gnu/libjemalloc.so.2`。
+- 手动跑法：
+
+  ```bash
+  LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2 \
+  MALLOC_CONF='prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_final:true,prof_prefix:/tmp/jeprof.tmux' \
+  NOTDEC_BINARYSUB_THREADS=8 ./build-relwithdebinfo-20260731/bin/notdec \
+    input.ll -o /tmp/out.ll --tr-level=2 --merge-struct-ptr-load-store \
+    -g --fast-work-dir --work-dir=/tmp/work --merge-eval-dir=/tmp/eval
+  ```
+
+  进程正常退出时 jemalloc 在 `prof_prefix` 写 heap dump（文件名带序号和
+  `.heap` 后缀；`prof_final` 保证被 kill 也有最终 dump）。
+- 分析：
+
+  ```bash
+  jeprof --show_bytes --text ./build-relwithdebinfo-20260731/bin/notdec \
+    /tmp/jeprof.tmux.*.heap
+  jeprof --show_bytes --pdf ./build-relwithdebinfo-20260731/bin/notdec \
+    /tmp/jeprof.tmux.*.heap > /tmp/jeprof-tmux.pdf
+  ```
+
+  `--alloc_space` 看累计分配总量，默认看 live；`--lines` 落到源码行。注意
+  jemalloc 会改变分配行为，时间 A/B 对比必须同一 allocator，内存归因可以接受
+  profile 自身开销。
+
+**时间：perf attach**
+
+- 本机 perf 是自编译的 `/home/ubuntu/.local/bin/perf`（5.15.160），
+  `perf_event_paranoid=0`，不需要 sudo。先 `pgrep -x notdec` 拿真实 notdec
+  进程 pid（`-f` 会同时匹配 bash 启动器），跑批起来后按阶段 attach 采样：
+
+  ```bash
+  perf record -F 99 -g -p <notdec-pid> -- sleep 30
+  perf report
+  perf annotate --symbol=<函数名>
+  ```
+
+- 阶段线程模型：约束生成是单核（进程只有 1 个线程，99% CPU）；analyze/simplify
+  是 8 线程。attach 前先 `ps -L -p <pid>` 看线程数，不要把多线程阶段误判为单核
+  热点。阶段边界看 workdir 文件时间：`02-mlsub-input.ll` 是约束生成输入，
+  `[simplify-start]`（`NOTDEC_SIMPLIFY_DIAG=1`）是 simplify 开始。
+- attach 偶发只采到极少量样本（进程长时间泡在深迭代或内核态段），重复采样或加
+  `--call-graph dwarf`；与 `/usr/bin/time -v` 的 wall/峰值 RSS 交叉核对阶段划分。
+
 ## 9. 测试
 
 测试布局和 oracle 细节以 `test/README.md` 为准；这里仅保留当前最常用入口。

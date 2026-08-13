@@ -2549,7 +2549,14 @@ bool isMallocWrapperAllocator(const llvm::Function *F) {
     return false;
   }
   auto Name = F->getName();
-  return Name == "malloc" || Name == "calloc";
+  // Generic allocator entry points whose pure forwarding wrappers can be
+  // treated as polymorphic. The use checker below still rejects any function
+  // that initializes or otherwise touches the returned memory, so adding the
+  // realloc/strdup family only extends detection to the same wrapper shape
+  // already accepted for malloc/calloc (tmux's xrealloc/xstrdup etc.).
+  return Name == "malloc" || Name == "calloc" || Name == "realloc" ||
+         Name == "reallocarray" || Name == "recallocarray" ||
+         Name == "strdup";
 }
 
 bool isIgnorableMallocWrapperUser(const llvm::Instruction *I) {

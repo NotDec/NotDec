@@ -52,3 +52,25 @@ fortune：
 - 实现效果：8/10。已解决 `do_malloc` 这类通用 wrapper 的 SCC 边界问题，且没有识别 `new_fp`。
 - 复杂度：6/10。新增了一段保守 use 检查，理解成本可控，但比单纯名字匹配高。
 - 维护成本：6/10。规则集中在一个 cpp helper 里，后续扩展 wrapper 形态比较直接；风险主要是 LLVM IR 形状更多时需要补 local forwarding。
+
+## 追加：allocator 白名单扩展到 realloc/strdup 家族（2026-08-13）
+
+tmux 自带 `xrealloc`/`xreallocarray`/`xrecallocarray`/`xstrdup`，分别调
+`reallocarray`/`recallocarray`/`strdup`；原白名单只有 `malloc`/`calloc`，这四
+个 wrapper 不会被识别。`isMallocWrapperAllocator()`
+（`src/TypeRecovery/mlsub/MLsubGenerator.cpp:2547`）的白名单加入
+`realloc`/`reallocarray`/`recallocarray`/`strdup`。use-checker 不变，仍会拒绝
+任何初始化/使用返回内存的 factory，因此只有和 xmalloc 相同形状的纯转发
+wrapper 才会被标记多态。
+
+验证：
+
+- tmux 全量检测：6 个 wrapper 全部命中（xmalloc/xcalloc/xrealloc/xreallocarray/
+  xrecallocarray/xstrdup），写进 workdir `MallocWrappers.txt`。
+- fortune / memcached merge-eval 回归：指标与历史一致（fortune bad_unions=0
+  frag=8 cov 2.85%；memcached bad_unions=1 frag=133），白名单扩展没有改变
+  这两个项目的结果。
+
+注意：tmux 里这些 wrapper 都在巨型 SCC0 内，多态标记不会拆 SCC，只影响
+per-callsite 实例化；tmux 的时间/内存瓶颈另有其因（见
+[20260812-02](./20260812-02-tmux-analyze-constraint-gen-bisection.md)）。
