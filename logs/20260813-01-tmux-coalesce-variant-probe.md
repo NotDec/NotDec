@@ -83,3 +83,24 @@ TypeBuilder 的 name→binder 表按名字 1:1 假设被打破。旧计数器命
    hash-cons 保证 body 指针相同），不同构才报错。
 2. 修好后用白名单扩展版跑全量 tmux 确认是否真正“跑通”（不再有大 group）。
 3. 若仍有卡点，再上祖先上下文缓存；探针数据支持按 (ty,pol,祖先上下文) 缓存。
+
+## 追加：TypeBuilder 重绑定断言修复（2026-08-13 完成）
+
+采用嵌套遮蔽而非“同构才共享”：
+
+- `external/binarysub/src/TypeBuilder.cpp:1014-1043`
+  `TypeBuilder::convertRecursive()`：把 `assert(名字不重复绑定)` 改成保存外层
+  binder、用内层 binder 遮蔽 `RecursiveTypeNames[T.name]`，转换完内层 body 后
+  恢复外层映射。
+- 语义：内层同名 binder 的 body 里对 `μ<hash>` 的自引用必须绑定到内层 binder；
+  遮蔽保证这一点，且不依赖两个 binder 是否结构同构，路径相关 μ 绑定差异也能
+  正确处理。结构同构时遮蔽结果与共享外层 binder 结构一致，输出不变。
+
+验证：
+
+- slice1275（白名单扩展版、确定性 μ 默认开）：修复前 4 次崩 2 次；修复后
+  无探针 4 次 + 带探针 2 次全部 exit=0，无 rebind。
+- fortune / memcached merge-eval 指标与历史一致（fortune bad_unions=0 frag=8
+  cov 2.85%；memcached bad_unions=1 frag=133），正常路径不受影响。
+
+提交：binarysub `763c0fe`；顶层指针随本日志一起更新。
