@@ -104,3 +104,44 @@ TypeBuilder 的 name→binder 表按名字 1:1 假设被打破。旧计数器命
   cov 2.85%；memcached bad_unions=1 frag=133），正常路径不受影响。
 
 提交：binarysub `763c0fe`；顶层指针随本日志一起更新。
+
+## 追加：祖先 fold 上下文缓存实现与全量结果（2026-08-13 第二轮）
+
+### 实现（binarysub `src/binarysub.cpp`，coalesceCompactType）
+
+按上一节的设计实现首版，默认开，`NOTDEC_DISABLE_PATH_MEMO=1` 关闭对照：
+
+- 每个 `(ty, pol)` 存 `SubtreeKeys`（无 memo 时会遍历到的完整输入键，排除根
+  自身，按 (节点,极性) 去重）+ 每个结果变体的 `FoldedKeys`（本次展开真正
+  折叠到的祖先键）。
+- 命中条件精确：所有 FoldedKeys 都在当前 inProcess 上，且当前 inProcess 落在
+  SubtreeKeys 里的键都被折叠过。展开命中过内层 PathMemo 或跨组共享 memo 的
+  变体不缓存（结果嵌入了未记录的外来 μ 绑定）。
+- 折叠键按展开栈记录并向上合并（合并时按父级根键过滤，自引用折叠不参与父级
+  有效性条件）。计数器 μ 命名模式下禁用（μ 名随调用顺序变化）。
+- `collectExpansionInputKeys` 镜像 go 的遍历（record/function/ptr/var 的
+  `fromOnlyVariable` 节点和 recVar bound 子树），多项式代价。
+
+### 验证
+
+- fortune/memcached merge-eval：指标与历史一致（bad_unions=0/1、frag=8/133），
+  正常路径不受影响。
+- slice1275（白名单版）缓存开/关各两次：输出 IR 字节一致；ValueTypes.txt 的
+  开关差异（39404 行）与 run-to-run 噪声（39428/39406 行）同量级。
+- 全量 tmux（白名单版 + 缓存开）首次完整跑通：**44:26，峰值 RSS 6.0GB**，
+  eval coverage 3.27%、bad_unions=8、fragmented_nodes=967。8 个 bad_unions
+  全是 L0 的 explicit/policy merge（不同 struct 被并），是 merge-policy 问题，
+  无路径相关 μ 特征。
+- 对照（缓存关）同时启动：同一输入形成 recvars=602 的 group，go_calls 冲到
+  1420 万后卡住（缓存开时最大 group 只有 160 万）。缓存把大 group 的重复展开
+  压了约 9 倍，是“跑通”的关键。该对照 run 在后台继续，完整 bad_unions A/B
+  待它结束。
+
+### 已知代价
+
+- 大 group 里 PathMemo 查找/校验是新增热点（perf 一度 PolarCompactTypeHash
+  33% + hashtable 18%）：每个 go 入口多一次 find，命中校验要遍历 inProcess。
+  目前 44 分钟跑完可以接受，但校验可以再优化（比如按路径签名先做 O(1) 预筛，
+  只在签名命中时才做 O(路径) 精确校验）。
+- SubtreeKeys 按 key 存储抬高了峰值内存（6GB vs 之前的 3GB 级），可以只给
+  真正反复查询的 key 收子树键。
