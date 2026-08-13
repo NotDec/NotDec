@@ -145,3 +145,37 @@ TypeBuilder 的 name→binder 表按名字 1:1 假设被打破。旧计数器命
   只在签名命中时才做 O(路径) 精确校验）。
 - SubtreeKeys 按 key 存储抬高了峰值内存（6GB vs 之前的 3GB 级），可以只给
   真正反复查询的 key 收子树键。
+
+## 追加：缓存关 A/B、两项优化、go1 栈溢出（2026-08-13 第三轮）
+
+### 缓存开/关全量 A/B（都跑完了）
+
+| 配置 | wall | 峰值 RSS | bad_unions | polluted | frag | coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 缓存开（43fd2cb） | 44:26 | 5.9GB | 8 | 8 | 967 | 3.268% |
+| 缓存关 | 1:36:51 | 12.6GB | 9 | 9 | 951 | 3.268% |
+
+bad_unions 对比：8 个完全相同，缓存关多 1 个（`cmd_list_print::arg0` vs
+`load_cfg_from_buffer::arg3`，reverse_edge）。缓存没有引入任何新的错误合并，
+coverage 完全一致。缓存把全量从 1.6 小时/12.6GB 压到 44 分钟/5.9GB。
+
+### 两项优化（binarysub `src/binarysub.cpp`）
+
+1. **校验按较小一侧迭代**：命中条件 `P ∩ SubtreeKeys == FoldedKeys` 改为两边
+   成员关系逐元素比较，迭代 `min(|SubtreeKeys|, |inProcess|)`。热点小 key 的
+   SubtreeKeys 通常只有几个键、路径可能很深，从 O(路径) 降到 O(几个键)。
+2. **SubtreeKeys 惰性收集**：store 时不再收子树键，只在 key 被再次查询时才收
+   一次；存了不再复用的 key 不占内存。
+
+验证：fortune/memcached eval 指标不变；slice1275 缓存开/关 ValueTypes 差异
+（39428 行）与 run-to-run 噪声同量级；全量 tmux 复跑 44:27 完成，bad_unions
+8 个与 v1 完全一致（0 新增 0 消失），coverage 相同。perf 采样中 v1 大 group
+阶段的 PolarCompactTypeHash 33% + 哈希表 18% 热点消失，变成 analyze 主导。
+
+### 偶发 SIGSEGV：canonicalizeType go1 深递归栈溢出（与本次改动无关）
+
+全量 tmux 有一次跑批在 `canonicalizeType` 的 go1 崩溃（383+ 层 go1/
+transformChildren 递归，TBB worker 线程默认 8MB 栈被撑爆，栈里没有 coalesce
+帧）。同输入换 `ulimit -s 65536` 后 44:27 完整跑通，确认是栈溢出而非本次
+改动。这是约束求解 run-to-run 变体偶发触发的既有隐患，修复方向是把 go1
+递归改成显式栈或给 TBB worker 配大栈。
