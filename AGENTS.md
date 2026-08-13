@@ -453,6 +453,9 @@ Bench2 大项目（tmux 39MB、redis 55MB 等）的恢复链路常见小时级�
   `[simplify-start]`（`NOTDEC_SIMPLIFY_DIAG=1`）是 simplify 开始。
 - attach 偶发只采到极少量样本（进程长时间泡在深迭代或内核态段），重复采样或加
   `--call-graph dwarf`；与 `/usr/bin/time -v` 的 wall/峰值 RSS 交叉核对阶段划分。
+- 跑批期间不要重链 `notdec`：运行中的进程还映射旧 inode，重建后 perf 里
+  `notdec` 会显示成 `(deleted)`、函数名解析丢失。需要可解析符号的采样就在
+  启动跑批前完成构建。
 
 ## 9. 测试
 
