@@ -260,3 +260,33 @@ canonicalize 后 1.7GB，simplify 后 11.9GB（列表共享修复后）。修复
 剩余线程相关内存 = 并发 group 的临时状态（coOccurrences、PathMemo、
 per-group arena）。16 线程本身不加速（关键路径单线程），推荐保持 8 线程；
 若确需压内存，可给大 group 加并发上限（半成品方向，未实现）。
+
+## 追加：run-to-run 分组方差根因（2026-08-14 第四轮）
+
+现象：同输入全量 tmux 的大 group 大小随机（60 万 vs 580 万 go_calls，
+recvars 490-861），墙钟 16-70 分钟。
+
+定位实验：
+
+- 全串行（单线程 + 串行 canonicalize）两次跑 slice1275，ValueTypes 仍差
+  15854 行 → 方差不来自并行。
+- `setarch -R`（关 ASLR）两次跑完全一致（diff=0）→ 根因是地址相关迭代
+  顺序：指针键容器（`std::set<llvm::Function*>`、`std::map<llvm::CallBase*,...>`
+  等）的迭代顺序随 ASLR 变化，影响约束生成/求解与 merge 决策。
+- 约束生成产物（SCCs.txt、03-pndiff-final.ll、PNDiff.warn）跨 run 完全一致，
+  差异发生在后续 simplify/merge 阶段。
+
+已做确定性修复（MLsubGenerator）：
+
+- `ConstraintsGenerator::run()` 与 `bottomUpPhase()` 按函数名排序遍历 SCC
+  内函数（`std::set<llvm::Function*>` 指针序 → 名字序）。
+- `bottomUpPhase()` 的 unhandledCalls 按模块声明序编号后排序遍历
+  （`std::map<llvm::CallBase*,...>` 指针序 → 模块序）。
+
+效果：全串行 slice 的 ValueTypes 差异 15854 → 6974 行；剩余差异是其它指针序
+点的结构/命名差异，完整修复需继续审计指针键迭代（半成品）。
+
+实用方案：跑批加 `setarch -R` 关 ASLR → 完全可复现，且本次全量 20:37 完成、
+没有任何 simplify-expanding（无大 group，消除 40-70 分钟的离群尾巴）。eval
+coverage 与历史一致；bad_unions=9（与其它 run 的 8/9 同一噪声带，顺序改变
+merge 决策属预期）。注意 `setarch -R` 只对该进程生效。

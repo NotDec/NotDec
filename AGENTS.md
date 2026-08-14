@@ -456,6 +456,12 @@ Bench2 大项目（tmux 39MB、redis 55MB 等）的恢复链路常见小时级�
 - 跑批期间不要重链 `notdec`：运行中的进程还映射旧 inode，重建后 perf 里
   `notdec` 会显示成 `(deleted)`、函数名解析丢失。需要可解析符号的采样就在
   启动跑批前完成构建。
+- run-to-run 复现性：指针键容器（`std::set<llvm::Function*>`、
+  `std::map<llvm::CallBase*,...>` 等）的迭代顺序随 ASLR 变化，会让
+  ValueTypes 文本、merge 决策和大 group 分组跨 run 不同（tmux 全量因此
+  16-70 分钟随机）。要可复现/无离群尾巴，用 `setarch x86_64 -R env ...`
+  关 ASLR 跑；`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=0` 可进一步去掉
+  canonicalize 并行的分组影响（速度代价另测）。
 
 ## 9. 测试
 
