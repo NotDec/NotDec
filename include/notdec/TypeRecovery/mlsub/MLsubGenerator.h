@@ -362,7 +362,15 @@ struct ConstraintsGenerator {
   }
 
   void run() {
-    for (const llvm::Function *Func1 : SCCs) {
+    // 约束生成按函数名排序遍历：SCCs 是 std::set<llvm::Function*>，指针迭代
+    // 顺序随 ASLR 变化，会让约束插入/求解顺序 run-to-run 不同（ValueTypes
+    // 差异和分组方差都来自这里）。模块内函数名唯一，排序是确定性键。
+    std::vector<const llvm::Function *> SortedSCCs(SCCs.begin(), SCCs.end());
+    llvm::sort(SortedSCCs, [](const llvm::Function *A,
+                              const llvm::Function *B) {
+      return A->getName() < B->getName();
+    });
+    for (const llvm::Function *Func1 : SortedSCCs) {
       auto Func = const_cast<llvm::Function *>(Func1);
       // create function nodes
       auto F = createNode(Func);
@@ -382,7 +390,7 @@ struct ConstraintsGenerator {
       }
       addSubtype(binarysub::make_function(Args, Ret), F);
     }
-    for (const llvm::Function *Func : SCCs) {
+    for (const llvm::Function *Func : SortedSCCs) {
       if (OpaqueBodies.count(const_cast<llvm::Function *>(Func)) != 0) {
         continue;
       }
@@ -391,7 +399,7 @@ struct ConstraintsGenerator {
       Visitor.handlePHINodes();
     }
     applyDeferredCallConstraints();
-    for (const llvm::Function *Func1 : SCCs) {
+    for (const llvm::Function *Func1 : SortedSCCs) {
       auto Func = const_cast<llvm::Function *>(Func1);
       auto F = getNodeOrNull(Func);
       assert(F->getAsVariableState() != nullptr);

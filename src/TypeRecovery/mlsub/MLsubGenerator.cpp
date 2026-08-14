@@ -6016,11 +6016,36 @@ void MLsubRecovery::applyExtraConstraints(ConstraintsGenerator &G,
 }
 
 void MLsubRecovery::bottomUpPhase() {
+  // 与 ConstraintsGenerator::run() 一致：SCC 内函数按名字排序遍历，避免
+  // std::set<llvm::Function*> 指针顺序随 ASLR 变化影响 run-to-run 结果。
+  auto SortedFunctions = [](const std::set<llvm::Function *> &Funcs) {
+    std::vector<llvm::Function *> Out(Funcs.begin(), Funcs.end());
+    llvm::sort(Out, [](llvm::Function *A, llvm::Function *B) {
+      return A->getName() < B->getName();
+    });
+    return Out;
+  };
+  // unhandledCalls 是 std::map<llvm::CallBase*, ...>，指针序随 ASLR 变化。
+  // 按模块声明序给调用点编号，保证跨 run 的实例化顺序一致（变量 id 和最终
+  // 类型文本依赖这个顺序）。
+  std::unordered_map<const llvm::CallBase *, std::size_t> CallOrder;
+  {
+    std::size_t Next = 0;
+    for (const llvm::Function &F : Mod) {
+      for (const llvm::BasicBlock &BB : F) {
+        for (const llvm::Instruction &I : BB) {
+          if (auto *CB = llvm::dyn_cast<llvm::CallBase>(&I)) {
+            CallOrder.emplace(CB, Next++);
+          }
+        }
+      }
+    }
+  }
   // Iterate bottom up.
   for (std::size_t Ind = AG.AllSCCs.size(); Ind-- > 0;) {
     auto &Data = AG.AllSCCs.at(Ind);
     std::set<llvm::Function *> OpaqueBodies;
-    for (auto *Func : Data.SCCSet) {
+    for (auto *Func : SortedFunctions(Data.SCCSet)) {
       if (!isOpaqueBody(*Func)) {
         continue;
       }
@@ -6066,7 +6091,7 @@ void MLsubRecovery::bottomUpPhase() {
       G->emitFunctionConstraintStats();
     }
 
-    for (auto *Func : Data.SCCSet) {
+    for (auto *Func : SortedFunctions(Data.SCCSet)) {
       if (auto *ExtraSpec = getExtraConstraintsSpec(*Func)) {
         llvm::errs() << "Applying MLsub extra constraints to "
                      << Func->getName() << "\n";
@@ -6091,7 +6116,15 @@ void MLsubRecovery::bottomUpPhase() {
     // Create poly schemes and instantiate every unhandled call first.  The
     // deferred flush below preserves the old subtype relations while ensuring
     // none of the call-slot merge candidates are recorded early.
-    for (auto &Ent : Data.Generator->unhandledCalls) {
+    std::vector<std::pair<llvm::CallBase *, SimpleType>> SortedCalls(
+        Data.Generator->unhandledCalls.begin(),
+        Data.Generator->unhandledCalls.end());
+    llvm::sort(SortedCalls, [&](const auto &A, const auto &B) {
+      auto ItA = CallOrder.find(A.first);
+      auto ItB = CallOrder.find(B.first);
+      return ItA->second < ItB->second;
+    });
+    for (auto &Ent : SortedCalls) {
       auto F = Ent.first->getCalledFunction();
       auto TargetNode = AG.CG->getOrInsertFunction(F);
       auto TargetIt = AG.Func2SCCIndex.find(TargetNode);
