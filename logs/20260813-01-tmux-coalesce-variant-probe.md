@@ -245,3 +245,18 @@ bound 子树，却各自重新遍历和求交。下一步候选是把 recVar bou
 验证：fortune/memcached eval 指标不变。全量 tmux 复跑赶上重分组离群样本
 （coalesce 关键路径 48 分钟还在跑，CPU ~150%，与 t16/缓存对照的重分组同类），
 单样本无法给出分片收益；分片只减少锁竞争，语义与哈希去重不变，保留。
+
+### 线程扩展性与 analyze 缓存内存（2026-08-14 第三轮）
+
+线程扩展数据（分片版之前）：8 线程峰值 7.7-10.4GB，16 线程 12.4GB（61 分钟
+仍跑，杀掉）。内存随并发 group 数上升，主要来自每 group 独立的共现状态与
+coalesce 局部结构，16 线程时并发大 group 更多。
+
+analyze 缓存首次实现峰值 16.7-17.4GB。`NOTDEC_BULK_MEM_STATS=1` 拆解：
+canonicalize 后 1.7GB，simplify 后 11.9GB（列表共享修复后）。修复前每个
+(var, 极性) map 为 bound 里每个节点各建一份出现列表，2×|recVars| 份重复；
+改为按 (节点, 极性) 全局共享列表后省约 5.5GB。
+
+剩余线程相关内存 = 并发 group 的临时状态（coOccurrences、PathMemo、
+per-group arena）。16 线程本身不加速（关键路径单线程），推荐保持 8 线程；
+若确需压内存，可给大 group 加并发上限（半成品方向，未实现）。
