@@ -202,3 +202,35 @@ bad_unions=8 与优化前完全一致（0 新增 0 消失），coverage 相同�
 bound 子树，却各自重新遍历和求交。下一步候选是把 recVar bound 闭包的共现
 贡献按 (var, pol) 预计算一次，group 侧只遍历根 DAG 再合并贡献（交集满足
 结合律/幂等，可精确拆分）；这是结构性改动，需单独设计验证。
+
+## 追加：跨组 analyze 缓存实现与三路实验（2026-08-14 第二轮）
+
+### 16 线程实验：负结果
+
+`NOTDEC_BINARYSUB_THREADS=16` 全量：61 分钟仍在跑（峰值 RSS 12.4GB），被
+杀掉。8 线程 38-45 分钟。说明 wall 时间受单线程 coalesce 大 group 关键路径
+限制，加线程只增加并发内存，不缩短墙钟。保持 8 线程。
+
+### 跨组 analyze 缓存（binarysub，默认开，`NOTDEC_DISABLE_ANALYZE_CACHE=1` 关闭）
+
+设计（`buildBoundOccurrenceCache` + `analyzeOccurrences` 回放）：
+
+- 每个 (递归变量, 极性) 预计算一次其 bound DAG 的共现贡献（只含 bound 自身
+  节点的位置，不含嵌套递归变量的 bound），记录 `FirstRefs`（本 bound 内每个
+  递归变量第一次出现的极性）。
+- group 侧根遍历不再就地展开 bound，只记录首次出现的 (var, 极性)；根遍历后
+  按首次出现顺序回放：合并预计算的 map，FirstRefs 里未处理的变量追加队列。
+- 精确性：交集结合律/幂等 + “节点被先访问则其递归变量必已处理” + DFS 顺序
+  一致，回放与原地展开等价（含 processedRecVars 的首次语义）。
+
+验证：
+
+- fortune/memcached eval 指标不变（bad_unions=0/1、frag=8/133）。
+- 全量 tmux 第一次跑 16:27（之前 38:08），bad_unions=8 与上一轮逐条一致
+  （0 新增 0 消失），coverage 相同；期间 CPU 从 ~700% 掉到 ~190%，analyze
+  工作量基本消失。
+- 关缓存对照同输入跑到 74 分钟（go_calls 580 万级的大组）被杀。注意 run 间
+  分组差异大（缓存版 60 万级 go_calls），墙钟对比混有噪声，但 CPU 表现和
+  perf 归因互相印证。
+- 峰值内存 16.7GB（缓存 map + 分组波动），比无缓存高；时间收益约 2.3 倍，
+  内存是代价。
