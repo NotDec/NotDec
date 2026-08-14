@@ -234,3 +234,14 @@ bound 子树，却各自重新遍历和求交。下一步候选是把 recVar bou
   perf 归因互相印证。
 - 峰值内存 16.7GB（缓存 map + 分组波动），比无缓存高；时间收益约 2.3 倍，
   内存是代价。
+
+### utype_pool 分片锁（binarysub `include/binarysub/binarysub.h`）
+
+`make_utype_node` 原来全程持一把全局 `utype_pool_mutex`，8 线程 coalesce 时
+所有节点构造串行化。改为按哈希分 64 片、每片独立锁，deque 增长单独用
+`utype_pool_mutex`。同构节点哈希相同必落同片，去重语义不变；同片第二个线程
+在分片锁下重扫桶命中新节点，不会重复 push。
+
+验证：fortune/memcached eval 指标不变。全量 tmux 复跑赶上重分组离群样本
+（coalesce 关键路径 48 分钟还在跑，CPU ~150%，与 t16/缓存对照的重分组同类），
+单样本无法给出分片收益；分片只减少锁竞争，语义与哈希去重不变，保留。
