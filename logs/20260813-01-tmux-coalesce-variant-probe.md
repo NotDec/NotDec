@@ -179,3 +179,26 @@ transformChildren 递归，TBB worker 线程默认 8MB 栈被撑爆，栈里没�
 帧）。同输入换 `ulimit -s 65536` 后 44:27 完整跑通，确认是栈溢出而非本次
 改动。这是约束求解 run-to-run 变体偶发触发的既有隐患，修复方向是把 go1
 递归改成显式栈或给 TBB worker 配大栈。
+
+## 追加：perf 归因与交集微优化（2026-08-14）
+
+全量 tmux（缓存版）两个阶段 perf 采样一致：`analyzeOccurrences` 41% +
+`SimpleTypeStableIdentityLess` 28% + PolarVar 哈希表 7% + `applySimplificationPlan`
+5%。analyze 的共现交集是 CPU 主体。
+
+微优化（binarysub）：
+
+- `intersect_occurrence_var_lists`（`src/binarysub.cpp`）：双指针合并从
+  `less(lhs,rhs)`+`less(rhs,lhs)` 两次比较改成一次三分比较，直接比较
+  VariableState 的 (id, level)，语义与 `SimpleTypeStableIdentityLess` 一致。
+- `SimpleTypeStableIdentityLess`（`include/binarysub/binarysub-core.h`）：去掉
+  `std::tie`，直接比较 id/level。
+
+验证：fortune/memcached eval 指标不变；全量 tmux 45:17 → **38:08**（约 -16%），
+bad_unions=8 与优化前完全一致（0 新增 0 消失），coverage 相同。峰值 RSS
+7.7-10.4GB 随 run-to-run 分组波动。
+
+剩余大头仍是 analyze（~69% CPU）里的跨组重复：大量 group 共享同一批 recVar
+bound 子树，却各自重新遍历和求交。下一步候选是把 recVar bound 闭包的共现
+贡献按 (var, pol) 预计算一次，group 侧只遍历根 DAG 再合并贡献（交集满足
+结合律/幂等，可精确拆分）；这是结构性改动，需单独设计验证。
