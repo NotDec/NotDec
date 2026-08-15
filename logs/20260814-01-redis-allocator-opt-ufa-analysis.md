@@ -124,3 +124,39 @@ fortune eval 不变。binarysub da3a08a。
 待查方向：PersistentSet refcount 在并发 canonicalize 下的不平衡路径
 （insert 返回已有节点不 retain、recoverCreatedNodesLocked 时机、跨线程
 Storage 拷贝）。
+
+## 追加：崩溃根因确认（TBB 4MB 栈溢出）与 coalesce 第二爆炸（2026-08-15 第二轮）
+
+### 崩溃根因：TBB worker 固定 4MB 栈
+
+实测（pthread_getattr_np）：TBB worker 线程栈=4MB（硬编码，与 ulimit -s 无关；
+主线程继承 rlimit 64MB）。canonicalizeType 的 go0/go1 路径相关展开深递归把
+4MB 撑爆，栈帧落到相邻映射后随机二次崩溃。解释全部现象：位置随机、单线程
+不崩（64MB 主线程）、ASan 不触发（栈溢出非堆 UAF）、ulimit -s 无效。
+
+修复（binarysub ded4aba）：
+- canonicalize 并行改用显式 pthread 线程池（128MB 栈，原子索引分派）替换
+  tbb::parallel_for；analyze 保持 TBB（4MB 对该阶段足够，串行 canonicalize
+  对照 run 2 小时无崩证明）。
+- PersistentSet retain/recycle 竞态顺带修复（CAS 化）：release 归零后、
+  锁内回收前，锁外 retain 把计数加回 1，recycle 仍无条件回收 → 节点复用
+  UAF。CAS（RecycledMask 互斥）消除。
+
+验证：redis 8 线程并行 133 分钟无崩（此前 12-15 分钟必崩），Interner 内存
+14.9GB 稳定约 2 小时，然后进入 coalesce 大组展开。
+
+### 第二个爆炸：coalesce 大组展开（recvars=169）
+
+133 分钟后 simplify-expanding 显示 recvars=169 组 go_calls 520 万级，
+RSS 14.9GB → 40.7GB 加速爬升（每 60s +5-10GB），手动终止。与 tmux
+20260813 同款（大组路径相关展开的组合爆炸；tmux 靠祖先 fold 上下文缓存把
+重复展开压 9 倍，redis 此组落在缓存未命中路径）。
+
+perf 热点（爆炸前采样）：相等比较仍是大头（PersistentSet== 25% +
+CompactType== 22% + std::_Rb_tree_increment 21% ≈ 70%）——hash 预筛后
+剩余为 hash 相同（内容相同）的真实比较，需结构共享（hash-cons 加强）方向。
+
+### 下一步
+
+1. coalesce 大组展开的内存爆炸归因（jeprof 第二轮，定位展开中间结构）。
+2. == 比较的结构共享增强（同构 CompactType/VarSet 共享节点 → O(1) 比较）。
