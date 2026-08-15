@@ -92,3 +92,35 @@ RSS 2.7GB → 57GB（60 秒采样，run4 手动终止避免 OOM）。这是 redi
 - redis 全量跑通：时间、峰值 RSS、eval bad_unions/frag 与历史噪声带一致。
 - 爆炸归因：明确是哪个阶段/结构（大 group go_calls 级、memo 保留量、bound
   闭包缓存）主导，给出可执行的减内存方向。
+
+## 追加：Interner 内存优化 + PersistentSet 崩溃深挖（2026-08-15）
+
+### redis 内存爆炸归因与 Interner 修复
+
+jeprof（48GB 阈值终止的 profile run）：`bulkSimplifyDetailed:5371`（
+buildBoundOccurrenceCache）分配 49GB live（95.4%）。perf：intersect 86% +
+coOccurrences map operator[] 18%。
+
+结构冗余：2×|recVars| 个 entry 各自独立分配交集结果列表，相同内容重复存储。
+修复：`OccurrenceInterner`（内容 hash 池 + (lhs,rhs) 交集 memo，shared_mutex），
+`OccurrenceInterner` 为 TypeSimplifier 成员，缓存构建与并行回放共享。
+效果：redis 并行 RSS 峰值 57GB（被杀）→ 9-15GB 平稳；slice1275 IR 一致、
+fortune eval 不变。binarysub da3a08a。
+
+### PersistentSet 偶发崩溃分析（未根治）
+
+现象：redis 并行 canonicalize 约 50% 概率 SIGSEGV，位置随机（PersistentSet
+迭代 / go1 展开 / PolarCompactTypeHash 都见过）；单线程不崩；ASan 版 60 分钟
+不触发；ulimit -s 65536 无效。
+
+已排除/已修：
+- go1FullCache UAF（f406641 修复）后仍崩 → 不是它。
+- iterator 固定 128 深数组越界写（崩溃 core 里 depth 字段被写坏、root 是有效
+  叶子——iterator 是受害者）：改为 128 inline + 堆增长 + 1M 深度防护
+  （da3a08a）。修复后仍偶发崩（hash 版 15 分钟崩在 go1），说明损坏树的源头
+  是 PersistentSet 并发节点生命周期（提前回收/UAF 残余）。
+- jemalloc profile run 崩在 jemalloc 内部（native 版同样崩）→ 与 allocator 无关。
+
+待查方向：PersistentSet refcount 在并发 canonicalize 下的不平衡路径
+（insert 返回已有节点不 retain、recoverCreatedNodesLocked 时机、跨线程
+Storage 拷贝）。
