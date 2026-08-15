@@ -1,0 +1,94 @@
+# redis-server 源码级 IR：多态名单补齐、约束传播去重 O(1) 化、go1FullCache UAF 修复
+
+## 用户原始 prompt
+
+> 沿着最近的优化日志的路线，继续跑tmux之后的下一个稍大一点的binary对应的源码级IR看看是否出现时间或内存爆炸并尝试分析原因
+> 思考一下，为什么时间这么久，内存涨的也不快，到底卡在哪，前面单核的流程是否也应该考虑并行？内存涨得不快的话，很可能是有一些可以提升效率的冗余计算的点？
+> 依次尝试，看是否有提升吧，看是否提升可以拿之前的一些已经能跑出来的小的例子
+> 后面也定位分析一下这个崩溃问题怎么解决吧
+
+## 背景与目标
+
+tmux 全量（40MB IR）已通过一系列优化跑通（44min→20min 级）。下一个更大目标是
+redis-server（57MB IR，3870 函数，Bench2 里最大的源码级 IR）。目标：跑通全量、
+确认是否有时间/内存爆炸、分析根因；顺手验证约束求解阶段的冗余计算假设。
+
+## 关键发现
+
+### 1. 多态名单缺失是第一个坑
+
+redis 全量用默认名单直接跑，约束生成阶段 40+ 分钟未完成（单核）。查
+`MallocWrappers.txt`：`No generic malloc wrappers detected`——redis 的 zmalloc 系列
+没被识别。原因：`getGenericMallocWrapperAllocator` 自动检测只认 libc 6 个 malloc 名
+字且拒绝"malloc 结果流入 malloc_usable_size + atomicrmw 计数 + OOM 分支"的形状。
+
+修复（`src/TypeRecovery/mlsub/MLsubGenerator.cpp`）：
+- `isBuiltinPolymorphicBufferFunctionName` 名单加 redis z* 分配系列
+  （zmalloc/zcalloc/zrealloc/zstrdup/zfree 及 usable/try 变体）。
+- `markBuiltinPolymorphicBufferFunctions` 放宽到名单内**有定义的**函数（原只处理
+  declaration；zmalloc 等是 dso_local 定义）。polymorphic SCC 只强制 summary
+  边界，函数体约束照常。
+- AGENTS.md 第 8 节第 2 步补强调：新项目必须先核对自定义 allocator 名字
+  （zmalloc/xrealloc 等自动检测不到），再跑全量。
+
+### 2. 约束生成收尾阶段"慢但内存不涨"的冗余计算
+
+时间线（release）：02-mlsub-input.ll 写完（约束生成输入）后，deferred call
+constraints + call-interface merge policy 的 merge 级联传播单核跑 40+ 分钟
+（debug+ASan 无优化版），RSS 平稳 ~2GB。perf：`addUpperBound → hasBound` 25% +
+`TypeRef::get` 9% + `HandlePtrUpperBound` 全扫。
+
+三项优化（binarysub）：
+1. **hasBound O(1) 化**：VariableState 加 lowerBoundSet/upperBoundSet
+   （unordered_set<const TypeNode*>），add/remove/内联替换/事务回滚同步。
+   TypeNode hash-cons，指针即结构，去重语义不变。
+2. **HandlePtrUpperBound 增量配对**：加 upperPtrLoadBounds/upperPtrStoreBounds
+   索引，新 bound 只与相反极性 Ptr bound 配对，不扫全 upperBounds。
+3. 预检合并（has_bound_ref）：优化 1 后预检已 O(1)，无额外收益，未做。
+
+验证：slice1275（setarch -R）baseline vs 优化后输出 IR 完全一致；fortune eval
+一致（bad_unions=0, frag=8）；release 并行 1:14.72 vs 1:14.14（slice1275 太小，
+merge 阶段收益测不出，需大输入验证）。
+
+### 3. go1FullCache 并发 UAF 是"canonicalizeType 偶发崩溃"的根因
+
+redis release 两次 SIGSEGV（12-14 分钟），core 栈都在 canonicalizeType →
+CompactTypeBuilder::append → mergeInsertVars → PersistentSet::begin（或
+PolarCompactTypeHash）。`ulimit -s 65536` 大栈无效（排除栈溢出）。
+
+ASan 稳定复现（slice1275 debug+ASan 并行）后拿到分配/释放栈，根因：
+`lookupGo1FullCache`（binarysub.cpp:2436）返回 `&Accessor->second` 裸指针，
+TBB const_accessor 在函数返回时释放读锁；锁外长使用（missingKeys 遍历）与并发
+`storeGo1FullCache` 的 `Accessor->second = value`（vector operator= 释放旧存储）
+竞争 → UAF。20260806-01 的 PersistentSet 并发修复与日志里"canonicalizeType
+偶发崩溃"是同一根因的不同表现。
+
+修复：`go1FullCache` 值类型改 `shared_ptr<const Go1FullCacheEntry>`，lookup 锁内
+拷贝快照（O(1)），store 只替换指针。验证：slice1275 debug+ASan 并行连跑两次通过
+（修复前稳定 UAF），release 性能无损（1:14.72 vs 1:14.14），IR 一致。
+
+## redis 全量现状（阻塞点）
+
+UAF 修复后 redis 能过崩溃点，但 simplify 阶段 15 分钟起内存爆炸：
+RSS 2.7GB → 57GB（60 秒采样，run4 手动终止避免 OOM）。这是 redis 自身的内存
+爆炸（AGENTS.md 预判目标），与 UAF 无关。约束生成+merge 阶段修复后 release 约
+8 分钟完成（对比 debug+ASan 无优化 40+ 分钟未完成）。
+
+## 技术路线/风险
+
+- 多态名单：只加 redis z* 系列，sds/hiredis hi_* 未动（后续看 bad_unions 再定）。
+- 优化 1+2：逻辑等价重构，风险在 set/索引与 vector 的同步点（事务回滚、内联
+  替换、merge clear 全测过）；正确性由 IR identical + eval 指标背书。
+- UAF 修复：shared_ptr 快照，锁内只拷贝指针，读不阻塞写、写不阻塞读。
+
+## 下一步
+
+1. 提交当前成果（binarysub 优化+修复、顶层白名单+AGENTS.md、日志）。
+2. jemalloc profile + perf 归因 redis simplify 内存爆炸（AGENTS.md 既有流程），
+   定位爆炸阶段（canonicalize 大 group 展开 / coalesce / analyze 缓存内存）。
+
+## 判断标准
+
+- redis 全量跑通：时间、峰值 RSS、eval bad_unions/frag 与历史噪声带一致。
+- 爆炸归因：明确是哪个阶段/结构（大 group go_calls 级、memo 保留量、bound
+  闭包缓存）主导，给出可执行的减内存方向。

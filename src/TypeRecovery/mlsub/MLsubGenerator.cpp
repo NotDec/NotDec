@@ -109,7 +109,15 @@ bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
       // declaration must not connect all callsites.
       "av_calloc", "av_mallocz", "av_malloc_array", "av_realloc_array",
       "av_fast_malloc", "av_fifo_read", "av_fifo_write", "av_log",
-      "av_opt_set", "av_opt_set_int", "av_opt_set_bin", "qsort"};
+      "av_opt_set", "av_opt_set_int", "av_opt_set_bin", "qsort",
+      // redis zmalloc family: generic allocators whose returned layout is
+      // decided by each callsite. The automatic malloc-wrapper detection
+      // rejects them because malloc results flow through malloc_usable_size
+      // and the used_memory atomic counter. Marking them polymorphic
+      // instantiates each callsite independently (same role as av_calloc).
+      "zmalloc", "zcalloc", "zcalloc_num", "zrealloc", "zstrdup", "zfree",
+      "ztrymalloc", "ztrycalloc", "ztryrealloc", "zmalloc_usable",
+      "zcalloc_usable", "zrealloc_usable", "zfree_usable"};
   for (auto Candidate : Names) {
     if (Candidate == Name) {
       return true;
@@ -5622,7 +5630,7 @@ void MLsubRecovery::markBuiltinPolymorphicBufferFunctions(llvm::Module &M) {
   std::vector<std::string> Rows;
 
   for (auto &F : M) {
-    if (!F.isDeclaration() || !F.hasName()) {
+    if (!F.hasName()) {
       continue;
     }
     if (!isBuiltinPolymorphicBufferFunctionName(F.getName())) {
@@ -5631,7 +5639,10 @@ void MLsubRecovery::markBuiltinPolymorphicBufferFunctions(llvm::Module &M) {
 
     // These APIs operate on caller-owned buffers or generic object contexts. A
     // single declaration node would otherwise force unrelated callsites to
-    // share one formal argument type.
+    // share one formal argument type. Defined functions in the list (e.g. the
+    // redis zmalloc family) get the same treatment: the SCC boundary
+    // instantiates each callsite independently instead of merging all of them
+    // through one function type.
     F.setMetadata(KIND_MLSUB_POLYMORPHIC_FUNCTION,
                   llvm::MDNode::get(F.getContext(), {}));
     DetectedPolymorphicBufferFunctions.insert(&F);

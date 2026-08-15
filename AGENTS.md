@@ -370,6 +370,12 @@ IR 基本不动是正常现象），**"输出 IR cmp SAME"不能作为推理等�
    读写/复制函数、回调的 `void *` context，以及项目内对这些函数的 wrapper。`malloc/calloc/realloc`
    的纯返回转发 wrapper、`free` 的纯参数转发 wrapper 都应按调用点隔离；分配后立即初始化固定结构体的
    factory 不是通用 malloc wrapper，不要标成多态。
+   **必须优先查项目自己的 allocator 名字**（如 redis 的 `zmalloc` 系列、tmux 的 `xrealloc`）：这类
+   函数常带 `malloc_usable_size`/内存计数/OOM 分支，`getGenericMallocWrapperAllocator` 的自动检测
+   只认 libc 6 个名字且拒绝这种形状，检测不到也不该依赖它。确认语义通用后直接加进
+   `isBuiltinPolymorphicBufferFunctionName` 的内置名单（`src/TypeRecovery/mlsub/MLsubGenerator.cpp`，
+   该名单现在对有定义的函数同样生效，效果同 av_calloc）。不带分配的裸 allocator（如 zmalloc）标记后
+   其所有调用点各自实例化，是消除巨型互递归类型的关键，漏掉会导致类型图爆炸或全程序统一。
 3. 网络程序额外检查 `read/write/recv/send` 及 wrapper，也检查 `recvfrom/recvmsg/accept/getsockname`、
    `getpeername/getsockopt/setsockopt/ioctl` 这类布局由地址族、option 或 request 决定的内存参数。只有裸
    buffer 或运行时决定布局的参数需要多态；固定读写某个明确结构体的业务函数不要因为调用了 socket API
