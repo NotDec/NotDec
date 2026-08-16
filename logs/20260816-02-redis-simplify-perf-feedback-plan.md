@@ -147,3 +147,29 @@ memo 查重点，曾加入仅限单次调用生命周期的 `(memo CompactType*,
 理解成本 3/10（脚本约第 30-687 行，流程集中），后期维护成本 3/10（只依赖现有
 `/usr/bin/time`、LLVM 22 和 workdir 产物）。下一轮优化应先围绕 `PersistentSet`/`CompactType`
 相等比较设计更低开销的统计或缓存，并先在该脚本的单线程严格 A/B 上证明收益，再进入 Redis。
+
+## 大样例复验（lighttpd）
+
+脚本的 `CASE_INPUTS`（第 35-45 行）本来就保留了 lighttpd、tmux、redis-server；本轮
+用 `--cases lighttpd` 把 lighttpd 加入性能口径，未把它们放进默认快速集合。lighttpd
+有 80,111 个 simplify group，适合验证小样例看不到的跨 arena 比较复用。
+
+使用旧版和之前保留的 equality-cache 实验 binary，均固定 `jobs=1`、`threads=8`、
+`NOTDEC_SIMPLIFY_DIAG=1`，结果如下：
+
+- 首轮旧版 `88.88s/1911.5 MiB`、实验版 `76.70s/1414.9 MiB`，但旧版复跑为
+  `78.13s/1355.8 MiB`，说明首轮是运行离群值。
+- 第二轮旧版 `78.13s/1355.8 MiB`、实验版 `80.61s/1572.2 MiB`，实验版反而
+  `+3.2% wall/+16.0% RSS`。实验版在最大 group 累计 `1,563,932` 次 equality
+  lookup、命中 `1,057,997` 次，说明候选确实被充分触发，但没有转化成收益。
+- 单线程严格复验：旧版 `161.05s/1898.4 MiB`、实验版 `157.99s/1897.5 MiB`，
+  wall 仅 `-1.9%`、RSS 基本不变；merge-eval 的 `bad_unions=20`、fragmentation
+  `361` 一致，但 `ValueTypes`、`ValueHTypes`、`ImportantHTypes`、`VarOrigins`
+  均不一致。
+
+结论：lighttpd 已经证明“样例太小”不是唯一原因。当前 equality cache 即使在百万级
+命中下也没有稳定收益，并且会改变类型产物的共享/编号结果，继续跑 tmux 或 Redis
+没有足够依据。该实验 binary 只存在于 `/sn640/NotDec/build-equality-cache-20260816`
+构建目录，binarysub 子模块和主线源码均未加入这段代码。后续应先寻找不需要为每次
+比较维护哈希表的 `PersistentSet`/`CompactType` 优化，再用 lighttpd 单线程严格 A/B
+作为第一道门槛。
