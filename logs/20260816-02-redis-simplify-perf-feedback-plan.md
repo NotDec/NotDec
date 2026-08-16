@@ -212,3 +212,45 @@ lighttpd 单线程慢 0.4%；把精确交集条件改成只比较交集计数会
 4/10（新增一个局部、定长 scratch），维护成本 3/10（仅两个调用点，满表有保守
 回退）。更好的下一步不是继续修改相等比较，而是先给 PathMemo 增加集合规模、变体
 数和校验查询数诊断，再减少 `P ∩ SubtreeKeys == FoldedKeys` 的重复成员查询。
+
+## PathMemo 快速校验与 Redis 复验
+
+Redis PathMemo 诊断发现，巨型 group 的单 record 最多有 6K-10K 个变体，
+一次 record 查询平均扫约 1500 个变体，但累计仍为 0 hit。旧代码对
+每个变体都重新查一遍当前路径与输入子树的交集，是 DAG 相等热点消失后
+约 93% CPU 的来源。
+
+实现位于 `external/binarysub/src/binarysub.cpp`：
+
+- `PathMemoDiagnostics` 和 `dumpPathMemoDiagnostics()`（约第 4927-4974 行）在
+  `NOTDEC_PATH_MEMO_DIAG` / `NOTDEC_SIMPLIFY_DIAG` 下记录 record、变体、集合
+  规模与成员查询。
+- `TypeSimplifier::coalesceCompactType()` 的 PathMemo lookup（约第 5183-5345 行）
+  每个 record 只计算一次 `Path ∩ SubtreeKeys` 的大小和首键。零/单键
+  走快路，多键保留精确查询。path-side 与 subtree-side 的历史非对称
+  语义保持不变。
+- 变体存储和函数收尾（约第 5561-5601 行）更新诊断计数并输出最终统计。
+
+临时 `NOTDEC_VERIFY_PATH_MEMO_FAST=1` 双算旧/新校验，默认五项目与完整
+lighttpd 都没有结果分歧；该临时代码已删除。正确 Redis opaque 口径使用
+30 个 allocator override、8 线程、关闭 ASLR 且开启 parallel canonicalize：
+
+- 新版约 21 分钟完成 19000 groups，25 分钟 timeout 时完成 118000；旧现场
+  到结束前只记录到 4000。并行 canonicalize 会改变 group 调度顺序，所以
+  这只是同口径吞吐比较，不是严格的单 group A/B。
+- 新版日志的最高 RSS 约 9.4 GiB，旧现场约 13.5 GiB。
+- `/tmp/perf-redis-path-fast-simplify-20260816.data` 中相关
+  PolarCompactType 哈希查询合计只剩 1.8%。新热点是 PersistentSet 回收 6.5%、
+  红黑树插入 6.2%、PersistentSet 遍历 6.0% 和
+  `applySimplificationPlan()` 5.5%。
+
+最终 lighttpd 为 `73.24s/1171.5 MiB`，相对 DAG 优化基线
+`74.22s/1172.4 MiB` 是 `-1.3% wall/-0.1% RSS`，merge-eval 一致。默认五
+项目的 merge-eval 和 LLVM 22 verifier 全过；`TypeBuilderTest` 9/9 通过。
+`binarysub` 仍是已知 parsing sample 4 失败，与本修改无关。
+
+本轮实现效果 9/10（Redis 主热点消失，lighttpd 无回归），理解成本 5/10
+（需要理解两个历史校验分支），维护成本 4/10（快路与精确回退均在一处，
+诊断只在环境变量开启时计数）。下一步不应立即给 PathMemo 加变体上限：它在
+新 perf 中已不是主热点，而上限可能让其他递归 DAG 重新指数展开。优先看
+`applySimplificationPlan()` 中的集合插入和 PersistentSet 节点回收/遍历。
