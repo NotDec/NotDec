@@ -97,3 +97,50 @@ CompactType 节点对。这样可以复用精确比较结果，又不会把所�
 
 Redis 仍在原 opaque-body run 的后处理阶段，尚未启动包含 memcached/ngircd 的完整
 基线；性能实验应使用相同脚本参数重新建立基线。
+
+## 实验结果与收尾
+
+### Redis perf attach
+
+原 opaque-body 进程 `3707891` 于 2026-08-16 运行 `2:12:42` 后仍未完成，日志中的
+simplify 展开计数到 `go_calls=7,000,000`，峰值 RSS 为 `44,479,916 KiB`。在其 8
+线程 simplify 阶段采样：
+
+- `/tmp/perf-redis-opaque-20260816.data`：`PersistentSet::operator==` 19.5%、
+  `std::_Rb_tree_increment` 14.76%、`CompactType::operator==` 14.19%、
+  `applySimplificationPlan` 8.30%、`PersistentSet::iterator::pushLeft` 7.18%。
+- dwarf 重采样 `/tmp/perf-redis-opaque-20260816-dwarf.data`：
+  `PersistentSet::operator==` 27.36%、`CompactType::operator==` 19.48%、
+  `std::_Rb_tree_increment` 18.49%。
+
+这说明主要开销是跨 per-group arena 的精确结构比较和持久有序集合遍历，不是 LLVM
+输出或 verifier。旧进程在采样后结束，避免与后续实验争抢约 44 GiB 内存。
+
+### 性能候选 A/B
+
+在 `external/binarysub/src/binarysub.cpp` 的 `coalesceCompactType()` 两个跨 arena
+memo 查重点，曾加入仅限单次调用生命周期的 `(memo CompactType*, local CompactType*)`
+精确比较缓存，并用 `NOTDEC_SIMPLIFY_DIAG` 记录命中率。memcached 快速 A/B 结果：
+
+- 8 threads：旧版 `22.13s/396.3 MiB`，实验版 `22.89s/398.2 MiB`，wall `+3.4%`，
+  equality lookup 仅 16 次、命中 1 次，merge-eval 一致。
+- 1 thread：旧版 `23.49s/378.9 MiB`，实验版 `23.69s/378.9 MiB`，wall `+0.9%`；
+  `ValueTypes` 和 merge-eval 一致，HType 差异仅为匿名 `rec_*` 编号变化。
+
+该候选没有稳定收益，且会增加共享/编号顺序变化，因此已从 binarysub 子模块撤回，
+没有留下性能代码改动。Redis 不再进行同一候选的全量长跑。
+
+### 验证与判断
+
+- `scripts/run-source-ir-perf-smoke.py`：`py_compile`、`--list-cases` 通过；
+  fortune/ffplay/vsftpd 并行严格 A/B 的 wall 变化为 `+0.0%/+0.6%/-0.7%`，RSS
+  变化小于 `0.3%`，HType、eval、LLVM 22 verifier 全一致。
+- `cmake --build ./build-relwithdebinfo-20260731 --target binarysub -j4` 通过。
+- 现有 `build-relwithdebinfo-20260731/binarysub` parsing sample 4 仍失败：期望
+  `⊤ -> ⊤ -> ⊤ -> {}`、实际 `⊤ -> … -> … -> {}`；该失败发生在本次缓存候选未涉及
+  的 parsing 测试路径，不能作为候选收益依据，后续应单独修复或更新测试预期。
+
+本次实现效果评分 8/10（快速反馈已覆盖性能、内存、verifier、oracle 和类型产物），
+理解成本 3/10（脚本约第 30-687 行，流程集中），后期维护成本 3/10（只依赖现有
+`/usr/bin/time`、LLVM 22 和 workdir 产物）。下一轮优化应先围绕 `PersistentSet`/`CompactType`
+相等比较设计更低开销的统计或缓存，并先在该脚本的单线程严格 A/B 上证明收益，再进入 Redis。
