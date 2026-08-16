@@ -173,3 +173,42 @@ memo 查重点，曾加入仅限单次调用生命周期的 `(memo CompactType*,
 构建目录，binarysub 子模块和主线源码均未加入这段代码。后续应先寻找不需要为每次
 比较维护哈希表的 `PersistentSet`/`CompactType` 优化，再用 lighttpd 单线程严格 A/B
 作为第一道门槛。
+
+## DAG 相等比较实现与 Redis 复验
+
+此前否决的是“跨多次比较缓存结果”的 heap hash table；本轮改为只在一次比较内部
+去重 DAG 节点对，不改变跨调用共享和遍历顺序：
+
+- `external/binarysub/src/binarysub.cpp:4533-4602` 新增
+  `CompactTypeEqualityScratch`，使用 thread-local 16K 定长开放寻址表和待检查栈。
+- `external/binarysub/src/binarysub.cpp:4604-4677` 新增
+  `compactTypeDAGEquals()`；共享子节点对只检查一次，容量不足回退原精确比较。
+- `lookupSharedMemo()` 和 `storeSharedMemo()`（约第 4991、5026 行）改用该比较。
+
+验证结果：
+
+- lighttpd 8 线程：旧版 `78.13s/1355.8 MiB`，新版 `74.22s/1172.4 MiB`；wall
+  `-5.0%`、RSS `-13.5%`，coalesce 累计 `30.303s -> 12.709s`，最慢 group
+  `8.596s -> 1.564s`。eval 与 LLVM verifier 一致。
+- lighttpd 单线程：`161.05s -> 161.03s`，总 wall 持平；coalesce
+  `11.482s -> 9.361s`。eval 一致。
+- 默认五项目 fixed-scratch A/B：`ValueTypes.txt`、`VarOrigins.txt` 全部一致，
+  eval、verifier 全部一致；其余 HType 差异只有已有的匿名类型声明编号/顺序变化。
+- 临时双算校验同时执行新旧比较并在不一致时 abort；fortune、ffplay、vsftpd、
+  ngircd、memcached 和完整 lighttpd 均未发现分歧。验证代码已删除。
+
+Redis 用较早的 heap-scratch 同算法版本运行 `2:14:06` 后终止，峰值 RSS
+`44,017,948 KiB`。`recvars=110` 巨型 group 到 `go_calls=13M`，旧版同时间约
+`7M`，展开吞吐约提高 1.8 倍，但 44 GB 内存爆炸仍在。perf
+`/tmp/perf-redis-dag-eq-rec110-20260816.data` 显示旧的 CompactType 相等热点已经
+消失，约 93% 转到 PathMemo 的哈希表查找，其中 `FoldedKeys.count(PathKey)` 对应
+的 set 查找占 54.8%，活动路径 `inProcess.find` 约占 31%。
+
+否决实验：给 `PersistentSet` 加元素指针快路径/`CompactVarSet::sameRootAs()` 后
+lighttpd 单线程慢 0.4%；把精确交集条件改成只比较交集计数会改变 shared hit 和
+类型结果，因为 `FoldedKeys ⊆ SubtreeKeys` 并非恒成立。两项都已撤回。
+
+本轮实现效果 8/10（跨 arena DAG 比较明显降时降内存且保持精确语义），理解成本
+4/10（新增一个局部、定长 scratch），维护成本 3/10（仅两个调用点，满表有保守
+回退）。更好的下一步不是继续修改相等比较，而是先给 PathMemo 增加集合规模、变体
+数和校验查询数诊断，再减少 `P ∩ SubtreeKeys == FoldedKeys` 的重复成员查询。
