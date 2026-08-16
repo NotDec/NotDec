@@ -136,6 +136,9 @@ memo 查重点，曾加入仅限单次调用生命周期的 `(memo CompactType*,
   fortune/ffplay/vsftpd 并行严格 A/B 的 wall 变化为 `+0.0%/+0.6%/-0.7%`，RSS
   变化小于 `0.3%`，HType、eval、LLVM 22 verifier 全一致。
 - `cmake --build ./build-relwithdebinfo-20260731 --target binarysub -j4` 通过。
+- 默认五项目最终 smoke（`jobs=2`、`threads=1`）通过：fortune `0.60s`、ffplay
+  `4.97s`、vsftpd `5.96s`、ngircd `7.79s`、memcached `23.30s`，suite wall
+  `38.07s`；LLVM 22 verifier、merge-eval 和严格类型产物均完整。
 - 现有 `build-relwithdebinfo-20260731/binarysub` parsing sample 4 仍失败：期望
   `⊤ -> ⊤ -> ⊤ -> {}`、实际 `⊤ -> … -> … -> {}`；该失败发生在本次缓存候选未涉及
   的 parsing 测试路径，不能作为候选收益依据，后续应单独修复或更新测试预期。
