@@ -160,3 +160,33 @@ CompactType== 22% + std::_Rb_tree_increment 21% ≈ 70%）——hash 预筛后
 
 1. coalesce 大组展开的内存爆炸归因（jeprof 第二轮，定位展开中间结构）。
 2. == 比较的结构共享增强（同构 CompactType/VarSet 共享节点 → O(1) 比较）。
+
+## 追加：CompactVarSet 结构共享与 UAF 修复（2026-08-16）
+
+### 结构共享（binarysub bf47c6f）
+
+perf 显示 simplify 的 == 比较占 70%（PersistentSet== 25% + CompactType== 22% +
+Rb_tree 21%）。根因：CompactVarSet 无 hash-cons，同内容集合每次创建都是新
+Storage/root，比较 hash 相同后仍 O(n) 遍历。修复：ArenaState 拥有
+unique_ptr<Storage> 的 hash-cons 表，同构共享一个 Storage，== 变 O(1) 指针
+比较；CompactVarSet 持非拥有指针（与 CompactType 的 TypeRef 模式一致）。
+
+### 由此暴露的 UAF 与修复
+
+copyCompactTypeInto（CoalesceMemo 深拷贝）只复制 CompactType 对象，vars 的
+Storage 裸指针仍指向源 per-group arena——group 结束后悬空（shared_ptr 模式靠
+保活掩盖）。ASan 定位：freed 在 localSimplifier 析构（processGroup 尾部），
+读在 consIndex 查重的 CompactVarSet::size()。修复：拷贝时 cloneVarSet 重建
+vars 到目标 arena。
+
+### 不合并 per-group arena（讨论结论）
+
+per-group 是 8d29998 的内存有界设计（lighttpd 57GB→4.4GB，12 万 root 教训）；
+CoalesceMemo 已处理跨组共享；合并成不释放的共享容器会退化为 per-root 爆炸。
+UAF 用最小修复（cloneVarSet）解决，不动 per-group 结构。
+
+### 验证
+
+slice1275 ASan 无错 + IR identical（release 1:17）；fortune eval 一致
+（bad_unions=0, frag=8）；redis 8 线程 55 分钟无崩溃、RSS 10.9GB 稳定。
+redis 完整跑通（simplify 总时长 + 大组展开）待续。
