@@ -342,3 +342,37 @@ SIGTERM。下一步用修正后的阶段诊断重跑 Redis，并对照该 SCC �
 
 本轮实现效果 8/10（消除完整 ValueTypes 文本的额外内存副本，且类型产物不变），
 理解成本 3/10，维护成本 3/10。
+
+## 2026-08-17：Redis 最大组的替换链开销
+
+当前 Redis 旧版进程进入 `values=246639`、`roots=399091` 的最大 SCC 后，早期
+canonicalize 采样 `/tmp/perf-redis-current-bulk-20260817.data` 中
+`CompactTypeBuilder::mergeInsertVars()` 占 53.4%，红黑树迭代占 22.8%。曾把 builder
+变量集合改成 `vector + unordered_set`：在 Redis 同时运行的条件下，lighttpd 单线程
+wall 从 `270.57s` 降到 `242.19s`，RSS 从 `1324.8 MiB` 降到 `1277.0 MiB`，eval 指标
+一致；但四个 HType 文件均变化，且出现 `union`/`struct` 分类和函数参数类型差异，不是
+单纯匿名编号变化。该实验已完整撤回。
+
+最大组后期的平面采样 `/tmp/perf-redis-current-apply-late-20260817.data` 显示热点已经
+转到 `TypeSimplifier::applySimplificationPlan()`：`resolveVarSubst` 占 13.4%，它每次
+调用新建的 `SimpleVarSet seen` 插入占 13.8%，`PersistentSet` 遍历占 10.3%。
+`external/binarysub/src/binarysub.cpp` 的 `applySimplificationPlan()`（约第 4367-4390
+行）改为统计已跟随的替换边数；边数超过 `plan.varSubst.size()` 才可能有环，因此保留
+原环检测语义，同时不再为每个变量分配红黑树。
+
+验证：
+
+- lighttpd 单线程严格 A/B：`270.57s -> 256.94s`，约 `-5.0%`，峰值 RSS 都是
+  `1324.8 MiB`；四个 HType 文件和三个 eval 文件逐字节一致，LLVM verifier 通过。
+- 默认五项目 8 线程 smoke：全部运行、LLVM verifier 和 merge-eval 通过。与 Redis
+  并跑造成 CPU 争抢，因此这轮 wall 不作性能判断。
+- `TypeBuilderTest` 9/9 通过。`binarysub` 仍是已有 parsing sample 4 失败，期望
+  `⊤ -> ⊤ -> ⊤ -> {}`、实际 `⊤ -> … -> … -> {}`。
+
+截至记录时，旧版 Redis 已运行约 50 分钟，8 个工作线程仍满载，resident RSS 约
+`8.9 GiB`，还没有写出 simplify 后阶段文件。它继续作为未含本修改的基线运行；候选
+收益需要等基线完成后再跑同口径 Redis 确认。
+
+本轮实现效果 8/10（移除现场约 14% 的纯环检测集合开销，严格类型结果不变），理解
+成本 1/10，维护成本 1/10。更大的 canonicalize 集合改造虽有性能收益，但当前会改变
+类型结果，不能为了速度保留。
