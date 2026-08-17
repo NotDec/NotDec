@@ -1,6 +1,8 @@
 #include <iostream>
 #include <cstdlib>
+#include <cstdint>
 #include <exception>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -147,6 +149,25 @@ void initDebugOptions();
 
 namespace {
 
+constexpr const char *kSimplifyStopAfterGroupsEnv =
+    "NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS";
+constexpr int kSimplifyDiagnosticStopExitCode = 75;
+
+bool validateSimplifyStopAfterGroups() {
+  const char *Value = std::getenv(kSimplifyStopAfterGroupsEnv);
+  if (Value == nullptr || *Value == '\0') {
+    return true;
+  }
+  std::uint64_t Parsed = 0;
+  if (llvm::StringRef(Value).getAsInteger(10, Parsed) || Parsed == 0 ||
+      Parsed > std::numeric_limits<std::size_t>::max()) {
+    llvm::errs() << "Error: " << kSimplifyStopAfterGroupsEnv
+                 << " must be a positive integer, got '" << Value << "'.\n";
+    return false;
+  }
+  return true;
+}
+
 binarysub::expected<void, binarysub::Error>
 configurePrimitiveSemanticRegistry(const notdec::Options &Opts) {
   binarysub::clearGlobalPrimitiveSemanticRegistry();
@@ -237,6 +258,9 @@ int main(int argc, char *argv[]) {
   // initDebugOptions();
   // parse cmdline
   cl::ParseCommandLineOptions(argc, argv);
+  if (!validateSimplifyStopAfterGroups()) {
+    return 1;
+  }
   const char *ExtraConstraintsFile = std::getenv("NOTDEC_EXTRA_CONSTRAINTS");
   std::string insuffix = getSuffix(inputFilename);
   std::string InputSuffixDesc = describeInputSuffix(insuffix);
@@ -404,7 +428,15 @@ int main(int argc, char *argv[]) {
   notdec::passes::DecompileConfig conf(M, outputFilename, dumpHTypes, Ctx.opt,
                                        llvm2cOpts);
   conf.build_passes(trLevel);
-  conf.run_passes();
+  try {
+    conf.run_passes();
+  } catch (const notdec::mlsub::SimplifyDiagnosticStop &Stop) {
+    llvm::errs() << "[notdec-diagnostic-stop] reason=\"" << Stop.what()
+                 << "\" output_written=0 exit_code="
+                 << kSimplifyDiagnosticStopExitCode << "\n";
+    notdec::frontend::free_buffer();
+    return kSimplifyDiagnosticStopExitCode;
+  }
 
   if (!emitTRInputIR.empty()) {
     conf.emit_tr_input_ir();

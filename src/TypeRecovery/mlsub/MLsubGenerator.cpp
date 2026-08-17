@@ -95,8 +95,23 @@ constexpr llvm::StringLiteral kCallSlotMergeDecisionsFile =
     "CallSlotMergeDecisions.txt";
 constexpr llvm::StringLiteral kLocalSubtypeMergeStatsFile =
     "LocalSubtypeMergeStats.txt";
+constexpr llvm::StringLiteral kSimplifyStopAfterGroupsEnv =
+    "NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS";
 
 using GenTypesClock = std::chrono::steady_clock;
+
+std::optional<std::size_t> getSimplifyStopAfterGroups() {
+  const char *Value = std::getenv(kSimplifyStopAfterGroupsEnv.data());
+  if (Value == nullptr || *Value == '\0') {
+    return std::nullopt;
+  }
+  std::uint64_t Parsed = 0;
+  if (llvm::StringRef(Value).getAsInteger(10, Parsed) || Parsed == 0 ||
+      Parsed > std::numeric_limits<std::size_t>::max()) {
+    return std::nullopt;
+  }
+  return static_cast<std::size_t>(Parsed);
+}
 
 struct ProcessCpuSnapshot {
   std::uint64_t TotalUs = 0;
@@ -178,6 +193,101 @@ void addGenTypesTiming(GenTypesTiming &Total, const GenTypesTiming &Current) {
   addGenTypesPhaseTiming(Total.Lower, Current.Lower);
   addGenTypesPhaseTiming(Total.Upper, Current.Upper);
   addGenTypesPhaseTiming(Total.DebugOutput, Current.DebugOutput);
+}
+
+struct BottomUpPhaseStart {
+  GenTypesClock::time_point Wall;
+  ProcessCpuSnapshot Cpu;
+};
+
+BottomUpPhaseStart startBottomUpPhase(bool Enabled) {
+  return {.Wall = GenTypesClock::now(),
+          .Cpu = Enabled ? currentProcessCpuTime() : ProcessCpuSnapshot{}};
+}
+
+BottomUpPhaseTiming finishBottomUpPhase(
+    const BottomUpPhaseStart &Start,
+    const binarysub::ConstraintSolverStats &Stats, bool Enabled) {
+  if (!Enabled) {
+    return {};
+  }
+  const auto Basic = finishGenTypesPhase(Start.Wall, Start.Cpu);
+  return {.WallUs = Basic.WallUs,
+          .CpuUs = Basic.CpuUs,
+          .CpuAvailable = Basic.CpuAvailable,
+          .ResidentRssKb = currentResidentRssKb(),
+          .ConstraintStats = Stats};
+}
+
+void addConstraintSolverStats(binarysub::ConstraintSolverStats &Total,
+                              const binarysub::ConstraintSolverStats &Current) {
+  Total.constrainCalls += Current.constrainCalls;
+  Total.mergeVariableCalls += Current.mergeVariableCalls;
+  Total.constraintTasksEnqueued += Current.constraintTasksEnqueued;
+  Total.constraintTasksPopped += Current.constraintTasksPopped;
+  Total.constraintTasksProcessed += Current.constraintTasksProcessed;
+  Total.mergeTasksEnqueued += Current.mergeTasksEnqueued;
+  Total.mergeTasksPopped += Current.mergeTasksPopped;
+  Total.mergeTasksProcessed += Current.mergeTasksProcessed;
+  Total.upperBoundsAdded += Current.upperBoundsAdded;
+  Total.upperBoundDuplicates += Current.upperBoundDuplicates;
+  Total.lowerBoundsAdded += Current.lowerBoundsAdded;
+  Total.lowerBoundDuplicates += Current.lowerBoundDuplicates;
+  Total.maxConstraintWorklistDepth =
+      std::max(Total.maxConstraintWorklistDepth,
+               Current.maxConstraintWorklistDepth);
+  Total.maxMergeWorklistDepth =
+      std::max(Total.maxMergeWorklistDepth, Current.maxMergeWorklistDepth);
+}
+
+void addBottomUpTiming(BottomUpTiming &Total, const BottomUpTiming &Current) {
+  for (std::size_t I = 0; I < Total.Phases.size(); ++I) {
+    auto &Dst = Total.Phases[I];
+    const auto &Src = Current.Phases[I];
+    Dst.WallUs += Src.WallUs;
+    Dst.CpuUs += Src.CpuUs;
+    Dst.CpuAvailable = Dst.CpuAvailable && Src.CpuAvailable;
+    Dst.ResidentRssKb = std::max(Dst.ResidentRssKb, Src.ResidentRssKb);
+    addConstraintSolverStats(Dst.ConstraintStats, Src.ConstraintStats);
+  }
+}
+
+std::string formatBottomUpAverageCores(const BottomUpPhaseTiming &Timing) {
+  if (!Timing.CpuAvailable || Timing.WallUs == 0) {
+    return "unavailable";
+  }
+  std::ostringstream Out;
+  Out << std::fixed << std::setprecision(2)
+      << static_cast<double>(Timing.CpuUs) /
+             static_cast<double>(Timing.WallUs);
+  return Out.str();
+}
+
+void printBottomUpTimingFields(const BottomUpPhaseTiming &Timing) {
+  const auto &Stats = Timing.ConstraintStats;
+  llvm::errs() << " wall_ms=" << Timing.WallUs / 1000 << " cpu_ms=";
+  if (Timing.CpuAvailable) {
+    llvm::errs() << Timing.CpuUs / 1000
+                 << " avg_cores=" << formatBottomUpAverageCores(Timing);
+  } else {
+    llvm::errs() << "unavailable avg_cores=unavailable";
+  }
+  llvm::errs() << " rss_kb=" << Timing.ResidentRssKb
+               << " constrain_calls=" << Stats.constrainCalls
+               << " merge_calls=" << Stats.mergeVariableCalls
+               << " constraint_enqueued=" << Stats.constraintTasksEnqueued
+               << " constraint_popped=" << Stats.constraintTasksPopped
+               << " constraint_processed=" << Stats.constraintTasksProcessed
+               << " merge_enqueued=" << Stats.mergeTasksEnqueued
+               << " merge_popped=" << Stats.mergeTasksPopped
+               << " merge_processed=" << Stats.mergeTasksProcessed
+               << " upper_added=" << Stats.upperBoundsAdded
+               << " upper_duplicate=" << Stats.upperBoundDuplicates
+               << " lower_added=" << Stats.lowerBoundsAdded
+               << " lower_duplicate=" << Stats.lowerBoundDuplicates
+               << " max_constraint_depth="
+               << Stats.maxConstraintWorklistDepth
+               << " max_merge_depth=" << Stats.maxMergeWorklistDepth;
 }
 
 bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
@@ -3073,6 +3183,81 @@ void ConstraintsGenerator::emitTypeRecoveryTrace(const std::string &Message) {
   binarysub::binarysub_trace(Message);
 }
 
+BottomUpTiming ConstraintsGenerator::run() {
+  BottomUpTiming Timing;
+  auto Measure = [&](BottomUpStage Stage, auto &&Action) {
+    CurrentConstraintStats = {};
+    auto Start = startBottomUpPhase(ConstraintDiagEnabled);
+    Action();
+    Timing.at(Stage) = finishBottomUpPhase(
+        Start, CurrentConstraintStats, ConstraintDiagEnabled);
+  };
+
+  // SCCs is pointer-ordered, so use function names to keep node creation and
+  // recursive constraint insertion stable across ASLR runs.
+  std::vector<const llvm::Function *> SortedSCCs(SCCs.begin(), SCCs.end());
+  llvm::sort(SortedSCCs, [](const llvm::Function *A,
+                            const llvm::Function *B) {
+    return A->getName() < B->getName();
+  });
+
+  Measure(BottomUpStage::FunctionNodes, [&] {
+    for (const llvm::Function *Func1 : SortedSCCs) {
+      auto Func = const_cast<llvm::Function *>(Func1);
+      auto F = createNode(Func);
+      std::vector<SimpleType> Args;
+      for (unsigned I = 0; I < Func->arg_size(); ++I) {
+        Args.push_back(createNode(Func->getArg(I)));
+      }
+      SimpleType Ret = nullptr;
+      if (!Func->getReturnType()->isVoidTy()) {
+        Ret = Func->getReturnType()->isAggregateType()
+                  ? makeFunctionAggregateReturnRecord(*Func)
+                  : createNode(ReturnValue{.Func = Func});
+      }
+      addSubtype(binarysub::make_function(Args, Ret), F);
+    }
+  });
+
+  Measure(BottomUpStage::VisitorConstraints, [&] {
+    for (const llvm::Function *Func : SortedSCCs) {
+      if (OpaqueBodies.count(const_cast<llvm::Function *>(Func)) != 0) {
+        continue;
+      }
+      MLsubVisitor Visitor(*this);
+      Visitor.visit(const_cast<llvm::Function *>(Func));
+      Visitor.handlePHINodes();
+    }
+  });
+
+  Measure(BottomUpStage::SccDeferredCalls,
+          [&] { applyDeferredCallConstraints(); });
+  for (const llvm::Function *Func1 : SortedSCCs) {
+    auto F = getNodeOrNull(const_cast<llvm::Function *>(Func1));
+    assert(F->getAsVariableState() != nullptr);
+  }
+  Measure(BottomUpStage::PNDiffSolve, [&] { PG.solve(); });
+  Measure(BottomUpStage::CallInterfaceMerge, [&] {
+    auto Merged = applyCallInterfaceMergePolicy();
+    llvm::errs() << "Info: transactional call interface merge policy merged "
+                 << Merged << " pair(s)\n";
+  });
+  Measure(BottomUpStage::StructSlotMerge, [&] {
+    if (!EnableStructPtrLoadStoreMerge) {
+      return;
+    }
+    auto Merged = applyStructPtrLoadStoreMergePolicy();
+    llvm::errs() << "Info: struct pointer slot merge policy merged "
+                 << Merged << " pair(s)\n";
+  });
+  Measure(BottomUpStage::FieldFollowupMerge, [&] {
+    auto Merged = applyStructPtrFieldFollowupMergePolicy();
+    llvm::errs() << "Info: struct pointer field follow-up merge policy merged "
+                 << Merged << " pair(s)\n";
+  });
+  return Timing;
+}
+
 bool ConstraintsGenerator::configureConstraintContext(
     binarysub::ConstraintContext &Context) {
   bool HasHook = true;
@@ -3118,6 +3303,8 @@ bool ConstraintsGenerator::configureConstraintContext(
       MergeEval->observeVariableMerged(Event);
     }
   };
+  Context.stats =
+      ConstraintDiagEnabled ? &CurrentConstraintStats : nullptr;
   return HasHook;
 }
 
@@ -6155,6 +6342,25 @@ void MLsubRecovery::applyExtraConstraints(ConstraintsGenerator &G,
 }
 
 void MLsubRecovery::bottomUpPhase() {
+  const bool ConstraintDiag =
+      std::getenv("NOTDEC_CONSTRAINT_DIAG") != nullptr;
+  std::optional<BottomUpTiming> TotalTiming;
+  static constexpr const char *StageNames[] = {
+      "function_nodes",
+      "visitor_constraints",
+      "scc_deferred_calls",
+      "pndiff_solve",
+      "call_interface_merge",
+      "struct_slot_merge",
+      "field_followup_merge",
+      "overrides",
+      "summary_instantiation",
+      "post_summary_deferred_calls",
+      "post_summary_call_interface_merge",
+      "post_summary_field_followup_merge",
+  };
+  static_assert(std::size(StageNames) ==
+                static_cast<std::size_t>(BottomUpStage::Count));
   // 与 ConstraintsGenerator::run() 一致：SCC 内函数按名字排序遍历，避免
   // std::set<llvm::Function*> 指针顺序随 ASLR 变化影响 run-to-run 结果。
   auto SortedFunctions = [](const std::set<llvm::Function *> &Funcs) {
@@ -6222,7 +6428,7 @@ void MLsubRecovery::bottomUpPhase() {
       }
     }
 
-    G->run();
+    auto CurrentTiming = G->run();
 
     // 函数内部约束生成完、跨函数调用边未连接：按函数统计约束图规模，
     // 用于评估哪些函数把图撑大。NOTDEC_CONSTRAINT_STATS=1 开启。
@@ -6230,27 +6436,36 @@ void MLsubRecovery::bottomUpPhase() {
       G->emitFunctionConstraintStats();
     }
 
-    for (auto *Func : SortedFunctions(Data.SCCSet)) {
-      if (auto *ExtraSpec = getExtraConstraintsSpec(*Func)) {
-        llvm::errs() << "Applying MLsub extra constraints to "
+    auto Measure = [&](BottomUpStage Stage, auto &&Action) {
+      G->CurrentConstraintStats = {};
+      auto Start = startBottomUpPhase(ConstraintDiag);
+      Action();
+      CurrentTiming.at(Stage) = finishBottomUpPhase(
+          Start, G->CurrentConstraintStats, ConstraintDiag);
+    };
+    Measure(BottomUpStage::Overrides, [&] {
+      for (auto *Func : SortedFunctions(Data.SCCSet)) {
+        if (auto *ExtraSpec = getExtraConstraintsSpec(*Func)) {
+          llvm::errs() << "Applying MLsub extra constraints to "
+                       << Func->getName() << "\n";
+          applyExtraConstraints(*G, *Func, *ExtraSpec);
+        }
+        if (auto *SummarySpec = getSummaryOverrideSpec(*Func)) {
+          llvm::errs() << "Applying MLsub summary override to "
+                       << Func->getName() << "\n";
+          applySummaryOverride(*G, *Func, *SummarySpec);
+        }
+        auto *Spec = getSignatureOverrideSpec(*Func);
+        if (Spec == nullptr) {
+          continue;
+        }
+        assert(!Func->isDeclaration() &&
+               "signature overrides are validated to require definitions");
+        llvm::errs() << "Applying MLsub signature override to "
                      << Func->getName() << "\n";
-        applyExtraConstraints(*G, *Func, *ExtraSpec);
+        applyUpperBoundSignatureOverride(*G, *Func, *Spec);
       }
-      if (auto *SummarySpec = getSummaryOverrideSpec(*Func)) {
-        llvm::errs() << "Applying MLsub summary override to "
-                     << Func->getName() << "\n";
-        applySummaryOverride(*G, *Func, *SummarySpec);
-      }
-      auto *Spec = getSignatureOverrideSpec(*Func);
-      if (Spec == nullptr) {
-        continue;
-      }
-      assert(!Func->isDeclaration() &&
-             "signature overrides are validated to require definitions");
-      llvm::errs() << "Applying MLsub signature override to "
-                   << Func->getName() << "\n";
-      applyUpperBoundSignatureOverride(*G, *Func, *Spec);
-    }
+    });
 
     // Create poly schemes and instantiate every unhandled call first.  The
     // deferred flush below preserves the old subtype relations while ensuring
@@ -6263,48 +6478,85 @@ void MLsubRecovery::bottomUpPhase() {
       auto ItB = CallOrder.find(B.first);
       return ItA->second < ItB->second;
     });
-    for (auto &Ent : SortedCalls) {
-      auto F = Ent.first->getCalledFunction();
-      auto TargetNode = AG.CG->getOrInsertFunction(F);
-      auto TargetIt = AG.Func2SCCIndex.find(TargetNode);
-      if (TargetIt == AG.Func2SCCIndex.end()) {
-        llvm::errs() << "Warning: skip unhandled call without MLsub SCC: "
-                     << F->getName() << "\n";
-        continue;
+    Measure(BottomUpStage::SummaryInstantiation, [&] {
+      for (auto &Ent : SortedCalls) {
+        auto F = Ent.first->getCalledFunction();
+        auto TargetNode = AG.CG->getOrInsertFunction(F);
+        auto TargetIt = AG.Func2SCCIndex.find(TargetNode);
+        if (TargetIt == AG.Func2SCCIndex.end()) {
+          llvm::errs() << "Warning: skip unhandled call without MLsub SCC: "
+                       << F->getName() << "\n";
+          continue;
+        }
+        auto Ind2 = TargetIt->second;
+        assert(Ind2 > Ind);
+        auto &TData = AG.AllSCCs.at(Ind2);
+        auto TargetG = TData.Generator;
+        auto TargetFTy = TargetG->getNodeOrNull(F);
+        auto PolyScheme = binarysub::TypeScheme(
+            binarysub::PolymorphicType(TData.level, TargetFTy));
+        auto TargetLevel = binarysub::level_of(TargetFTy);
+        assert(TargetLevel >= 0);
+        assert(TData.level == static_cast<unsigned int>(TargetLevel));
+        assert(TData.level >= Data.level);
+        auto InsFunc = PolyScheme.instantiate(Data.level);
+        Data.Generator->deferCallConstraint(*Ent.first, *F, InsFunc,
+                                            Ent.second, InsFunc);
       }
-      auto Ind2 = TargetIt->second;
-      assert(Ind2 > Ind);
-      auto &TData = AG.AllSCCs.at(Ind2);
-      auto TargetG = TData.Generator;
-      auto TargetFTy = TargetG->getNodeOrNull(F);
-      auto PolyScheme = binarysub::TypeScheme(
-          binarysub::PolymorphicType(TData.level, TargetFTy));
-      auto TargetLevel = binarysub::level_of(TargetFTy);
-      assert(TargetLevel >= 0);
-      assert(TData.level == static_cast<unsigned int>(TargetLevel));
-      assert(TData.level >= Data.level);
-      auto InsFunc = PolyScheme.instantiate(Data.level);
-      Data.Generator->deferCallConstraint(*Ent.first, *F, InsFunc, Ent.second,
-                                          InsFunc);
-    }
-    Data.Generator->applyDeferredCallConstraints();
-    auto PostSummaryMerged =
-        Data.Generator->applyCallInterfaceMergePolicy();
-    if (PostSummaryMerged != 0) {
-      llvm::errs()
-          << "Info: post-summary transactional call interface merge policy "
-             "merged "
-          << PostSummaryMerged << " pair(s)\n";
-    }
-    auto PostSummaryFieldFollowupMerged =
-        Data.Generator->applyStructPtrFieldFollowupMergePolicy();
-    if (PostSummaryFieldFollowupMerged != 0) {
-      llvm::errs()
-          << "Info: post-summary struct pointer field follow-up merge policy "
-             "merged "
-          << PostSummaryFieldFollowupMerged << " pair(s)\n";
-    }
+    });
+    Measure(BottomUpStage::PostSummaryDeferredCalls,
+            [&] { Data.Generator->applyDeferredCallConstraints(); });
+    Measure(BottomUpStage::PostSummaryCallInterfaceMerge, [&] {
+      auto Merged = Data.Generator->applyCallInterfaceMergePolicy();
+      if (Merged != 0) {
+        llvm::errs()
+            << "Info: post-summary transactional call interface merge policy "
+               "merged "
+            << Merged << " pair(s)\n";
+      }
+    });
+    Measure(BottomUpStage::PostSummaryFieldFollowupMerge, [&] {
+      auto Merged =
+          Data.Generator->applyStructPtrFieldFollowupMergePolicy();
+      if (Merged != 0) {
+        llvm::errs()
+            << "Info: post-summary struct pointer field follow-up merge policy "
+               "merged "
+            << Merged << " pair(s)\n";
+      }
+    });
     Data.Generator->unhandledCalls.clear();
+
+    if (ConstraintDiag) {
+      for (std::size_t I = 0; I < CurrentTiming.Phases.size(); ++I) {
+        llvm::errs() << "[bottom-up-phase] stage=" << StageNames[I]
+                     << " scc_index=" << Ind
+                     << " bottom_up_done=" << AG.AllSCCs.size() - Ind << "/"
+                     << AG.AllSCCs.size() << " functions=" << Data.SCCSet.size()
+                     << " scc=" << llvm::StringRef(Data.SCCName).take_front(80);
+        printBottomUpTimingFields(CurrentTiming.Phases[I]);
+        llvm::errs() << "\n";
+      }
+      llvm::errs() << "[bottom-up-scc-complete] scc_index=" << Ind
+                   << " bottom_up_done=" << AG.AllSCCs.size() - Ind << "/"
+                   << AG.AllSCCs.size() << " functions=" << Data.SCCSet.size()
+                   << " values=" << G->V2N.size() << " scc="
+                   << llvm::StringRef(Data.SCCName).take_front(80)
+                   << " rss_kb=" << currentResidentRssKb() << "\n";
+      if (!TotalTiming) {
+        TotalTiming = CurrentTiming;
+      } else {
+        addBottomUpTiming(*TotalTiming, CurrentTiming);
+      }
+    }
+  }
+  if (TotalTiming) {
+    for (std::size_t I = 0; I < TotalTiming->Phases.size(); ++I) {
+      llvm::errs() << "[bottom-up-summary] stage=" << StageNames[I]
+                   << " sccs=" << AG.AllSCCs.size();
+      printBottomUpTimingFields(TotalTiming->Phases[I]);
+      llvm::errs() << "\n";
+    }
   }
 }
 
@@ -6313,7 +6565,8 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                                unsigned PointerSizeBytes, bool SolveGlobals,
                                ExtValueLabelCache *DebugLabelCache) {
   const bool GenTypesDiag =
-      std::getenv("NOTDEC_SIMPLIFY_DIAG") != nullptr;
+      std::getenv("NOTDEC_SIMPLIFY_DIAG") != nullptr ||
+      std::getenv(kSimplifyStopAfterGroupsEnv.data()) != nullptr;
   GenTypesTiming Timing;
   auto PhaseWallStart = GenTypesClock::now();
   auto PhaseCpuStart =
@@ -6367,6 +6620,7 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   };
   binarysub::BulkSimplifyOptions BulkOptions;
   BulkOptions.enableParallel = true;
+  BulkOptions.diagnosticStopAfterGroups = getSimplifyStopAfterGroups();
   // 静态图分析探针：canonicalize 之前 dump roots 可达的引用图，用于
   // 折叠展开爆炸的预检（SCC/路径计数/节点贡献），见 logs/20260731-03。
   if (const char *DumpPath = std::getenv("NOTDEC_DUMP_TYPE_GRAPH")) {
@@ -6386,6 +6640,17 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
   Timing.Bulk = finishGenTypesPhase(PhaseWallStart, PhaseCpuStart);
   reportGenTypesStage("bulk", Timing.Bulk);
+  if (BulkResult.status ==
+      binarysub::BulkSimplifyResult::Status::DiagnosticStop) {
+    std::ostringstream Message;
+    Message << "simplify stopped at a complete group boundary: scc="
+            << llvm::StringRef(Name).take_front(80).str()
+            << " groups_completed=" << BulkResult.groupsCompleted
+            << " groups_total=" << BulkResult.groupsTotal;
+    llvm::errs() << "[type-recovery-diagnostic-stop] " << Message.str()
+                 << " lower_started=0 upper_started=0 debug_output_started=0\n";
+    throw SimplifyDiagnosticStop(Message.str());
+  }
   const auto &Res = BulkResult.types;
 
   PhaseWallStart = GenTypesClock::now();

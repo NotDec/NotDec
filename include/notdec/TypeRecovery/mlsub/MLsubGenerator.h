@@ -1,6 +1,7 @@
 #ifndef _BINARYSUB_MLSUBGENERATOR_H_
 #define _BINARYSUB_MLSUBGENERATOR_H_
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <ostream>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <variant>
@@ -71,6 +73,53 @@ struct GenTypesTiming {
   GenTypesPhaseTiming Lower;
   GenTypesPhaseTiming Upper;
   GenTypesPhaseTiming DebugOutput;
+};
+
+// bottomUpPhase is split only at existing sequential boundaries. Each phase
+// keeps its solver counters so time changes can be compared with recursive
+// constraint work instead of only top-level addSubtype calls.
+struct BottomUpPhaseTiming {
+  std::uint64_t WallUs = 0;
+  std::uint64_t CpuUs = 0;
+  bool CpuAvailable = false;
+  long ResidentRssKb = 0;
+  binarysub::ConstraintSolverStats ConstraintStats;
+};
+
+enum class BottomUpStage : std::size_t {
+  FunctionNodes,
+  VisitorConstraints,
+  SccDeferredCalls,
+  PNDiffSolve,
+  CallInterfaceMerge,
+  StructSlotMerge,
+  FieldFollowupMerge,
+  Overrides,
+  SummaryInstantiation,
+  PostSummaryDeferredCalls,
+  PostSummaryCallInterfaceMerge,
+  PostSummaryFieldFollowupMerge,
+  Count,
+};
+
+struct BottomUpTiming {
+  std::array<BottomUpPhaseTiming,
+             static_cast<std::size_t>(BottomUpStage::Count)>
+      Phases;
+
+  BottomUpPhaseTiming &at(BottomUpStage Stage) {
+    return Phases.at(static_cast<std::size_t>(Stage));
+  }
+  const BottomUpPhaseTiming &at(BottomUpStage Stage) const {
+    return Phases.at(static_cast<std::size_t>(Stage));
+  }
+};
+
+// This control-flow signal unwinds the pass pipeline before an incomplete type
+// map reaches lowering or an output backend. main translates it to exit 75.
+class SimplifyDiagnosticStop final : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
 };
 
 struct ConstraintsGenerator;
@@ -244,6 +293,8 @@ struct ConstraintsGenerator {
   // cannot add and continues. Count those failures so early-merge experiments
   // cannot look successful merely because a later conflicting edge was lost.
   std::map<std::string, std::size_t> SubtypeConstraintFailures;
+  bool ConstraintDiagEnabled = false;
+  binarysub::ConstraintSolverStats CurrentConstraintStats;
 
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
@@ -377,68 +428,11 @@ struct ConstraintsGenerator {
     if (auto *Enabled = std::getenv("NOTDEC_EARLY_CALL_INTERFACE_MERGE")) {
       EnableEarlyCallInterfaceMerge = std::strcmp(Enabled, "1") == 0;
     }
+    ConstraintDiagEnabled =
+        std::getenv("NOTDEC_CONSTRAINT_DIAG") != nullptr;
   }
 
-  void run() {
-    // 约束生成按函数名排序遍历：SCCs 是 std::set<llvm::Function*>，指针迭代
-    // 顺序随 ASLR 变化，会让约束插入/求解顺序 run-to-run 不同（ValueTypes
-    // 差异和分组方差都来自这里）。模块内函数名唯一，排序是确定性键。
-    std::vector<const llvm::Function *> SortedSCCs(SCCs.begin(), SCCs.end());
-    llvm::sort(SortedSCCs, [](const llvm::Function *A,
-                              const llvm::Function *B) {
-      return A->getName() < B->getName();
-    });
-    for (const llvm::Function *Func1 : SortedSCCs) {
-      auto Func = const_cast<llvm::Function *>(Func1);
-      // create function nodes
-      auto F = createNode(Func);
-      std::vector<SimpleType> Args;
-      for (unsigned i = 0; i < Func->arg_size(); ++i) {
-        auto Arg = createNode(Func->getArg(i));
-        // Contra-variant.
-        Args.push_back(Arg);
-      }
-      SimpleType Ret = nullptr;
-      if (!Func->getReturnType()->isVoidTy()) {
-        if (Func->getReturnType()->isAggregateType()) {
-          Ret = makeFunctionAggregateReturnRecord(*Func);
-        } else {
-          Ret = createNode(ReturnValue{.Func = Func});
-        }
-      }
-      addSubtype(binarysub::make_function(Args, Ret), F);
-    }
-    for (const llvm::Function *Func : SortedSCCs) {
-      if (OpaqueBodies.count(const_cast<llvm::Function *>(Func)) != 0) {
-        continue;
-      }
-      MLsubVisitor Visitor(*this);
-      Visitor.visit(const_cast<llvm::Function *>(Func));
-      Visitor.handlePHINodes();
-    }
-    applyDeferredCallConstraints();
-    for (const llvm::Function *Func1 : SortedSCCs) {
-      auto Func = const_cast<llvm::Function *>(Func1);
-      auto F = getNodeOrNull(Func);
-      assert(F->getAsVariableState() != nullptr);
-    }
-    PG.solve();
-    {
-      auto Merged = applyCallInterfaceMergePolicy();
-      llvm::errs() << "Info: transactional call interface merge policy merged "
-                   << Merged << " pair(s)\n";
-    }
-    if (EnableStructPtrLoadStoreMerge) {
-      auto Merged = applyStructPtrLoadStoreMergePolicy();
-      llvm::errs() << "Info: struct pointer slot merge policy merged "
-                   << Merged << " pair(s)\n";
-    }
-    {
-      auto Merged = applyStructPtrFieldFollowupMergePolicy();
-      llvm::errs() << "Info: struct pointer field follow-up merge policy merged "
-                   << Merged << " pair(s)\n";
-    }
-  }
+  BottomUpTiming run();
   GenTypesTiming genTypes(ast::HTypeContext &HCtx, unsigned PointerSizeBytes,
                           bool SolveGlobals,
                           ExtValueLabelCache *DebugLabelCache);
