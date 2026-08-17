@@ -1,4 +1,4 @@
-# 类型恢复阶段耗时与平均核数计划
+# 类型恢复阶段耗时与平均核数计划（已完成）
 
 ## 用户原始 prompt
 
@@ -95,3 +95,57 @@ fortune、lighttpd 等性能 A/B。新增的阶段统计结构只保存整数计
 - 开关关闭时不增加诊断输出；开关开启后的 wall/RSS 相对基线没有可观察的系统性
   回归。
 
+## 实现记录
+
+### binarysub 连续阶段
+
+- `external/binarysub/include/binarysub/binarysub.h:1073` 的
+  `BulkSimplifyPhaseTiming` 以微秒保存 wall/进程 CPU，并在 `BulkSimplifyTiming` 中
+  分开 canonicalize、group setup、group processing、finalize 和 total。
+- `external/binarysub/src/binarysub.cpp:150` 的计时与格式化函数使用
+  `getrusage(RUSAGE_SELF)`；失败时输出 unavailable，平均核数用未取整微秒计算。
+- `TypeSimplifier::snapshotBulkSimplifyTiming()`（约第 2622 行）保存阶段数据和原缓存
+  统计；`bulkSimplifyDetailed()`（约第 5927、6250-6344 行）在真实连续边界取快照，
+  向 `NOTDEC_SIMPLIFY_DIAG` 输出 `[simplify-phase]`，并扩展 binarysub trace。
+- 原 `analyze/origin/simplify/coalesce` 明确改称 `*_work_ms`；旧 trace 字段暂时同时
+  输出，避免破坏现有日志读取。
+
+实现时发现 canonicalize 与 group 并行循环之间的 occurrence cache、root 分组准备在
+lighttpd 上并非可忽略开销，因此相对原计划新增 `group_setup`。它只增加两个阶段边界
+快照，不改变执行顺序，也不增加 barrier。
+
+### genTypes 外层阶段
+
+- `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:59` 新增只含计数的
+  `GenTypesPhaseTiming` / `GenTypesTiming`；`ConstraintsGenerator::genTypes()` 改为返回
+  本 SCC 的五阶段数据。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:99-180` 增加进程 CPU、平均核数、RSS 和
+  SCC 汇总辅助函数。
+- `ConstraintsGenerator::genTypes()`（约第 6311-6493 行）报告 prepare、bulk、lower、
+  upper、debug_output 的 `wall_ms/cpu_ms/avg_cores/rss_kb`。
+- `MLsubRecovery::topDownPhase()`（约第 6561-6605 行）按阶段累加所有 SCC 的微秒
+  数据，再用总 CPU / 总 wall 重算 `[gen-types-summary]`，不平均各 SCC 比值。
+
+## 验证结果
+
+- `cmake --build ./build --target notdec -j4`：通过。
+- `cmake --build ./build-relwithdebinfo-20260731 --target notdec TypeBuilderTest binarysub
+  -j4`：通过。
+- `./build-relwithdebinfo-20260731/bin/TypeBuilderTest`：9/9 通过。
+- fortune 单线程诊断开关 A/B：`ValueTypes.txt`、`ValueHTypes.txt`、
+  `ImportantHTypes.txt`、`VarOrigins.txt`、三个 eval 明细和输出 IR 均逐字节一致；
+  merge-eval oracle 一致，LLVM 22 `opt -passes=verify` 通过。关闭开关时没有新增阶段
+  日志，开启后五个外层阶段、五个 binarysub 阶段和 SCC 汇总字段完整。
+- lighttpd 8 线程完整运行：wall `82.41s`、峰值 RSS `1425948 KiB`，LLVM verifier
+  通过，merge-eval 为 `bad_unions=20`、`fragmented_nodes=361`，与当前基线一致。
+  主 SCC 的 canonicalize 平均 `6.37` 核、group setup `1.00` 核、group processing
+  `7.09` 核、binarysub total `6.50` 核；外层 bulk `6.47` 核，lower/upper/debug
+  均为 `1.00` 核。
+- `./build-relwithdebinfo-20260731/binarysub` 仍在已有 parsing sample 4 失败：期望
+  `⊤ -> ⊤ -> ⊤ -> {}`，实际 `⊤ -> … -> … -> {}`。该失败与本次计时路径无关，
+  也已在前序性能日志中记录。
+
+实现效果 9/10：阶段 wall、CPU、平均核数和 RSS 已能互相对照，并实际区分了
+lighttpd 的并行与单线程区间。理解成本 3/10：新增两个小计时结构和固定阶段字段，
+没有改求解流程。后期维护成本 2/10：计时集中在边界，新增阶段时只需补一个快照和
+输出字段。当前没有更简单且还能正确处理并行交错子步骤的方案。

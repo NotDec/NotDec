@@ -40,13 +40,16 @@
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/SHA256.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <sys/resource.h>
 #include <tuple>
 #include <unistd.h>
 #include <vector>
@@ -92,6 +95,90 @@ constexpr llvm::StringLiteral kCallSlotMergeDecisionsFile =
     "CallSlotMergeDecisions.txt";
 constexpr llvm::StringLiteral kLocalSubtypeMergeStatsFile =
     "LocalSubtypeMergeStats.txt";
+
+using GenTypesClock = std::chrono::steady_clock;
+
+struct ProcessCpuSnapshot {
+  std::uint64_t TotalUs = 0;
+  bool Available = false;
+};
+
+std::uint64_t timevalToUs(const timeval &Time) {
+  return static_cast<std::uint64_t>(Time.tv_sec) * 1000000 +
+         static_cast<std::uint64_t>(Time.tv_usec);
+}
+
+ProcessCpuSnapshot currentProcessCpuTime() {
+  rusage Usage{};
+  if (getrusage(RUSAGE_SELF, &Usage) != 0) {
+    return {};
+  }
+  return {.TotalUs = timevalToUs(Usage.ru_utime) +
+                     timevalToUs(Usage.ru_stime),
+          .Available = true};
+}
+
+GenTypesPhaseTiming finishGenTypesPhase(
+    GenTypesClock::time_point WallStart, const ProcessCpuSnapshot &CpuStart) {
+  const auto WallUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                          GenTypesClock::now() - WallStart)
+                          .count();
+  if (!CpuStart.Available) {
+    return {.WallUs = static_cast<std::uint64_t>(WallUs)};
+  }
+  const auto CpuEnd = currentProcessCpuTime();
+  const bool CpuAvailable =
+      CpuEnd.Available && CpuEnd.TotalUs >= CpuStart.TotalUs;
+  return {.WallUs = static_cast<std::uint64_t>(WallUs),
+          .CpuUs = CpuAvailable ? CpuEnd.TotalUs - CpuStart.TotalUs : 0,
+          .CpuAvailable = CpuAvailable};
+}
+
+std::string formatAverageCores(const GenTypesPhaseTiming &Timing) {
+  if (!Timing.CpuAvailable || Timing.WallUs == 0) {
+    return "unavailable";
+  }
+  std::ostringstream Out;
+  Out << std::fixed << std::setprecision(2)
+      << static_cast<double>(Timing.CpuUs) /
+             static_cast<double>(Timing.WallUs);
+  return Out.str();
+}
+
+void printGenTypesTimingFields(const GenTypesPhaseTiming &Timing) {
+  llvm::errs() << " wall_ms=" << Timing.WallUs / 1000 << " cpu_ms=";
+  if (!Timing.CpuAvailable) {
+    llvm::errs() << "unavailable avg_cores=unavailable";
+    return;
+  }
+  llvm::errs() << Timing.CpuUs / 1000
+               << " avg_cores=" << formatAverageCores(Timing);
+}
+
+long currentResidentRssKb() {
+  std::ifstream Statm("/proc/self/statm");
+  long VirtualPages = 0;
+  long ResidentPages = 0;
+  if (!(Statm >> VirtualPages >> ResidentPages)) {
+    return 0;
+  }
+  return ResidentPages * (sysconf(_SC_PAGESIZE) / 1024);
+}
+
+void addGenTypesPhaseTiming(GenTypesPhaseTiming &Total,
+                            const GenTypesPhaseTiming &Current) {
+  Total.WallUs += Current.WallUs;
+  Total.CpuUs += Current.CpuUs;
+  Total.CpuAvailable = Total.CpuAvailable && Current.CpuAvailable;
+}
+
+void addGenTypesTiming(GenTypesTiming &Total, const GenTypesTiming &Current) {
+  addGenTypesPhaseTiming(Total.Prepare, Current.Prepare);
+  addGenTypesPhaseTiming(Total.Bulk, Current.Bulk);
+  addGenTypesPhaseTiming(Total.Lower, Current.Lower);
+  addGenTypesPhaseTiming(Total.Upper, Current.Upper);
+  addGenTypesPhaseTiming(Total.DebugOutput, Current.DebugOutput);
+}
 
 bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
   static constexpr llvm::StringLiteral Names[] = {
@@ -6221,10 +6308,16 @@ void MLsubRecovery::bottomUpPhase() {
   }
 }
 
-void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
-                                    unsigned PointerSizeBytes,
-                                    bool SolveGlobals,
-                                    ExtValueLabelCache *DebugLabelCache) {
+GenTypesTiming
+ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
+                               unsigned PointerSizeBytes, bool SolveGlobals,
+                               ExtValueLabelCache *DebugLabelCache) {
+  const bool GenTypesDiag =
+      std::getenv("NOTDEC_SIMPLIFY_DIAG") != nullptr;
+  GenTypesTiming Timing;
+  auto PhaseWallStart = GenTypesClock::now();
+  auto PhaseCpuStart =
+      GenTypesDiag ? currentProcessCpuTime() : ProcessCpuSnapshot{};
   binarysub::TypeSimplifier Ts;
   using binarysub::PolarVar;
   SnapshotContraVariantValues = ContraVariantValues;
@@ -6258,27 +6351,19 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
       Tys.insert(PolStorage);
     }
   }
-  // Redis has one dominant SCC followed by small allocator SCCs that can pull
-  // the large recursive shape back in. Stage-level resident memory makes it
-  // clear whether growth belongs to bulk simplify, HType conversion, or debug
-  // output. Keep it under the existing simplify diagnostic switch.
-  const bool GenTypesDiag =
-      std::getenv("NOTDEC_SIMPLIFY_DIAG") != nullptr;
-  auto reportGenTypesStage = [&](llvm::StringRef Stage) {
+  // Each line is a completed, process-wide interval. The timing snapshot is
+  // taken before reading RSS or printing so diagnostics do not become part of
+  // the following phase.
+  auto reportGenTypesStage = [&](llvm::StringRef Stage,
+                                 const GenTypesPhaseTiming &Phase) {
     if (!GenTypesDiag) {
       return;
     }
-    long RssKb = 0;
-    std::ifstream Statm("/proc/self/statm");
-    long VirtualPages = 0;
-    long ResidentPages = 0;
-    if (Statm >> VirtualPages >> ResidentPages) {
-      RssKb = ResidentPages * (sysconf(_SC_PAGESIZE) / 1024);
-    }
     llvm::errs() << "[gen-types-diag] stage=" << Stage
                  << " scc=" << llvm::StringRef(Name).take_front(80)
-                 << " values=" << V2N.size() << " roots=" << Tys.size()
-                 << " rss_kb=" << RssKb << "\n";
+                 << " values=" << V2N.size() << " roots=" << Tys.size();
+    printGenTypesTimingFields(Phase);
+    llvm::errs() << " rss_kb=" << currentResidentRssKb() << "\n";
   };
   binarysub::BulkSimplifyOptions BulkOptions;
   BulkOptions.enableParallel = true;
@@ -6292,11 +6377,20 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   if (const char *DumpPath = std::getenv("NOTDEC_DUMP_COMPACT_GRAPH")) {
     Ts.setCompactGraphDump(DumpPath);
   }
-  reportGenTypesStage("bulk-start");
+  Timing.Prepare = finishGenTypesPhase(PhaseWallStart, PhaseCpuStart);
+  reportGenTypesStage("prepare", Timing.Prepare);
+
+  PhaseWallStart = GenTypesClock::now();
+  PhaseCpuStart =
+      GenTypesDiag ? currentProcessCpuTime() : ProcessCpuSnapshot{};
   auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
-  reportGenTypesStage("bulk-done");
+  Timing.Bulk = finishGenTypesPhase(PhaseWallStart, PhaseCpuStart);
+  reportGenTypesStage("bulk", Timing.Bulk);
   const auto &Res = BulkResult.types;
 
+  PhaseWallStart = GenTypesClock::now();
+  PhaseCpuStart =
+      GenTypesDiag ? currentProcessCpuTime() : ProcessCpuSnapshot{};
   // Create TypeBuilder context and builder.  Keep this SCC-local until cross-SCC
   // type sharing has a dedicated design.
   TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, notdec::getWorkDirOpt());
@@ -6345,7 +6439,12 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
       reportConvertProgress(ConvertCount, V2N.size());
     }
   }
-  reportGenTypesStage("lower-done");
+  Timing.Lower = finishGenTypesPhase(PhaseWallStart, PhaseCpuStart);
+  reportGenTypesStage("lower", Timing.Lower);
+
+  PhaseWallStart = GenTypesClock::now();
+  PhaseCpuStart =
+      GenTypesDiag ? currentProcessCpuTime() : ProcessCpuSnapshot{};
   if (SolveGlobals) {
     auto MemUTy = Res.at(PolMem);
     TB.setDebugRootLabel(std::string("<memory>"));
@@ -6374,8 +6473,12 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     }
   }
   reportConvertProgress(V2N.size() * 2, V2N.size() * 2);
-  reportGenTypesStage("upper-done");
+  Timing.Upper = finishGenTypesPhase(PhaseWallStart, PhaseCpuStart);
+  reportGenTypesStage("upper", Timing.Upper);
 
+  PhaseWallStart = GenTypesClock::now();
+  PhaseCpuStart =
+      GenTypesDiag ? currentProcessCpuTime() : ProcessCpuSnapshot{};
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     appendDebugValueTypes(*WorkDir, Name, V2N, ContraVariantValues, Res,
                           OriginalVariableSources, SolveGlobals, PolMem,
@@ -6384,7 +6487,9 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                           OriginalVariableSources, SolveGlobals, PolMem,
                           DebugLabelCache);
   }
-  reportGenTypesStage("debug-done");
+  Timing.DebugOutput = finishGenTypesPhase(PhaseWallStart, PhaseCpuStart);
+  reportGenTypesStage("debug_output", Timing.DebugOutput);
+  return Timing;
 }
 
 void ConstraintsGenerator::releaseBinarysubState() {
@@ -6466,12 +6571,37 @@ void MLsubRecovery::topDownPhase() {
   ExtValueLabelCache DebugValueLabels;
   ExtValueLabelCache *DebugLabelCache =
       notdec::getWorkDirOpt() ? &DebugValueLabels : nullptr;
+  const bool GenTypesDiag =
+      std::getenv("NOTDEC_SIMPLIFY_DIAG") != nullptr;
+  std::optional<GenTypesTiming> TotalTiming;
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
     // 尝试运行简化算法，保存到ValueTypes里面。
     // solve memory if ind == 0
-    Data.Generator->genTypes(*HCtx, Mod.getDataLayout().getPointerSize(),
-                             Ind == 0, DebugLabelCache);
+    auto CurrentTiming = Data.Generator->genTypes(
+        *HCtx, Mod.getDataLayout().getPointerSize(), Ind == 0,
+        DebugLabelCache);
+    if (GenTypesDiag) {
+      if (!TotalTiming) {
+        TotalTiming = CurrentTiming;
+      } else {
+        addGenTypesTiming(*TotalTiming, CurrentTiming);
+      }
+    }
+  }
+  if (TotalTiming) {
+    auto ReportTotal = [&](llvm::StringRef Stage,
+                           const GenTypesPhaseTiming &Phase) {
+      llvm::errs() << "[gen-types-summary] stage=" << Stage
+                   << " sccs=" << AG.AllSCCs.size();
+      printGenTypesTimingFields(Phase);
+      llvm::errs() << "\n";
+    };
+    ReportTotal("prepare", TotalTiming->Prepare);
+    ReportTotal("bulk", TotalTiming->Bulk);
+    ReportTotal("lower", TotalTiming->Lower);
+    ReportTotal("upper", TotalTiming->Upper);
+    ReportTotal("debug_output", TotalTiming->DebugOutput);
   }
   if (MergeEval) {
     MergeEval->finish(AG);

@@ -2,6 +2,7 @@
 #define _BINARYSUB_MLSUBGENERATOR_H_
 
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -54,6 +55,23 @@ using binarysub::SimpleType;
 // one cache for a complete top-down pass so label formatting is paid once per
 // ExtValuePtr without giving the cache a lifetime beyond the LLVM module run.
 using ExtValueLabelCache = std::map<ExtValuePtr, std::string>;
+
+// genTypes phases are sequential within one SCC. Keeping only microsecond
+// counters lets topDownPhase aggregate every SCC without retaining any type
+// graph or debug-output state.
+struct GenTypesPhaseTiming {
+  std::uint64_t WallUs = 0;
+  std::uint64_t CpuUs = 0;
+  bool CpuAvailable = false;
+};
+
+struct GenTypesTiming {
+  GenTypesPhaseTiming Prepare;
+  GenTypesPhaseTiming Bulk;
+  GenTypesPhaseTiming Lower;
+  GenTypesPhaseTiming Upper;
+  GenTypesPhaseTiming DebugOutput;
+};
 
 struct ConstraintsGenerator;
 
@@ -421,8 +439,9 @@ struct ConstraintsGenerator {
                    << Merged << " pair(s)\n";
     }
   }
-  void genTypes(ast::HTypeContext &HCtx, unsigned PointerSizeBytes,
-                bool SolveGlobals, ExtValueLabelCache *DebugLabelCache);
+  GenTypesTiming genTypes(ast::HTypeContext &HCtx, unsigned PointerSizeBytes,
+                          bool SolveGlobals,
+                          ExtValueLabelCache *DebugLabelCache);
   void releaseBinarysubState();
 
   SimpleType convertSimpleType(ExtValuePtr Val);
