@@ -41,12 +41,14 @@
 #include <llvm/Support/SHA256.h>
 #include <algorithm>
 #include <cstdint>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <unistd.h>
 #include <vector>
 
 using namespace llvm;
@@ -1911,44 +1913,83 @@ void appendDebugValueTypes(
     return;
   }
 
-  std::vector<std::string> Lines;
-  Lines.reserve(V2N.size() + (SolveMemory ? 1 : 0));
-
+  // A Redis SCC can produce multi-megabyte UType strings for hundreds of
+  // thousands of values. Keeping every completed line until the final sort
+  // retained the whole 15 GB ValueTypes file in memory. The line prefix is the
+  // polarity plus stable value label; sort that small key, then format and
+  // write one full UType line at a time.
+  struct DebugValueTypeEntry {
+    std::string SortPrefix;
+    SimpleType Type;
+  };
+  std::vector<DebugValueTypeEntry> Entries;
+  Entries.reserve(V2N.size());
   for (const auto &Ent : V2N) {
-    auto formatSolvedType = [&](bool Pos) {
-      if (!Ent.second->isVariableState()) {
-        return binarysub::debug_string(Ent.second);
-      }
-      auto It = Res.find(binarysub::PolarVar{.var = Ent.second, .pos = Pos});
-      if (It == Res.end() || !It->second) {
-        return std::string("<null>");
-      }
-      return binarysub::printType(It->second);
-    };
-    std::string Line = ContraVariantValues.count(Ent.first) == 0 ? "[+]" : "[-]";
-    Line += " ";
-    Line += formatExtValueMappingLabel(Ent.first, DebugLabelCache);
-    Line += " => lower=";
-    Line += formatSolvedType(true);
-    Line += " ; upper=";
-    Line += formatSolvedType(false);
-    Lines.push_back(std::move(Line));
+    std::string Prefix =
+        ContraVariantValues.count(Ent.first) == 0 ? "[+] " : "[-] ";
+    Prefix += formatExtValueMappingLabel(Ent.first, DebugLabelCache);
+    Entries.push_back({std::move(Prefix), Ent.second});
   }
+  std::sort(Entries.begin(), Entries.end(),
+            [](const DebugValueTypeEntry &Lhs,
+               const DebugValueTypeEntry &Rhs) {
+              return Lhs.SortPrefix < Rhs.SortPrefix;
+            });
 
-  if (SolveMemory) {
-    auto It = Res.find(PolMem);
-    std::string UTypeStr = "<null>";
-    if (It != Res.end() && It->second) {
-      UTypeStr = binarysub::printType(It->second);
+  auto formatSolvedType = [&](const DebugValueTypeEntry &Entry, bool Pos) {
+    if (!Entry.Type->isVariableState()) {
+      return binarysub::debug_string(Entry.Type);
     }
-    Lines.push_back("[memory] <memory> => " + UTypeStr);
-  }
-
-  std::sort(Lines.begin(), Lines.end());
+    auto It = Res.find(binarysub::PolarVar{.var = Entry.Type, .pos = Pos});
+    if (It == Res.end() || !It->second) {
+      return std::string("<null>");
+    }
+    return binarysub::printType(It->second);
+  };
+  auto formatLine = [&](const DebugValueTypeEntry &Entry) {
+    return Entry.SortPrefix + " => lower=" + formatSolvedType(Entry, true) +
+           " ; upper=" + formatSolvedType(Entry, false);
+  };
+  auto writeEntry = [&](const DebugValueTypeEntry &Entry) {
+    Out << Entry.SortPrefix << " => lower=" << formatSolvedType(Entry, true)
+        << " ; upper=" << formatSolvedType(Entry, false) << "\n";
+  };
 
   Out << "## SCC: " << SCCName << "\n";
-  for (const auto &Line : Lines) {
-    Out << Line << "\n";
+  for (std::size_t Begin = 0; Begin < Entries.size();) {
+    std::size_t End = Begin + 1;
+    while (End < Entries.size() &&
+           Entries[End].SortPrefix == Entries[Begin].SortPrefix) {
+      ++End;
+    }
+    if (End == Begin + 1) {
+      writeEntry(Entries[Begin]);
+    } else {
+      // Stable labels should be unique. If malformed input produces a
+      // collision, retain the old full-line lexicographic order locally.
+      std::vector<std::string> CollisionLines;
+      CollisionLines.reserve(End - Begin);
+      for (std::size_t Index = Begin; Index < End; ++Index) {
+        CollisionLines.push_back(formatLine(Entries[Index]));
+      }
+      std::sort(CollisionLines.begin(), CollisionLines.end());
+      for (const auto &Line : CollisionLines) {
+        Out << Line << "\n";
+      }
+    }
+    Begin = End;
+  }
+  // `[memory]` sorts after the `[+]` and `[-]` value prefixes, so streaming it
+  // last preserves the previous complete-file order.
+  if (SolveMemory) {
+    auto It = Res.find(PolMem);
+    Out << "[memory] <memory> => ";
+    if (It == Res.end() || !It->second) {
+      Out << "<null>";
+    } else {
+      Out << binarysub::printType(It->second);
+    }
+    Out << "\n";
   }
   Out << "\n";
 }
@@ -6217,6 +6258,28 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
       Tys.insert(PolStorage);
     }
   }
+  // Redis has one dominant SCC followed by small allocator SCCs that can pull
+  // the large recursive shape back in. Stage-level resident memory makes it
+  // clear whether growth belongs to bulk simplify, HType conversion, or debug
+  // output. Keep it under the existing simplify diagnostic switch.
+  const bool GenTypesDiag =
+      std::getenv("NOTDEC_SIMPLIFY_DIAG") != nullptr;
+  auto reportGenTypesStage = [&](llvm::StringRef Stage) {
+    if (!GenTypesDiag) {
+      return;
+    }
+    long RssKb = 0;
+    std::ifstream Statm("/proc/self/statm");
+    long VirtualPages = 0;
+    long ResidentPages = 0;
+    if (Statm >> VirtualPages >> ResidentPages) {
+      RssKb = ResidentPages * (sysconf(_SC_PAGESIZE) / 1024);
+    }
+    llvm::errs() << "[gen-types-diag] stage=" << Stage
+                 << " scc=" << llvm::StringRef(Name).take_front(80)
+                 << " values=" << V2N.size() << " roots=" << Tys.size()
+                 << " rss_kb=" << RssKb << "\n";
+  };
   binarysub::BulkSimplifyOptions BulkOptions;
   BulkOptions.enableParallel = true;
   // 静态图分析探针：canonicalize 之前 dump roots 可达的引用图，用于
@@ -6229,7 +6292,9 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   if (const char *DumpPath = std::getenv("NOTDEC_DUMP_COMPACT_GRAPH")) {
     Ts.setCompactGraphDump(DumpPath);
   }
+  reportGenTypesStage("bulk-start");
   auto BulkResult = Ts.bulkSimplifyDetailed(Tys, false, BulkOptions);
+  reportGenTypesStage("bulk-done");
   const auto &Res = BulkResult.types;
 
   // Create TypeBuilder context and builder.  Keep this SCC-local until cross-SCC
@@ -6280,6 +6345,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
       reportConvertProgress(ConvertCount, V2N.size());
     }
   }
+  reportGenTypesStage("lower-done");
   if (SolveGlobals) {
     auto MemUTy = Res.at(PolMem);
     TB.setDebugRootLabel(std::string("<memory>"));
@@ -6308,6 +6374,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     }
   }
   reportConvertProgress(V2N.size() * 2, V2N.size() * 2);
+  reportGenTypesStage("upper-done");
 
   if (auto WorkDir = notdec::getWorkDirOpt()) {
     appendDebugValueTypes(*WorkDir, Name, V2N, ContraVariantValues, Res,
@@ -6317,6 +6384,7 @@ void ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                           OriginalVariableSources, SolveGlobals, PolMem,
                           DebugLabelCache);
   }
+  reportGenTypesStage("debug-done");
 }
 
 void ConstraintsGenerator::releaseBinarysubState() {

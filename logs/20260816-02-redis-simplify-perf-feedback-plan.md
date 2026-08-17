@@ -284,14 +284,15 @@ record 的变体达到 32 个后，按 `FoldedKeys ∩ SubtreeKeys` 的数量、
 对照目录为 `/tmp/notdec-source-ir-perf-redis-path-index-20260817-Qmucff`。
 主 simplify 完成 `399087` 个 group 后主动停止后续类型生成，诊断如下：
 
-- 交集索引：总 coalesce `2441570 ms`，最慢 group `323697 ms`，主 simplify RSS
-  约 `13.9 GiB`；大型 `recvars=116` record 的 `829228` 次查询中有 `810241`
+- 交集索引：总 coalesce `2441570 ms`，最慢 group `323697 ms`，旧诊断日志中的
+  `13.9 GiB` 实际是 VMS（`/proc/self/statm` 第一列），不是 resident RSS；大型
+  `recvars=116` record 的 `829228` 次查询中有 `810241`
   次索引无候选，累计变体检查只有 `242986`，命中仍为 0。
 - `cap=16` 对照：总 coalesce `3392927 ms`，最慢 group `499363 ms`，主 simplify
-  RSS 约 `9.8 GiB`；`recvars=117` 慢 group 有 `10766278` 次查询、`171848886`
+  `9.8 GiB` 同样是旧诊断记录的 VMS；`recvars=117` 慢 group 有 `10766278` 次查询、`171848886`
   次变体检查，全部 0 命中。交集索引相对 cap=16 的 coalesce 约快 28%，最慢
-  group 约快 35%；索引会增加缓存内存，不能把后处理阶段约 47.7 GiB 的 RSS
-  当成 simplify 峰值。
+  group 约快 35%；索引会增加缓存内存。整次旧运行的 `/usr/bin/time` 峰值
+  `50022004 KiB`（约 47.7 GiB）是真实 RSS，但不能把它当成 simplify 阶段峰值。
 
 ### 验证与判断
 
@@ -314,3 +315,30 @@ record 的变体达到 32 个后，按 `FoldedKeys ∩ SubtreeKeys` 的数量、
 下一步不是继续堆 PathMemo 快路，而是先用内存 profile 确认后处理约 47.7 GiB 的
 主要持有者；若索引本身需要继续降内存，再考虑存精确交集集合的共享编号，而不是给
 变体设会改变缓存覆盖率的固定上限。
+
+## 2026-08-17：修正阶段 RSS 诊断并流式写出 ValueTypes
+
+**问题**：`/proc/self/statm` 的第一列是虚拟页数，旧诊断把它当成 resident RSS，
+导致 Redis 主 simplify 的阶段内存判断偏大且口径错误。另一个问题是
+`appendDebugValueTypes()` 先把每一行完整的 UType 文本放入 `vector<string>` 再排序；
+Redis 的 `ValueTypes.txt` 约 15.2 GB，输出阶段会在内存中再保留约一份同样大的文本。
+
+**实现**：`external/binarysub/src/binarysub.cpp` 的两处 `statm` 读取改用第二列
+resident pages。`src/TypeRecovery/mlsub/MLsubGenerator.cpp` 的
+`appendDebugValueTypes()` 只缓存 polarity 和 stable value label，按短前缀排序后逐行
+格式化、写出；只有 stable label 碰撞时才在局部恢复完整行排序。`genTypes()` 增加
+bulk、lower、upper 和 debug 阶段的 resident RSS 诊断。
+
+**验证**：fortune 单线程的 `ValueTypes.txt`、`ValueHTypes.txt`、`VarOrigins.txt`
+和 DebugInfo oracle 与基线逐字节一致。lighttpd 单线程（80,111 groups）四个类型文件
+和 oracle 也逐字节一致，LLVM 22 verifier 通过；wall `157.96 s`、峰值 RSS
+`1356388 KiB`。阶段 RSS 从 bulk-start `322908 KiB` 增长到 bulk-done `715924 KiB`、
+lower-done `961972 KiB`、debug-done `1356388 KiB`，与 `/usr/bin/time` 同口径。
+
+旧 Redis 运行的 `/usr/bin/time` 记录为 wall `4413.60 s`、峰值 RSS `50022004 KiB`；
+主 simplify 完成后仍在 `ztrymalloc` 小 SCC 中重复展开 117 个递归变量，随后被
+SIGTERM。下一步用修正后的阶段诊断重跑 Redis，并对照该 SCC 的类型结构，先判断是否
+能安全复用已有跨 SCC 结果，再决定是否做缓存。
+
+本轮实现效果 8/10（消除完整 ValueTypes 文本的额外内存副本，且类型产物不变），
+理解成本 3/10，维护成本 3/10。
