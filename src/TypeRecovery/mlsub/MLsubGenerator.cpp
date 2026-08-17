@@ -9181,6 +9181,9 @@ void ConstraintsGenerator::MLsubVisitor::visitOr(BinaryOperator &I) {
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitInstruction(Instruction &I) {
+  bool UnhandledReturn = false;
+  std::vector<unsigned> UnhandledOperands;
+
   // return value
   if (I.getType()->isVoidTy()) {
     // skip void type
@@ -9189,8 +9192,7 @@ void ConstraintsGenerator::MLsubVisitor::visitInstruction(Instruction &I) {
                  .addRetConstraint(&I, cg)) {
     // good
   } else {
-    llvm::errs() << "WARN: MLsubGenerator: unhandled instruction return: " << I
-                 << "\n";
+    UnhandledReturn = true;
   }
   // for each op
   for (unsigned Ind = 0; Ind < I.getNumOperands(); ++Ind) {
@@ -9202,10 +9204,37 @@ void ConstraintsGenerator::MLsubVisitor::visitInstruction(Instruction &I) {
                    .addOpConstraint(Ind, &I, cg)) {
       // good
     } else {
-      llvm::errs() << "WARN: MLsubGenerator: unhandled instruction Op: " << I
-                   << "\n";
+      UnhandledOperands.push_back(Ind);
     }
   }
+
+  if (!UnhandledReturn && UnhandledOperands.empty()) {
+    return;
+  }
+
+  // Printing an Instruction constructs an LLVM SlotTracker for the whole
+  // module. On large DebugInfo inputs that made warnings cost more than the
+  // constraint work itself, and the old operand loop printed the same
+  // instruction repeatedly. Keep one compact, stable warning per instruction.
+  llvm::errs() << "WARN: MLsubGenerator: unhandled instruction function="
+               << I.getFunction()->getName() << " opcode=" << I.getOpcodeName();
+  if (I.hasName()) {
+    llvm::errs() << " value=" << I.getName();
+  }
+  llvm::errs() << " parts=";
+  bool NeedComma = false;
+  if (UnhandledReturn) {
+    llvm::errs() << "return";
+    NeedComma = true;
+  }
+  for (unsigned Ind : UnhandledOperands) {
+    if (NeedComma) {
+      llvm::errs() << ',';
+    }
+    llvm::errs() << "op" << Ind;
+    NeedComma = true;
+  }
+  llvm::errs() << '\n';
 }
 
 // Helper function for string comparison

@@ -254,3 +254,63 @@ lighttpd 都没有结果分歧；该临时代码已删除。正确 Redis opaque 
 诊断只在环境变量开启时计数）。下一步不应立即给 PathMemo 加变体上限：它在
 新 perf 中已不是主热点，而上限可能让其他递归 DAG 重新指数展开。优先看
 `applySimplificationPlan()` 中的集合插入和 PersistentSet 节点回收/遍历。
+
+## PathMemo 交集索引与 Redis 慢 group 复验
+
+### 实现
+
+Redis 约束生成阶段还发现一处与 simplify 无关的日志热点：
+`src/TypeRecovery/mlsub/MLsubGenerator.cpp` 的
+`ConstraintsGenerator::MLsubVisitor::visitInstruction()`（9183-9238 行）原来每个
+未处理返回值或 operand 都打印一次完整 LLVM `Instruction`。带 DebugInfo 的 Redis
+会因此反复构造全模块 `SlotTracker`；修改后每条指令只打印一次函数名、opcode、
+可用的 value name 和未处理部分。修改前 perf 中 `llvm::Module::print` 占 44.13%，
+修改后复采样已不再出现该调用栈，约束语义不变。
+
+在 `external/binarysub/src/binarysub.cpp` 的
+`TypeSimplifier::coalesceCompactType()`（4902-4951、5230-5444、5659-5687 行）增加
+`PathIntersectionSignature` 和 `PathMemoRecord::VariantsByIntersection`。
+record 的变体达到 32 个后，按 `FoldedKeys ∩ SubtreeKeys` 的数量、异或和累加
+签名建索引；查询只取同签名的候选，随后继续执行原 path-side/subtree-side 精确
+集合校验。哈希碰撞只会增加候选，不会误命中。低于 32 个变体的 record 保留原
+线性扫描，避免 lighttpd 小 record 的固定索引开销。
+
+同时撤回 `PersistentSet` scratch 回收和 `NOTDEC_PATH_MEMO_MAX_VARIANTS` 固定上限：
+前者在 lighttpd 只有约 1% 收益，后者会丢弃可能有用的变体并让慢 group 仍需扫描。
+
+### Redis 慢 group
+
+使用相同 opaque allocator override、8 threads、ASLR 关闭和 canonicalize 并行配置，
+对照目录为 `/tmp/notdec-source-ir-perf-redis-path-index-20260817-Qmucff`。
+主 simplify 完成 `399087` 个 group 后主动停止后续类型生成，诊断如下：
+
+- 交集索引：总 coalesce `2441570 ms`，最慢 group `323697 ms`，主 simplify RSS
+  约 `13.9 GiB`；大型 `recvars=116` record 的 `829228` 次查询中有 `810241`
+  次索引无候选，累计变体检查只有 `242986`，命中仍为 0。
+- `cap=16` 对照：总 coalesce `3392927 ms`，最慢 group `499363 ms`，主 simplify
+  RSS 约 `9.8 GiB`；`recvars=117` 慢 group 有 `10766278` 次查询、`171848886`
+  次变体检查，全部 0 命中。交集索引相对 cap=16 的 coalesce 约快 28%，最慢
+  group 约快 35%；索引会增加缓存内存，不能把后处理阶段约 47.7 GiB 的 RSS
+  当成 simplify 峰值。
+
+### 验证与判断
+
+- fortune：`ValueTypes.txt`、`ValueHTypes.txt`、`VarOrigins.txt` 和 merge-eval
+  oracle 与基线一致，LLVM 22 `opt -passes=verify` 通过。
+- lighttpd：8 threads、80,111 groups，merge-eval 的 wrong-merge、fragmentation、
+  coverage 一致，LLVM verifier 通过；32 阈值未触发时 RSS 约 `1.15 GiB`，wall
+  约 `76.9 s`，与已有 `73-79 s` 现场范围相符。
+- `cmake --build ./build-relwithdebinfo-20260731 --target binarysub notdec
+  TypeBuilderTest -j4` 通过，`TypeBuilderTest` 9/9 通过。`binarysub` parsing sample 4
+  的已有失败仍存在，与本改动无关。
+
+本轮结论：PathMemo 的真正瓶颈是大型零命中 record 的变体扫描，交集索引是比固定
+上限更稳的方向；Redis 完整后处理仍会产生很高内存峰值，后续应单独分析该阶段，
+不要把它和 simplify 的 PathMemo 成本混在一起。
+
+本轮实现效果 8/10（Redis 主 simplify 明显加速，但完整流程仍受后处理内存限制），
+理解成本 6/10（需要同时理解两个历史校验分支、折叠集合和索引碰撞回退），维护成本
+5/10（索引只在 `coalesceCompactType()` 内，但会额外持有候选下标和签名桶）。更好的
+下一步不是继续堆 PathMemo 快路，而是先用内存 profile 确认后处理约 47.7 GiB 的
+主要持有者；若索引本身需要继续降内存，再考虑存精确交集集合的共享编号，而不是给
+变体设会改变缓存覆盖率的固定上限。
