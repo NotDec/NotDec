@@ -6016,7 +6016,9 @@ void MLsubRecovery::run() {
 
   bottomUpPhase();
 
-  topDownPhase();
+  topDownConstraintPhase();
+
+  solveAndLowerTypes();
 
   if (WorkDir) {
     writeCallSlotMergeDecisions(
@@ -7086,10 +7088,14 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   }
 }
 
-void MLsubRecovery::topDownPhase() {
-  // TODO 怎么处理TopDown的类型传递？设置多态参数的类型？
-  // TODO 对于每个SCCData的所有Caller，都instantiate到 -x level？
-  // 也许我该基于最后都优化完毕之后的CompactType？？
+void MLsubRecovery::topDownConstraintPhase() {
+  // The current MLsub implementation finishes all constraint generation and
+  // cross-SCC summary instantiation in bottomUpPhase(). Keep this boundary
+  // explicit so a future caller-to-callee propagation pass can mutate the
+  // completed SimpleType graph before solveAndLowerTypes() starts.
+}
+
+void MLsubRecovery::solveAndLowerTypes() {
 
   if (!HCtx) {
     HCtx = std::make_shared<ast::HTypeContext>();

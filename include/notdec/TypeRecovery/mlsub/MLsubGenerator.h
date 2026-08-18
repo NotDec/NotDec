@@ -59,8 +59,8 @@ using binarysub::SimpleType;
 using ExtValueLabelCache = std::map<ExtValuePtr, std::string>;
 
 // genTypes phases are sequential within one SCC. Keeping only microsecond
-// counters lets topDownPhase aggregate every SCC without retaining any type
-// graph or debug-output state.
+// counters lets solveAndLowerTypes() aggregate every SCC without retaining any
+// type graph or debug-output state.
 struct GenTypesPhaseTiming {
   std::uint64_t WallUs = 0;
   std::uint64_t CpuUs = 0;
@@ -817,7 +817,13 @@ public:
   // 形成单独分析的SCC群。（按需复制多态函数）
   void prepareSCC(llvm::CallGraph &CG);
   void bottomUpPhase();
-  void topDownPhase();
+  // Reserved for a future caller-to-callee constraint propagation pass. The
+  // current MLsub pipeline has no top-down graph mutation yet, so this phase
+  // intentionally remains an explicit no-op between bottom-up generation and
+  // CompactType/HType solving.
+  void topDownConstraintPhase();
+  // Solve the completed SimpleType graph and lower each SCC result to HType.
+  void solveAndLowerTypes();
 
   using Result = ::notdec::llvm2c::HTypeResult;
   std::unique_ptr<Result> ResultVal;
