@@ -391,3 +391,62 @@ deferred 阶段只有 `1.051 s`，必须与主 `scc_deferred_calls` 分开看。
 - 完整 `./build/binarysub` 仍在既有 parsing sample 4 处 abort：期望
   `⊤ -> ⊤ -> ⊤ -> {}`，实际 `⊤ -> … -> … -> {}`；失败发生在新增 solver 测试之前，
   与本改动无关。
+
+## 无 group 上限完整 run 与 perf attach（20260818）
+
+### 运行口径
+
+- 输入：`/tmp/notdec-source-ir-perf-redis-current-20260817/redis-server/work/02-mlsub-input.ll`，
+  allocator override：`/tmp/redis-allocator-summary.json`。
+- `setarch x86_64 -R`、`NOTDEC_BINARYSUB_THREADS=8`、
+  `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1`，没有设置
+  `NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS`；开启 `NOTDEC_CONSTRAINT_DIAG=1` 和
+  `NOTDEC_SIMPLIFY_DIAG=1`。
+- 可执行文件：`build-relwithdebinfo-20260731/bin/notdec`。运行目录：
+  `/tmp/notdec-redis-full-20260818`。
+
+### 结果
+
+- 主 SCC 完成全部 `398869/398869` group，`values=246639`、`roots=398869`。
+- `/usr/bin/time -v`：wall `45:31.58`，user `12365.14 s`，system `1118.83 s`，
+  平均约 `4.93` 核；峰值 RSS `24967156 KiB`。
+- `gen-types` lower 阶段 `28.487 s`、RSS `10582400 KiB`；upper 阶段
+  `54.533 s`、RSS `24809368 KiB`。随后在继续生成完整类型/workdir 输出时因可用内存
+  降至约 `768 MiB` 主动发送 SIGTERM，未把部分 `ValueTypes.txt` 或输出 IR 当作完整结果。
+
+### perf 数据
+
+- bottom-up 120 秒：`/tmp/perf-redis-full-20260818-bottomup.data`，11862 samples。
+  平面热点为 `binarysub::resolve_variable` `17.39%`、`std::_Rb_tree_increment`
+  `7.56%`、`skip_cached_or_materialized_variable_edge` `5.50%`，其次是
+  `unifyPNDiffValueGroups`、`getPNIValue`、`collectMaxDirectFieldAccessSizeBytes` 和
+  约束去重哈希。该阶段仍是单线程，优先方向是减少重复变量解析/树遍历和约束任务，而非
+  直接并发修改共享图。
+- simplify/group 300 秒：`/tmp/perf-redis-full-20260818-simplify.data`，186246
+  samples。混合阶段报告中 `CompactTypeBuilder::mergeInsertVars` `48.86%`、
+  `std::_Rb_tree_increment` `21.88%`，说明 canonicalize/group setup 仍被有序集合
+  合并主导。
+- bulk-late 180 秒：`/tmp/perf-redis-full-20260818-bulk-late.data`，86821 samples。
+  热点转为 `TypeSimplifier::applySimplificationPlan` `6.35%`、PersistentSet
+  `pushLeft` `5.10%`、红黑树查找 `4.94%`、PersistentSet `recycleNodeLocked`
+  `4.73%`、`makeNode` `3.89%`；`pthread_mutex_lock/unlock` 与
+  `__lll_lock_wait` 合计约 `3.5%`，另有约 `12%` 未解析内核样本。
+- 同阶段 `perf stat -p` 60 秒：平均 `5.247/8` 核，IPC `0.61`，cache miss
+  `15.77%`，context switch `21,739,021`（约 `69k/s`），CPU migration `49,052`。
+  这更符合指针密集型红黑树/arena 访问与共享 factory 锁/调度等待，而不是算术执行
+  饱和。
+
+### 优化判断
+
+1. bottom-up 的 `resolve_variable`、`std::_Rb_tree_increment` 和约束任务重复传播是
+   独立的单线程优化方向；应先按已物化 direct edge、调用边和 merge 候选做去重，再评估
+   候选收集并行化，不能直接并发 `addSubtype()`。
+2. simplify 早期的 `mergeInsertVars()` 当前为了保持类型结果使用有序 `std::set` 合并；
+   直接替换为无序/向量容器曾改变 HType 结果。可以设计保持
+   `SimpleTypeStableIdentityLess` 顺序的批量 sorted-vector merge，再做严格 HType A/B，
+   不能只看 wall time。
+3. bulk-late 的 PersistentSet factory 在 `CoalesceMemo::Arena` 复制/回收时共享 mutex；
+   可考虑按 worker 分片 arena、批量 clone 后再发布 memo，或减少跨 root 结构复制。该方向
+   有较大收益潜力，但必须保持 hash-cons、共享 memo 生命周期和类型结果不变。
+4. `gen-types` upper 阶段已成为内存瓶颈（约 24.8 GiB），后续应单独 profile
+   `TypeBuilder`/ValueTypes 输出，不能把 simplify 的 7.8 GiB RSS 当成完整 run 峰值。
