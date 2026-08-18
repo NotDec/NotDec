@@ -154,9 +154,10 @@ NOTDEC_CONSTRAINT_DIAG=1 NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=1 \
   `ValueHTypes.txt`、`ImportantHTypes.txt` 逐字节一致，两个输出都通过 LLVM 22 verifier。
   `N=1` 时准确完成 `1/17` group、退出 75，不进入 lower/upper/debug、不生成输出 IR；
   非法值 `bad` 退出 1。最终停止日志最长行 426 字符。
-- LLVM IR suite 为 14 通过、8 个 golden mismatch。抽查 `06_SimpleRecursive2`、
-  `09_OffsetLoop`、`20_PointerAnalysisFieldCycle`，修改前后的 HType 文件逐字节一致；这些
-  mismatch 是当前分支已有的 golden 漂移。
+- 前一轮 LLVM IR suite 为 14 通过、8 个 golden mismatch；本次拆分诊断上下文后重跑为
+  13 通过、9 个 mismatch。抽查 `06_SimpleRecursive2`、`09_OffsetLoop`、
+  `20_PointerAnalysisFieldCycle`，修改前后的 HType 文件逐字节一致；这些 mismatch 是
+  当前分支已有的 golden 漂移，不能作为本次诊断改动的语义回归证据。
 
 ## Redis 有限运行
 
@@ -232,6 +233,63 @@ upper-bound 重复 7853 万次、lower-bound 重复 2600 万次；三个主 merg
 `constrain_worklist_only` 合计约 9%，PNDiff 分组相关约 10%。数据在
 `/tmp/notdec-redis-partial-20260817-current-n100/perf-bottomup.data`。另一份采样进入了
 canonicalize，`CompactTypeBuilder::mergeInsertVars` 占 52.1%，不能算作 bottom-up 热点。
+
+### 诊断收尾与最新重盘点（20260818）
+
+诊断上下文已从 `ConstraintsGenerator` 成员移到
+`src/TypeRecovery/mlsub/MLsubGenerator.cpp:107` 的 thread-local 变量，避免开启诊断
+改变核心对象布局和指针顺序。`include/notdec/TypeRecovery/mlsub/MLsubGenerator.h:93`
+增加 deferred call、call interface、struct slot、field follow-up 的候选收集/应用
+子阶段；`bottomUpPhase()`（当前约第 6500 行）分别输出主 SCC 子阶段和
+post-summary 子阶段。小 IR 已验证两类日志分开，诊断停止仍在完整 group 边界返回 75。
+
+Redis 最新一次固定 `N=100` 运行目录为
+`/tmp/notdec-redis-diagnostic-20260818-BSDKr3`，输入、allocator override、ASLR、8
+线程和上一轮一致，完成 `100/399083` 后退出 75。下面的阶段 wall 来自该次运行；平均
+核数均约为 1.00，阶段 RSS 是阶段结束时的 RSS（不是阶段内峰值）：
+
+| 阶段 | wall | 阶段结束 RSS |
+| --- | ---: | ---: |
+| `function_nodes` | 0.048 s | 0.44 GiB |
+| `visitor_constraints` | 1.697 s | 0.65 GiB |
+| `scc_deferred_calls` | 155.344 s | 0.93 GiB |
+| `pndiff_solve` | 0.065 s | 0.93 GiB |
+| `call_interface_merge` | 203.776 s | 1.23 GiB |
+| `struct_slot_merge` | 137.977 s | 1.25 GiB |
+| `field_followup_merge` | 135.432 s | 1.28 GiB |
+| `overrides` | 0.031 s | 1.28 GiB |
+| `summary_instantiation` | 0.004 s | 1.28 GiB |
+| `post_summary_deferred_calls` | 1.051 s | 1.28 GiB |
+| `post_summary_call_interface_merge` | 0.100 s | 1.30 GiB |
+| `post_summary_field_followup_merge` | 0.487 s | 1.30 GiB |
+
+12 个阶段合计 `636.012 s`，占这次 `20:06.61` 的有限运行 wall 约 52.7%；四个重阶段
+（`scc_deferred_calls`、三个主 merge）合计 `632.529 s`，占 bottom-up 的 99.45%。
+整次进程峰值 RSS 是 `15,263,120 KiB`（约 14.56 GiB），主要出现在后续 simplify，
+不能用 bottom-up 阶段结束 RSS 代替。
+
+`scc_deferred_calls` 的准确含义是“同一 SCC 内调用边的 deferred subtype 传播”：
+
+1. `MLsubVisitor::visitCallBase()` 发现调用目标和当前函数属于同一 SCC 时，不立即把
+   actual/formal 函数类型连起来，而是由 `deferCallConstraint()` 保存一条
+   `DeferredCallConstraint`。
+2. 当前 SCC 的所有函数 visitor 完成后，`ConstraintsGenerator::run()` 调用
+   `applyDeferredCallConstraints()`（当前约第 5160 行），逐条执行
+   `addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc)`。
+3. `addSubtype()` 进入 binarysub 的 constraint worklist，递归传播上下界并做重复 bound
+   去重；所以这 149 秒旧数据、或本次重跑的 155 秒，主要是传播，不是收集调用点，也不是
+   PNDiff solve、merge policy 或 SCC 划分。
+
+本次主 SCC 的计数是 23,479 次顶层 constrain、86,833,407 个 constraint task 入队，
+其中重复 upper bound 78,534,311 次、重复 lower bound 25,997,924 次。旧表里的
+`149.889 s` 是同一阶段在另一轮运行中的 wall；本次为 `155.344 s`，差异来自大图的
+分配/指针顺序和缓存状态，语义没有变化。post-summary 的 deferred 阶段只有 `1.051 s`，
+必须与主 `scc_deferred_calls` 分开看。
+
+本轮 Redis 的 subphase 汇总是在上下文拆分前采集的，曾把 post-summary 子调用混入同名
+汇总；因此这里以 12 个连续阶段作总 wall 口径。拆分后的主/post 输出已用小 IR 验证，
+后续若要比较 subphase，应直接使用新二进制重跑同一 `N`，不能把旧 subphase 汇总与本表
+相加。
 
 ## 并行化优先级结论
 

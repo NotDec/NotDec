@@ -100,6 +100,13 @@ constexpr llvm::StringLiteral kSimplifyStopAfterGroupsEnv =
 
 using GenTypesClock = std::chrono::steady_clock;
 
+// Bottom-up is currently serialized, but keep diagnostic state outside
+// ConstraintsGenerator so enabling diagnostics cannot perturb its layout.
+// Thread-local storage also keeps the context independent if SCC processing
+// is parallelized later.
+thread_local BottomUpTiming *ActiveBottomUpTimingContext = nullptr;
+thread_local bool ActiveBottomUpPostSummaryContext = false;
+
 std::optional<std::size_t> getSimplifyStopAfterGroups() {
   const char *Value = std::getenv(kSimplifyStopAfterGroupsEnv.data());
   if (Value == nullptr || *Value == '\0') {
@@ -219,6 +226,20 @@ BottomUpPhaseTiming finishBottomUpPhase(
           .ConstraintStats = Stats};
 }
 
+void recordBottomUpSubphase(BottomUpTiming *Timing, BottomUpSubstage Stage,
+                            const BottomUpPhaseStart &Start,
+                            std::uint64_t WorkItems, bool PostSummary) {
+  if (Timing == nullptr) {
+    return;
+  }
+  const auto Basic = finishGenTypesPhase(Start.Wall, Start.Cpu);
+  auto &Dst = PostSummary ? Timing->atPostSummary(Stage) : Timing->at(Stage);
+  Dst.WallUs += Basic.WallUs;
+  Dst.CpuUs += Basic.CpuUs;
+  Dst.CpuAvailable = Dst.CpuAvailable && Basic.CpuAvailable;
+  Dst.WorkItems += WorkItems;
+}
+
 void addConstraintSolverStats(binarysub::ConstraintSolverStats &Total,
                               const binarysub::ConstraintSolverStats &Current) {
   Total.constrainCalls += Current.constrainCalls;
@@ -249,6 +270,22 @@ void addBottomUpTiming(BottomUpTiming &Total, const BottomUpTiming &Current) {
     Dst.CpuAvailable = Dst.CpuAvailable && Src.CpuAvailable;
     Dst.ResidentRssKb = std::max(Dst.ResidentRssKb, Src.ResidentRssKb);
     addConstraintSolverStats(Dst.ConstraintStats, Src.ConstraintStats);
+  }
+  for (std::size_t I = 0; I < Total.Subphases.size(); ++I) {
+    auto &Dst = Total.Subphases[I];
+    const auto &Src = Current.Subphases[I];
+    Dst.WallUs += Src.WallUs;
+    Dst.CpuUs += Src.CpuUs;
+    Dst.CpuAvailable = Dst.CpuAvailable && Src.CpuAvailable;
+    Dst.WorkItems += Src.WorkItems;
+  }
+  for (std::size_t I = 0; I < Total.PostSummarySubphases.size(); ++I) {
+    auto &Dst = Total.PostSummarySubphases[I];
+    const auto &Src = Current.PostSummarySubphases[I];
+    Dst.WallUs += Src.WallUs;
+    Dst.CpuUs += Src.CpuUs;
+    Dst.CpuAvailable = Dst.CpuAvailable && Src.CpuAvailable;
+    Dst.WorkItems += Src.WorkItems;
   }
 }
 
@@ -288,6 +325,30 @@ void printBottomUpTimingFields(const BottomUpPhaseTiming &Timing) {
                << " max_constraint_depth="
                << Stats.maxConstraintWorklistDepth
                << " max_merge_depth=" << Stats.maxMergeWorklistDepth;
+}
+
+void printBottomUpSubphaseTimingFields(
+    const BottomUpSubphaseTiming &Timing) {
+  llvm::errs() << " wall_ms=" << Timing.WallUs / 1000 << " cpu_ms=";
+  if (Timing.CpuAvailable) {
+    llvm::errs() << Timing.CpuUs / 1000 << " avg_cores=";
+    if (Timing.WallUs == 0) {
+      llvm::errs() << "unavailable";
+    } else {
+      std::ostringstream Average;
+      Average << std::fixed << std::setprecision(2)
+              << static_cast<double>(Timing.CpuUs) /
+                     static_cast<double>(Timing.WallUs);
+      llvm::errs() << Average.str();
+    }
+  } else {
+    llvm::errs() << "unavailable avg_cores=unavailable";
+  }
+  llvm::errs() << " work_items=" << Timing.WorkItems;
+}
+
+bool hasBottomUpSubphaseTiming(const BottomUpSubphaseTiming &Timing) {
+  return Timing.WallUs != 0 || Timing.CpuUs != 0 || Timing.WorkItems != 0;
 }
 
 bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
@@ -3185,6 +3246,7 @@ void ConstraintsGenerator::emitTypeRecoveryTrace(const std::string &Message) {
 
 BottomUpTiming ConstraintsGenerator::run() {
   BottomUpTiming Timing;
+  ActiveBottomUpTimingContext = &Timing;
   auto Measure = [&](BottomUpStage Stage, auto &&Action) {
     CurrentConstraintStats = {};
     auto Start = startBottomUpPhase(ConstraintDiagEnabled);
@@ -3255,6 +3317,7 @@ BottomUpTiming ConstraintsGenerator::run() {
     llvm::errs() << "Info: struct pointer field follow-up merge policy merged "
                  << Merged << " pair(s)\n";
   });
+  ActiveBottomUpTimingContext = nullptr;
   return Timing;
 }
 
@@ -3949,6 +4012,12 @@ ConstraintsGenerator::collectOneLevelStructPtrFieldTargetGroups(
 std::vector<ConstraintsGenerator::StructFieldFollowupMergeCandidate>
 ConstraintsGenerator::collectStructPtrFieldFollowupMergeCandidatesForMergedOwner(
     SimpleType Owner) const {
+  const bool MeasureSubphases =
+      ConstraintDiagEnabled && ActiveBottomUpTimingContext != nullptr;
+  BottomUpPhaseStart CollectStart;
+  if (MeasureSubphases) {
+    CollectStart = startBottomUpPhase(/*Enabled=*/true);
+  }
   std::vector<StructFieldFollowupMergeCandidate> Candidates;
   Owner = binarysub::resolve_variable(Owner);
   auto TargetGroups = collectOneLevelStructPtrFieldTargetGroups(Owner);
@@ -3992,12 +4061,24 @@ ConstraintsGenerator::collectStructPtrFieldFollowupMergeCandidatesForMergedOwner
       }
     }
   }
+  if (MeasureSubphases) {
+    recordBottomUpSubphase(ActiveBottomUpTimingContext,
+                           BottomUpSubstage::FieldFollowupCandidateCollect,
+                           CollectStart, Candidates.size(),
+                           ActiveBottomUpPostSummaryContext);
+  }
   return Candidates;
 }
 
 std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
   std::size_t Merged = 0;
   while (true) {
+    const bool MeasureSubphases =
+        ConstraintDiagEnabled && ActiveBottomUpTimingContext != nullptr;
+    BottomUpPhaseStart ApplyStart;
+    if (MeasureSubphases) {
+      ApplyStart = startBottomUpPhase(/*Enabled=*/true);
+    }
     bool Changed = false;
     std::set<std::tuple<const binarysub::TypeNode *,
                         const binarysub::TypeNode *, uint64_t>>
@@ -4040,6 +4121,13 @@ std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
       ++Merged;
       Changed = true;
       break;
+    }
+    if (MeasureSubphases) {
+      recordBottomUpSubphase(ActiveBottomUpTimingContext,
+                             BottomUpSubstage::FieldFollowupCandidateApply,
+                             ApplyStart,
+                             StructFieldFollowupMergeCandidates.size(),
+                             ActiveBottomUpPostSummaryContext);
     }
     if (!Changed) {
       return Merged;
@@ -4303,6 +4391,20 @@ static std::string formatCallMergeTarget(const llvm::Function *Target) {
 // A recursive failure rolls every already-processed slot back together.
 static std::size_t applyTransactionalCallSlotMergePolicy(
     ConstraintsGenerator &CG, std::vector<CallSlotMergeEntry> Entries) {
+  const bool MeasureSubphases =
+      CG.ConstraintDiagEnabled && ActiveBottomUpTimingContext != nullptr;
+  auto RecordSubphase = [&](BottomUpSubstage Stage,
+                            const BottomUpPhaseStart &Start,
+                            std::uint64_t WorkItems) {
+    if (MeasureSubphases) {
+      recordBottomUpSubphase(ActiveBottomUpTimingContext, Stage, Start,
+                             WorkItems, ActiveBottomUpPostSummaryContext);
+    }
+  };
+  BottomUpPhaseStart PlanStart;
+  if (MeasureSubphases) {
+    PlanStart = startBottomUpPhase(/*Enabled=*/true);
+  }
   std::vector<CallFunctionMergePlan> Plans;
   std::map<llvm::Function *, std::size_t> TargetToPlan;
   // Index V2N values by their resolved root once per policy application.
@@ -4450,6 +4552,8 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
     }
   }
   Plans = std::move(OrderedPlans);
+  RecordSubphase(BottomUpSubstage::CallInterfacePlan, PlanStart,
+                 Entries.size());
 
   std::vector<CallFormalSlotLabel> FormalSlotLabels;
   for (const auto &Plan : Plans) {
@@ -4470,6 +4574,10 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
     Prepared.reserve(Plan.Groups.size());
     std::optional<std::string> PlanFailure;
     std::string FailureDecision = "precheck-skipped";
+    BottomUpPhaseStart PrecheckStart;
+    if (MeasureSubphases) {
+      PrecheckStart = startBottomUpPhase(/*Enabled=*/true);
+    }
 
     for (auto &Group : Plan.Groups) {
       PreparedCallSlotMergeGroup Item{.Group = &Group};
@@ -4597,6 +4705,9 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
       }
     }
 
+    RecordSubphase(BottomUpSubstage::CallInterfacePrecheck, PrecheckStart,
+                   Prepared.size());
+
     auto RecordDecisions = [&](llvm::StringRef Decision,
                                llvm::StringRef Reason,
                                std::size_t TouchedNodes,
@@ -4650,6 +4761,10 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
       }
     }
 
+    BottomUpPhaseStart TransactionStart;
+    if (MeasureSubphases) {
+      TransactionStart = startBottomUpPhase(/*Enabled=*/true);
+    }
     PendingCallMergeEffects Effects;
     auto QueuePNDiffUnify = [&](const SimpleType &Lhs, const SimpleType &Rhs) {
       if (!CG.EnablePNDiffTypeVariableClosureUnification || !Lhs || !Rhs ||
@@ -4848,6 +4963,8 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
                                TargetName + " touched=" +
                                std::to_string(Transaction.touchedNodeCount()) +
                                " reason=" + *RuntimeFailure);
+      RecordSubphase(BottomUpSubstage::CallInterfaceTransaction,
+                     TransactionStart, Plan.Groups.size());
       continue;
     }
 
@@ -4907,6 +5024,8 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
                              TargetName + " touched=" +
                              std::to_string(Transaction.touchedNodeCount()));
     TotalMerged += PlanMerged;
+    RecordSubphase(BottomUpSubstage::CallInterfaceTransaction,
+                   TransactionStart, Plan.Groups.size());
   }
   return TotalMerged;
 }
@@ -5038,36 +5157,59 @@ void ConstraintsGenerator::deferCallConstraint(
 }
 
 void ConstraintsGenerator::applyDeferredCallConstraints() {
+  auto RunSubphase = [&](BottomUpSubstage Stage, std::uint64_t WorkItems,
+                         auto &&Action) {
+    if (!ConstraintDiagEnabled || ActiveBottomUpTimingContext == nullptr) {
+      Action();
+      return;
+    }
+    auto Start = startBottomUpPhase(/*Enabled=*/true);
+    Action();
+    recordBottomUpSubphase(ActiveBottomUpTimingContext, Stage, Start, WorkItems,
+                           ActiveBottomUpPostSummaryContext);
+  };
   if (EnableEarlyCallInterfaceMerge) {
     // This is intentionally opt-in. It measures how much work can be avoided by
     // eliminating actual/formal edges before propagation, while exposing the
     // risk that later call edges would have supplied new conflict evidence.
-    for (const auto &Deferred : DeferredCallConstraints) {
-      recordCallArgStructPtrMergeCandidates(*Deferred.Call, *Deferred.Target,
-                                            Deferred.ActualFunc,
-                                            Deferred.FormalFunc);
-      recordCallReturnStructPtrMergeCandidates(*Deferred.Call, *Deferred.Target,
-                                               Deferred.ActualFunc,
-                                               Deferred.FormalFunc);
-    }
+    RunSubphase(BottomUpSubstage::DeferredCallCandidateCollect,
+                DeferredCallConstraints.size(), [&] {
+                  for (const auto &Deferred : DeferredCallConstraints) {
+                    recordCallArgStructPtrMergeCandidates(
+                        *Deferred.Call, *Deferred.Target, Deferred.ActualFunc,
+                        Deferred.FormalFunc);
+                    recordCallReturnStructPtrMergeCandidates(
+                        *Deferred.Call, *Deferred.Target, Deferred.ActualFunc,
+                        Deferred.FormalFunc);
+                  }
+                });
     EarlyCallInterfaceMerged += applyCallInterfaceMergePolicy();
-    for (const auto &Deferred : DeferredCallConstraints) {
-      addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
-    }
+    RunSubphase(BottomUpSubstage::DeferredCallSubtype,
+                DeferredCallConstraints.size(), [&] {
+                  for (const auto &Deferred : DeferredCallConstraints) {
+                    addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
+                  }
+                });
   } else {
     // Keep the production ordering exact: every call subtype is added before
     // any candidate is recorded, so the policy sees the completed call graph.
-    for (const auto &Deferred : DeferredCallConstraints) {
-      addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
-    }
-    for (const auto &Deferred : DeferredCallConstraints) {
-      recordCallArgStructPtrMergeCandidates(*Deferred.Call, *Deferred.Target,
-                                            Deferred.ActualFunc,
-                                            Deferred.FormalFunc);
-      recordCallReturnStructPtrMergeCandidates(*Deferred.Call, *Deferred.Target,
-                                               Deferred.ActualFunc,
-                                               Deferred.FormalFunc);
-    }
+    RunSubphase(BottomUpSubstage::DeferredCallSubtype,
+                DeferredCallConstraints.size(), [&] {
+                  for (const auto &Deferred : DeferredCallConstraints) {
+                    addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
+                  }
+                });
+    RunSubphase(BottomUpSubstage::DeferredCallCandidateCollect,
+                DeferredCallConstraints.size(), [&] {
+                  for (const auto &Deferred : DeferredCallConstraints) {
+                    recordCallArgStructPtrMergeCandidates(
+                        *Deferred.Call, *Deferred.Target, Deferred.ActualFunc,
+                        Deferred.FormalFunc);
+                    recordCallReturnStructPtrMergeCandidates(
+                        *Deferred.Call, *Deferred.Target, Deferred.ActualFunc,
+                        Deferred.FormalFunc);
+                  }
+                });
   }
   DeferredCallConstraints.clear();
 }
@@ -5372,6 +5514,12 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
     return hasStructPointerEvidence(Ty);
   };
   while (true) {
+    const bool MeasureSubphases =
+        ConstraintDiagEnabled && ActiveBottomUpTimingContext != nullptr;
+    BottomUpPhaseStart CollectStart;
+    if (MeasureSubphases) {
+      CollectStart = startBottomUpPhase(/*Enabled=*/true);
+    }
     bool Changed = false;
     const bool SlotMergeDiag = std::getenv("NOTDEC_SLOT_MERGE_DIAG") != nullptr;
     auto SlotMergeDiagStart = std::chrono::steady_clock::now();
@@ -5389,6 +5537,12 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
     } else {
       Candidates = collectStructPtrLoadStoreMergeCandidates();
     }
+    if (MeasureSubphases) {
+      recordBottomUpSubphase(
+          ActiveBottomUpTimingContext,
+          BottomUpSubstage::StructSlotCandidateCollect, CollectStart,
+          Candidates.size(), ActiveBottomUpPostSummaryContext);
+    }
     if (SlotMergeDiag) {
       llvm::errs() << "[slot-merge] " << Policy.str()
                    << " round collect_ms=" << SlotMergeDiagElapsedMs(SlotMergeDiagStart)
@@ -5396,6 +5550,10 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
                    << " merged_so_far=" << Merged << "\n";
     }
     SlotMergeDiagCollect = std::chrono::steady_clock::now();
+    BottomUpPhaseStart ApplyStart;
+    if (MeasureSubphases) {
+      ApplyStart = startBottomUpPhase(/*Enabled=*/true);
+    }
 
     for (const auto &Candidate : Candidates) {
       auto FirstTarget = binarysub::resolve_variable(Candidate.FromTarget);
@@ -5434,6 +5592,12 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
       // tmux/redis 这类大输入的 merge policy 因此卡数小时）；失效的
       // 候选会在检查里被跳过，新出现的候选由外层 while 下一轮处理。
       continue;
+    }
+    if (MeasureSubphases) {
+      recordBottomUpSubphase(
+          ActiveBottomUpTimingContext,
+          BottomUpSubstage::StructSlotCandidateApply, ApplyStart,
+          Candidates.size(), ActiveBottomUpPostSummaryContext);
     }
     if (!Changed) {
       if (SlotMergeDiag) {
@@ -6361,6 +6525,19 @@ void MLsubRecovery::bottomUpPhase() {
   };
   static_assert(std::size(StageNames) ==
                 static_cast<std::size_t>(BottomUpStage::Count));
+  static constexpr const char *SubstageNames[] = {
+      "deferred_call_subtype",
+      "deferred_call_candidate_collect",
+      "call_interface_plan",
+      "call_interface_precheck",
+      "call_interface_transaction",
+      "struct_slot_candidate_collect",
+      "struct_slot_candidate_apply",
+      "field_followup_candidate_collect",
+      "field_followup_candidate_apply",
+  };
+  static_assert(std::size(SubstageNames) ==
+                static_cast<std::size_t>(BottomUpSubstage::Count));
   // 与 ConstraintsGenerator::run() 一致：SCC 内函数按名字排序遍历，避免
   // std::set<llvm::Function*> 指针顺序随 ASLR 变化影响 run-to-run 结果。
   auto SortedFunctions = [](const std::set<llvm::Function *> &Funcs) {
@@ -6429,6 +6606,8 @@ void MLsubRecovery::bottomUpPhase() {
     }
 
     auto CurrentTiming = G->run();
+    ActiveBottomUpTimingContext = &CurrentTiming;
+    ActiveBottomUpPostSummaryContext = false;
 
     // 函数内部约束生成完、跨函数调用边未连接：按函数统计约束图规模，
     // 用于评估哪些函数把图撑大。NOTDEC_CONSTRAINT_STATS=1 开启。
@@ -6504,6 +6683,7 @@ void MLsubRecovery::bottomUpPhase() {
                                             Ent.second, InsFunc);
       }
     });
+    ActiveBottomUpPostSummaryContext = true;
     Measure(BottomUpStage::PostSummaryDeferredCalls,
             [&] { Data.Generator->applyDeferredCallConstraints(); });
     Measure(BottomUpStage::PostSummaryCallInterfaceMerge, [&] {
@@ -6526,6 +6706,8 @@ void MLsubRecovery::bottomUpPhase() {
       }
     });
     Data.Generator->unhandledCalls.clear();
+    ActiveBottomUpPostSummaryContext = false;
+    ActiveBottomUpTimingContext = nullptr;
 
     if (ConstraintDiag) {
       for (std::size_t I = 0; I < CurrentTiming.Phases.size(); ++I) {
@@ -6535,6 +6717,29 @@ void MLsubRecovery::bottomUpPhase() {
                      << AG.AllSCCs.size() << " functions=" << Data.SCCSet.size()
                      << " scc=" << llvm::StringRef(Data.SCCName).take_front(80);
         printBottomUpTimingFields(CurrentTiming.Phases[I]);
+        llvm::errs() << "\n";
+      }
+      for (std::size_t I = 0; I < CurrentTiming.Subphases.size(); ++I) {
+        llvm::errs() << "[bottom-up-subphase] stage=" << SubstageNames[I]
+                     << " scc_index=" << Ind
+                     << " bottom_up_done=" << AG.AllSCCs.size() - Ind << "/"
+                     << AG.AllSCCs.size() << " functions=" << Data.SCCSet.size()
+                     << " scc=" << llvm::StringRef(Data.SCCName).take_front(80);
+        printBottomUpSubphaseTimingFields(CurrentTiming.Subphases[I]);
+        llvm::errs() << "\n";
+      }
+      for (std::size_t I = 0;
+           I < CurrentTiming.PostSummarySubphases.size(); ++I) {
+        const auto &Subphase = CurrentTiming.PostSummarySubphases[I];
+        if (!hasBottomUpSubphaseTiming(Subphase)) {
+          continue;
+        }
+        llvm::errs() << "[bottom-up-post-summary-subphase] stage="
+                     << SubstageNames[I] << " scc_index=" << Ind
+                     << " bottom_up_done=" << AG.AllSCCs.size() - Ind << "/"
+                     << AG.AllSCCs.size() << " functions=" << Data.SCCSet.size()
+                     << " scc=" << llvm::StringRef(Data.SCCName).take_front(80);
+        printBottomUpSubphaseTimingFields(Subphase);
         llvm::errs() << "\n";
       }
       llvm::errs() << "[bottom-up-scc-complete] scc_index=" << Ind
@@ -6555,6 +6760,23 @@ void MLsubRecovery::bottomUpPhase() {
       llvm::errs() << "[bottom-up-summary] stage=" << StageNames[I]
                    << " sccs=" << AG.AllSCCs.size();
       printBottomUpTimingFields(TotalTiming->Phases[I]);
+      llvm::errs() << "\n";
+    }
+    for (std::size_t I = 0; I < TotalTiming->Subphases.size(); ++I) {
+      llvm::errs() << "[bottom-up-subphase-summary] stage="
+                   << SubstageNames[I] << " sccs=" << AG.AllSCCs.size();
+      printBottomUpSubphaseTimingFields(TotalTiming->Subphases[I]);
+      llvm::errs() << "\n";
+    }
+    for (std::size_t I = 0;
+         I < TotalTiming->PostSummarySubphases.size(); ++I) {
+      const auto &Subphase = TotalTiming->PostSummarySubphases[I];
+      if (!hasBottomUpSubphaseTiming(Subphase)) {
+        continue;
+      }
+      llvm::errs() << "[bottom-up-post-summary-subphase-summary] stage="
+                   << SubstageNames[I] << " sccs=" << AG.AllSCCs.size();
+      printBottomUpSubphaseTimingFields(Subphase);
       llvm::errs() << "\n";
     }
   }

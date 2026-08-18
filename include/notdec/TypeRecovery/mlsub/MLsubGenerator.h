@@ -86,6 +86,17 @@ struct BottomUpPhaseTiming {
   binarysub::ConstraintSolverStats ConstraintStats;
 };
 
+// These counters split the expensive policy stages without retaining any
+// candidate data after an SCC finishes. WorkItems is the number of entries or
+// candidates seen by that subphase; it is only a scale indicator, not a result
+// count. The whole structure is populated only with NOTDEC_CONSTRAINT_DIAG.
+struct BottomUpSubphaseTiming {
+  std::uint64_t WallUs = 0;
+  std::uint64_t CpuUs = 0;
+  bool CpuAvailable = true;
+  std::uint64_t WorkItems = 0;
+};
+
 enum class BottomUpStage : std::size_t {
   FunctionNodes,
   VisitorConstraints,
@@ -102,16 +113,50 @@ enum class BottomUpStage : std::size_t {
   Count,
 };
 
+enum class BottomUpSubstage : std::size_t {
+  DeferredCallSubtype,
+  DeferredCallCandidateCollect,
+  CallInterfacePlan,
+  CallInterfacePrecheck,
+  CallInterfaceTransaction,
+  StructSlotCandidateCollect,
+  StructSlotCandidateApply,
+  FieldFollowupCandidateCollect,
+  FieldFollowupCandidateApply,
+  Count,
+};
+
 struct BottomUpTiming {
   std::array<BottomUpPhaseTiming,
              static_cast<std::size_t>(BottomUpStage::Count)>
       Phases;
+  std::array<BottomUpSubphaseTiming,
+             static_cast<std::size_t>(BottomUpSubstage::Count)>
+      Subphases;
+  // Cross-SCC summary instantiation reuses the same policy functions. Keep a
+  // second aggregate so their work is not silently charged to the main SCC
+  // stages with similar names.
+  std::array<BottomUpSubphaseTiming,
+             static_cast<std::size_t>(BottomUpSubstage::Count)>
+      PostSummarySubphases;
 
   BottomUpPhaseTiming &at(BottomUpStage Stage) {
     return Phases.at(static_cast<std::size_t>(Stage));
   }
   const BottomUpPhaseTiming &at(BottomUpStage Stage) const {
     return Phases.at(static_cast<std::size_t>(Stage));
+  }
+  BottomUpSubphaseTiming &at(BottomUpSubstage Stage) {
+    return Subphases.at(static_cast<std::size_t>(Stage));
+  }
+  const BottomUpSubphaseTiming &at(BottomUpSubstage Stage) const {
+    return Subphases.at(static_cast<std::size_t>(Stage));
+  }
+  BottomUpSubphaseTiming &atPostSummary(BottomUpSubstage Stage) {
+    return PostSummarySubphases.at(static_cast<std::size_t>(Stage));
+  }
+  const BottomUpSubphaseTiming &atPostSummary(BottomUpSubstage Stage) const {
+    return PostSummarySubphases.at(static_cast<std::size_t>(Stage));
   }
 };
 
