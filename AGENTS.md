@@ -1,33 +1,5 @@
 # Work guidelines
 
-## 0. 语言风格
-
-即使是在说话和思考的时候，也要保持简洁，不造抽象层次的风格。**这一点非常重要，必须从头到尾始终贯彻，即使是在自己思考的过程中**
-1. 说白话，使用更简洁务实的说法，不要过度抽象，不要引入自己造的名词，不要用新术语把问题重新命名。
-2. 不要在特别简单的，比如命名，比如用户已经意识到的，或者肯定知道的问题上大费笔墨，而是思考那些真正关键的地方，真正和当前事情相关，更重要的地方。
-
-## 1. Think Before Coding
-
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-## 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
 # 项目规范
 
 1. 代码一定要多写注释，特别是新引入的数据结构前，说明背后的设计理念。
@@ -36,7 +8,7 @@ Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, sim
    如果只是文档修改，并且前一个 commit 也是同一模块的文档-only 修改，优先用 amend 合并到前一个 commit，必要时同步修改 commit message，减少零碎提交。
 1. 写修改日志时，必须明确指出修改了哪个文件的哪一行，涉及哪些函数。
 1. 尽量复用并改进之前的日志，最好每个功能都单独一个日志。
-1. plan日志重点写问题背景、目标、期望效果、大致技术路线、风险和判断标准，要让没有上下文的人也能看懂；不要过早写成具体实现清单、命令清单或行号清单。实现记录才需要明确写修改了哪个文件的哪一行、涉及哪些函数、验证命令和结果。只有复杂代码修改需要从实现效果、复杂度（增加其他人对项目的理解成本）、后期维护成本三个角度评分，并思考有没有更好的方案。
+1. plan日志重点写问题背景、目标、期望效果、大致技术路线、风险和判断标准，要让没有上下文的人也能看懂；不要过早写成具体实现清单、命令清单或行号清单。实现记录才需要明确写修改了哪个文件的哪一行、涉及哪些函数、验证命令和结果。
    `logs/` 下的 plan 文档顶部必须先保留本次用户的原始 prompt，然后再写背景、目标、路线、风险和判断标准。
 1. 如果当前的任务是对之前的plan日志的实现，则不需要单独创建日志，而是将实现情况写入之前的计划日志，比如将计划的步骤在标题中标记为已完成，记录实现细节，以及调整计划时考虑不全而实现时有所改变的部分。同时也不要使得日志文件过于冗长，简洁一些，包括语言风格上，以及没有真正实现，或者试错的思路都尽量简写。
 1. Goal编写规范：Goal按照一下的三段格式编写：第一段 “基于 logs/xxx.md的规划进行”（启动goal前必须先生成对应规划文档）。第二段：使用200字左右描述当前用什么技术路线处理什么问题。第三段是固定内容，必须放这个原话：遇到了不确定的技术路线选择或计划里明显没有考虑到的事情时暂停goal。样例如下：
