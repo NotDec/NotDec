@@ -5854,6 +5854,7 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
 
 void MLsubRecovery::run() {
   auto &M = const_cast<llvm::Module &>(Mod);
+  LoadedPostConstraintState = false;
   if (!MergeEvalDir.empty()) {
     MergeEval = std::make_shared<MergePolicyEval>(M, MergeEvalDir, PointerSize);
   } else {
@@ -5932,10 +5933,13 @@ void MLsubRecovery::run() {
 
   binarysub::binarysub_set_trace_stream(BinarysubTraceFile.get());
 
-  if (!MemoryType) {
+  // A load run must begin with an empty binarysub context so restore can
+  // recreate the saved variable IDs exactly. Fresh roots are created only for
+  // the constraint-generation path.
+  if (LoadPostConstraintStateDir.empty() && !MemoryType) {
     MemoryType = binarysub::make_variable(0, PointerSize);
   }
-  if (isEVMModule(M) && !StorageType) {
+  if (LoadPostConstraintStateDir.empty() && isEVMModule(M) && !StorageType) {
     StorageType = binarysub::make_variable(0, PointerSize);
   }
 
@@ -6014,17 +6018,29 @@ void MLsubRecovery::run() {
 
   prepareSCC(*CallG);
 
-  bottomUpPhase();
+  if (!LoadPostConstraintStateDir.empty()) {
+    loadPostConstraintState(LoadPostConstraintStateDir, ModuleSHA256Hex);
+  } else {
+    bottomUpPhase();
 
-  topDownConstraintPhase();
+    topDownConstraintPhase();
+
+    if (!EmitPostConstraintStateDir.empty()) {
+      savePostConstraintState(EmitPostConstraintStateDir, ModuleSHA256Hex);
+    }
+  }
 
   solveAndLowerTypes();
 
-  if (WorkDir) {
+  if (WorkDir && !LoadedPostConstraintState) {
     writeCallSlotMergeDecisions(
         join(*WorkDir, kCallSlotMergeDecisionsFile.str()), AG);
     writeLocalSubtypeMergeStats(
         join(*WorkDir, kLocalSubtypeMergeStatsFile.str()), AG);
+  } else if (WorkDir && LoadedPostConstraintState) {
+    llvm::errs() << "Warning: post-constraint checkpoint format version 1 does "
+                    "not restore merge-decision history; skip its workdir "
+                    "diagnostics.\n";
   }
 
   if (WorkDir && ResultVal == nullptr) {

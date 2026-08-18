@@ -18,6 +18,8 @@ struct Options {
   bool fastWorkDir = false;
   std::string mergeEvalDir;
   std::string emitTRInputIR;
+  std::string emitPostConstraintState;
+  std::string loadPostConstraintState;
   bool frozenTRInputIR = false;
   bool mergeStructPtrLoadStore = true;
   std::vector<std::string> primitiveSemanticLatticeFiles;

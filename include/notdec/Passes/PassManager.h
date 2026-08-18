@@ -75,6 +75,9 @@ struct PassEnv {
 
   std::shared_ptr<mlsub::MLsubRecovery> TR;
   std::string MergeEvalDir;
+  std::string EmitPostConstraintState;
+  std::string LoadPostConstraintState;
+  int TypeRecoveryLevel = 0;
   bool MergeStructPtrLoadStore = false;
 
   void prepareTypeRecoveryContext() {
@@ -82,6 +85,9 @@ struct PassEnv {
       TR = std::make_shared<mlsub::MLsubRecovery>(Mod, MAM);
     }
     TR->setMergeEvalDir(MergeEvalDir);
+    TR->setPostConstraintCheckpointDirectories(EmitPostConstraintState,
+                                               LoadPostConstraintState);
+    TR->setTypeRecoveryLevel(TypeRecoveryLevel);
     TR->setMergeStructPtrLoadStore(MergeStructPtrLoadStore);
   }
 
@@ -91,7 +97,9 @@ struct PassEnv {
                     bool frozenTRInputIR = false,
                     llvm::StringRef HTypeDumpPath = "",
                     llvm::StringRef MergeEvalDir = "",
-                    bool MergeStructPtrLoadStore = false);
+                    bool MergeStructPtrLoadStore = false,
+                    llvm::StringRef EmitPostConstraintState = "",
+                    llvm::StringRef LoadPostConstraintState = "");
   void add_llvm2c(std::string OutFilePath, ::notdec::llvm2c::Options llvm2cOpt,
                   bool disableTypeRecovery);
   void add_solidity(std::string OutFilePath);
@@ -134,7 +142,9 @@ struct DecompileConfig {
     }
     PE.build_passes(EffectiveLevel, EmitTRInputIR, FrozenTRInputIR,
                     HTypeDumpPath, Opts.mergeEvalDir,
-                    Opts.mergeStructPtrLoadStore);
+                    Opts.mergeStructPtrLoadStore,
+                    Opts.emitPostConstraintState,
+                    Opts.loadPostConstraintState);
     if (EmitTRInputIR) {
       return;
     }

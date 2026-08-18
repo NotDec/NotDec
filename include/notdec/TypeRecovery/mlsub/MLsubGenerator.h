@@ -730,6 +730,10 @@ class MLsubRecovery {
   const char *SignatureFile = std::getenv("NOTDEC_SIGNATURE_OVERRIDE");
   const char *ExtraConstraintsFile = std::getenv("NOTDEC_EXTRA_CONSTRAINTS");
   std::string MergeEvalDir;
+  std::string EmitPostConstraintStateDir;
+  std::string LoadPostConstraintStateDir;
+  int TypeRecoveryLevel = 0;
+  bool LoadedPostConstraintState = false;
   std::shared_ptr<MergePolicyEval> MergeEval;
   bool EnableStructPtrLoadStoreMerge = false;
   // Generic allocator wrappers must become SCC summary boundaries before
@@ -780,6 +784,35 @@ public:
       : Mod(Mod), MAM(MAM) {}
 
   void setMergeEvalDir(std::string Dir) { MergeEvalDir = std::move(Dir); }
+  void setPostConstraintCheckpointDirectories(std::string EmitDir,
+                                              std::string LoadDir) {
+    EmitPostConstraintStateDir = std::move(EmitDir);
+    LoadPostConstraintStateDir = std::move(LoadDir);
+  }
+  void setTypeRecoveryLevel(int Level) { TypeRecoveryLevel = Level; }
+  const llvm::Module &getCheckpointModule() const { return Mod; }
+  llvm::StringRef getCheckpointDataLayout() const { return data_layout; }
+  unsigned getCheckpointPointerSize() const { return PointerSize; }
+  int getCheckpointTypeRecoveryLevel() const { return TypeRecoveryLevel; }
+  bool getCheckpointStructMergeEnabled() const {
+    return EnableStructPtrLoadStoreMerge;
+  }
+  const llvm::json::Value &getCheckpointSummaryDoc() const {
+    return SummaryOverrideDoc;
+  }
+  const llvm::json::Value &getCheckpointSignatureDoc() const {
+    return SignatureOverrideDoc;
+  }
+  const llvm::json::Value &getCheckpointExtraConstraintsDoc() const {
+    return ExtraConstraintsDoc;
+  }
+  const std::set<llvm::Function *> &getCheckpointMallocWrappers() const {
+    return DetectedMallocWrappers;
+  }
+  const std::set<llvm::Function *> &
+  getCheckpointPolymorphicBufferFunctions() const {
+    return DetectedPolymorphicBufferFunctions;
+  }
   void setMergeStructPtrLoadStore(bool Enable) {
     EnableStructPtrLoadStoreMerge = Enable;
   }
@@ -822,6 +855,10 @@ public:
   // intentionally remains an explicit no-op between bottom-up generation and
   // CompactType/HType solving.
   void topDownConstraintPhase();
+  void savePostConstraintState(llvm::StringRef Directory,
+                               llvm::StringRef ModuleSHA256Hex);
+  void loadPostConstraintState(llvm::StringRef Directory,
+                               llvm::StringRef ModuleSHA256Hex);
   // Solve the completed SimpleType graph and lower each SCC result to HType.
   void solveAndLowerTypes();
 

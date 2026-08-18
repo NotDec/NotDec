@@ -140,6 +140,20 @@ static cl::opt<bool> frozenTRInputIR(
              "requires --tr-level >= 2."),
     cl::init(false), cl::cat(NotdecCat));
 
+static cl::opt<std::string> emitPostConstraintState(
+    "emit-post-constraint-state",
+    cl::desc("Save the completed post-constraint/pre-simplify type-recovery "
+             "state to a new directory, then continue solving."),
+    cl::init(""), cl::value_desc("directory"), cl::Optional,
+    cl::cat(NotdecCat));
+
+static cl::opt<std::string> loadPostConstraintState(
+    "load-post-constraint-state",
+    cl::desc("Load a post-constraint/pre-simplify type-recovery state and skip "
+             "constraint generation."),
+    cl::init(""), cl::value_desc("directory"), cl::Optional,
+    cl::cat(NotdecCat));
+
 // https://llvm.org/docs/ProgrammersManual.html#the-llvm-debug-macro-and-debug-option
 // initialize function for the fine-grained debug info with DEBUG_TYPE and the
 // -debug-only option
@@ -291,6 +305,41 @@ int main(int argc, char *argv[]) {
                     "--emit-tr-input-ir.\n";
     return 1;
   }
+  const bool HasPostConstraintCheckpoint =
+      !emitPostConstraintState.empty() || !loadPostConstraintState.empty();
+  if (!emitPostConstraintState.empty() && !loadPostConstraintState.empty()) {
+    llvm::errs() << "Error: --emit-post-constraint-state and "
+                    "--load-post-constraint-state cannot be used together.\n";
+    return 1;
+  }
+  if (HasPostConstraintCheckpoint && !emitTRInputIR.empty()) {
+    llvm::errs() << "Error: post-constraint checkpoint options cannot be "
+                    "combined with --emit-tr-input-ir.\n";
+    return 1;
+  }
+  if (HasPostConstraintCheckpoint && !frozenTRInputIR) {
+    llvm::errs() << "Error: post-constraint checkpoint options require "
+                    "--frozen-tr-input-ir.\n";
+    printFrozenTRInputWorkflowHint(inputFilename);
+    return 1;
+  }
+  if (HasPostConstraintCheckpoint && insuffix != ".ll" && insuffix != ".bc") {
+    llvm::errs() << "Error: post-constraint checkpoint options require a "
+                    "frozen .ll or .bc input, but current input has suffix "
+                 << InputSuffixDesc << ".\n";
+    return 1;
+  }
+  if (HasPostConstraintCheckpoint && trLevel < 2) {
+    llvm::errs() << "Error: post-constraint checkpoint options require "
+                    "--tr-level >= 2.\n";
+    return 1;
+  }
+  if (!loadPostConstraintState.empty() && !mergeEvalDir.empty()) {
+    llvm::errs() << "Error: --load-post-constraint-state cannot currently be "
+                    "combined with --merge-eval-dir because historical merge "
+                    "witnesses are not in the checkpoint.\n";
+    return 1;
+  }
   if (ExtraConstraintsFile != nullptr && !emitTRInputIR.empty()) {
     llvm::errs() << "Error: NOTDEC_EXTRA_CONSTRAINTS cannot be combined with "
                     "--emit-tr-input-ir.\n"
@@ -329,6 +378,8 @@ int main(int argc, char *argv[]) {
                                    primitiveSemanticLatticeFiles.end()),
   };
   opts.emitTRInputIR = emitTRInputIR;
+  opts.emitPostConstraintState = emitPostConstraintState;
+  opts.loadPostConstraintState = loadPostConstraintState;
   opts.mergeEvalDir = mergeEvalDir;
   opts.mergeStructPtrLoadStore = mergeStructPtrLoadStore;
   opts.frozenTRInputIR = frozenTRInputIR;

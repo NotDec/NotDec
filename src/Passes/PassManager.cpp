@@ -496,8 +496,13 @@ void PassEnv::add_type_recovery_passes(int level, bool SplitFreePhi) {
 void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
                            bool frozenTRInputIR, StringRef HTypeDumpPath,
                            StringRef MergeEvalDirArg,
-                           bool MergeStructPtrLoadStoreArg) {
+                           bool MergeStructPtrLoadStoreArg,
+                           StringRef EmitPostConstraintStateArg,
+                           StringRef LoadPostConstraintStateArg) {
   MergeEvalDir = MergeEvalDirArg.str();
+  EmitPostConstraintState = EmitPostConstraintStateArg.str();
+  LoadPostConstraintState = LoadPostConstraintStateArg.str();
+  TypeRecoveryLevel = level;
   MergeStructPtrLoadStore = MergeStructPtrLoadStoreArg;
   TargetArch Arch = classifyTargetArch(Mod.getTargetTriple().getTriple());
   switch (Arch) {

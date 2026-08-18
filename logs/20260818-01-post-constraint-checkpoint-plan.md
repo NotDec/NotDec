@@ -373,3 +373,73 @@ bottom-up 和 top-down constraint phase。将来加入真实 top-down 传播后�
 - 不为了 checkpoint 顺便重构 CompactType/UType 或 HType lowering。
 - 不在本计划中决定 Redis 后续并行化算法；并行化仍依赖无 group 上限 perf 和
   checkpoint 加速后的实验反馈。
+
+## 实现记录（2026-08-18）
+
+### 已完成
+
+- **阶段边界**：`src/TypeRecovery/mlsub/MLsubGenerator.cpp:5855` 的
+  `MLsubRecovery::run()` 保持 `bottomUpPhase()` -> 空的
+  `topDownConstraintPhase()` -> `solveAndLowerTypes()` 顺序；save 位于空阶段之后，load
+  直接跳过两个约束阶段。没有实现真正的 top-down propagation，也没有加入 post-simplify
+  checkpoint。
+- **SimpleType 图**：`external/binarysub/include/binarysub/SimpleTypeSnapshot.h:72-86` 和
+  `src/SimpleTypeSnapshot.cpp:181,307,546,609` 新增版本化二进制 snapshot/restore API。节点、边、变量 ID、
+  merge representative、fresh-variable supply 都使用 checkpoint-local ID；恢复时重建
+  bound set、ptr-load/store index 和 `nestedBoundUsers`。bound vector 的重复槽位会保留，
+  因为 merge rewrite 可能只去重存在性索引而不重排遍历向量。
+- **CLI 与原子目录**：`src/NotDec.cpp:144-150,308-337`、
+  `include/notdec/DecompilerContext.h`、`include/notdec/Passes/PassManager.h`、
+  `src/Passes/PassManager.cpp:496` 接入
+  `--emit-post-constraint-state=<dir>` 和 `--load-post-constraint-state=<dir>`，校验
+  frozen `.ll/.bc`、`tr-level >= 2`、互斥选项和已有目标目录。新增的
+  `src/TypeRecovery/mlsub/PostConstraintCheckpoint.cpp:1368,1452` 的
+  `MLsubRecovery::savePostConstraintState()` / `loadPostConstraintState()` 写入临时目录后
+  rename，manifest 校验 stage、IR SHA-256、target/data layout、配置摘要、ABI 和图统计。
+- **Value 与 SCC 状态**：`src/TypeRecovery/mlsub/PostConstraintCheckpoint.cpp:264,632,726,801,982` 的
+  `ValueCatalog`、`resolveValueSelectors()` 和 semantic state serializer 不保存
+  `llvm::Value *`。typed selector 覆盖普通 Value、ReturnValue、UConstant、ConstantAddr、
+  StackObject、HeapObject，并遍历指令及按需遍历常量 DAG/全局 initializer。SCC 名称、函数
+  集合、V2N、contra/origin、memory/storage roots、storage fields 和 EVM store evidence
+  均可恢复。
+- **PNDiff**：`external/binarysub/include/binarysub/PNDiff.h:266`、`src/PNDiff.cpp:623` 增加
+  `restorePNINode()`，checkpoint 保存等价类、lattice/conflict、add/sub constraints、
+  worklist、instruction selector 和 `NextConsSeq`，恢复后可继续生成 annotated IR 与
+  warning。Merge-decision history 尚未保存；load 若请求 `--merge-eval-dir` 会明确失败，
+  manifest 也标记 `merge_eval_history_saved=false`。
+- **诊断与失败路径**：save/load 日志增加 wall、CPU 和 peak RSS；二进制 reader 会报告
+  实际文件名。selector 缺失/碰撞、hash/config/schema 不匹配、图/mapping/PNDiff 截断、
+  save/load 同时指定和 merge-eval 冲突均在 solve 前失败。
+
+### 验证结果
+
+- `10_BottomUp1.ll`、ConstantAddr、Stack、EVM heap、EVM aggregate return、EVM storage
+  bytes 等 save/load 对照中，`ValueTypes.txt`、`ValueHTypes.txt`、`ImportantHTypes.txt`、
+  `VarOrigins.txt`、`PNDiff.warn.txt`、`03-pndiff-final.ll` 和输出 IR 均逐字节一致；非
+  `--fast-work-dir` 模式也通过。输出 IR 用 LLVM 22 `llvm-as` 检查。
+- binarysub 新增 `test_simple_type_snapshot_round_trip()` 覆盖 recursive bounds、重复
+  bound vector、record/function（含 void null result）、ptr-load/store、merge、nested
+  users、fresh ID 和截断输入。完整 `./build/binarysub` 仍在既有
+  `test_local_persistent_set()` assertion 处提前失败，未进入该测试。
+- lighttpd frozen stage-B（约 6.3 万图节点、5.3 万 selector）保存约 9 秒、checkpoint
+  约 23.6 MB；修复重复 bound vector 后 load 成功，restore 日志约 18 秒、peak RSS 约
+  300 MiB。该结果表明 checkpoint 复用成本明显低于重新生成约束，Value selector 扫描和
+  PNDiff/图恢复仍是后续可优化的对象。
+- 手工负向测试覆盖互斥参数、缺少 frozen、已有目标目录、IR hash mismatch、三类截断
+  文件和 merge-eval load rejection，均按预期非零退出且没有 HType 输出。
+
+### Redis 验证
+
+Redis stage-B 使用固定 frozen IR、allocator summary、ASLR disabled、8 threads 和
+`NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=1` 验证，checkpoint 位于
+`/tmp/notdec-checkpoint-redis.g9ke4Q/state`：
+
+- bottom-up 到保存边界 `9:53.06`；save 函数自身 `wall=52.814 s`、`cpu=52.809 s`、
+  `peak_rss=1,797,652 KiB`。图 `314,398` nodes / `201,150` roots，Value selector
+  `252,955`，文件合计约 `88 MiB`（graph 60 MB、mapping 22 MB、PNDiff 5.4 MB）。
+- load 恢复函数 `wall=13.444 s`、`cpu=13.443 s`、`peak_rss=1,226,120 KiB`，日志明确
+  输出 `bottom_up_skipped=true top_down_skipped=true pndiff_state_restored=true`。
+  这是约束生成近十分钟与 checkpoint 恢复十几秒的直接对照。
+- load 后第一个 simplify group 仍需约四分钟，整次被诊断停止时 peak RSS 约 3.7 GiB；
+  因此 checkpoint 只缩短前置约束反馈，不代表 CompactType simplify 已解决。保存和加载
+  run 都在 checkpoint 完成后主动终止，未把部分 simplify 结果当成完整回归依据。

@@ -32,6 +32,7 @@ add_library(notdec-core STATIC
 	TypeRecovery/mlsub/HTypeNormalize.cpp
 	TypeRecovery/mlsub/MergePolicyEval.cpp
 	TypeRecovery/mlsub/MLsubGenerator.cpp
+	TypeRecovery/mlsub/PostConstraintCheckpoint.cpp
 	TypeRecovery/mlsub/Schema.cpp
 	Utils/Utils.cpp
 )
