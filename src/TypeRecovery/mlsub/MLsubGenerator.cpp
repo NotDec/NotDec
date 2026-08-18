@@ -2194,6 +2194,39 @@ void appendDebugValueTypes(
               return Lhs.SortPrefix < Rhs.SortPrefix;
             });
 
+  auto findSolvedType = [&](const DebugValueTypeEntry &Entry, bool Pos)
+      -> binarysub::UTypePtr {
+    if (!Entry.Type->isVariableState()) {
+      return nullptr;
+    }
+    auto It = Res.find(binarysub::PolarVar{.var = Entry.Type, .pos = Pos});
+    if (It == Res.end() || !It->second) {
+      return nullptr;
+    }
+    return It->second;
+  };
+
+  // Build one printer for the whole SCC section. This lets a recursive record
+  // shared by many value rows be declared once before the rows instead of
+  // repeating the same declaration in every printType() result.
+  std::vector<binarysub::UTypePtr> PrintRoots;
+  PrintRoots.reserve(Entries.size() * 2 + (SolveMemory ? 1 : 0));
+  for (const auto &Entry : Entries) {
+    if (auto Lower = findSolvedType(Entry, true)) {
+      PrintRoots.push_back(Lower);
+    }
+    if (auto Upper = findSolvedType(Entry, false)) {
+      PrintRoots.push_back(Upper);
+    }
+  }
+  if (SolveMemory) {
+    auto It = Res.find(PolMem);
+    if (It != Res.end() && It->second) {
+      PrintRoots.push_back(It->second);
+    }
+  }
+  binarysub::UTypePrintSession PrintSession(PrintRoots);
+
   auto formatSolvedType = [&](const DebugValueTypeEntry &Entry, bool Pos) {
     if (!Entry.Type->isVariableState()) {
       return binarysub::debug_string(Entry.Type);
@@ -2202,7 +2235,7 @@ void appendDebugValueTypes(
     if (It == Res.end() || !It->second) {
       return std::string("<null>");
     }
-    return binarysub::printType(It->second);
+    return PrintSession.print(It->second);
   };
   auto formatLine = [&](const DebugValueTypeEntry &Entry) {
     return Entry.SortPrefix + " => lower=" + formatSolvedType(Entry, true) +
@@ -2214,6 +2247,10 @@ void appendDebugValueTypes(
   };
 
   Out << "## SCC: " << SCCName << "\n";
+  if (PrintSession.hasDeclarations()) {
+    Out << "### Shared UTypes\n";
+    Out << PrintSession.printDeclarations() << "\n";
+  }
   for (std::size_t Begin = 0; Begin < Entries.size();) {
     std::size_t End = Begin + 1;
     while (End < Entries.size() &&
@@ -2245,7 +2282,7 @@ void appendDebugValueTypes(
     if (It == Res.end() || !It->second) {
       Out << "<null>";
     } else {
-      Out << binarysub::printType(It->second);
+      Out << PrintSession.print(It->second);
     }
     Out << "\n";
   }

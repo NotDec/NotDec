@@ -299,8 +299,8 @@ pol，两者不匹配）。
   binarysub.cpp:4023-4029、4097-4104、4051、4201。输出 UType 由此成为
   共享 DAG。
 - analyzeOccurrences 加 (节点, 极性) visited（binarysub.cpp:3502-3508）、
-  collectVars 加 visited（binarysub.cpp:3610 附近）、printTypeImpl 加
-  seen 共享检测，重复引用打印省略号（binarysub.cpp:551-566）。
+  collectVars 加 visited（binarysub.cpp:3610 附近）。UType 输出随后改为共享节点
+  声明表 + `@uN` 引用，避免用省略号隐藏重复结构（详见下方 20260818 更新）。
 
 ### 验证
 
@@ -348,3 +348,32 @@ ctest `llvm_ir.tr_level_2` 通过；`sysy` 9 失败与 `realworld/fortune` 失�
   sha256 过期）。
 - 探针文件与脚本（analyze-type-graph.py 等）仍在仓库；SimpleType 层探针
   无效已确认，compact 探针保留可删。
+
+## UType 共享声明打印（20260818）
+
+### 实现
+
+- `external/binarysub/include/binarysub/binarysub.h` 新增
+  `UTypePrintSession`；`external/binarysub/src/binarysub.cpp` 的
+  `collectUTypeReferences()`、`assignSharedUTypeIds()` 和 `printUTypeImpl()`
+  在整个 root 集合上统计引用并按确定的 DFS 后序顺序分配 `@uN`。
+- 被多处引用的复杂节点在声明区只打印一次；`UTop`、`UBot`、primitive、变量和空
+  record 继续直接展开。删除原先把重复节点打印成 `…` 的路径省略。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:appendDebugValueTypes()` 为每个 SCC
+  建立一个 `UTypePrintSession`，在 `## SCC` 后写 `### Shared UTypes` 声明区，后续
+  `ValueTypes.txt` 的 lower/upper 行只写 `@uN` 引用；这样不会为每个 value 重复声明。
+- `external/binarysub/src/binarysub-test.cpp:test_utype_pretty_printing()` 覆盖简单
+  重复叶子、复杂共享 record/function、SCC session，以及共享递归类型的新文本格式。
+  递归 producer-consumer 和 misc 中原先依赖省略号的 golden 改为完整结构或声明引用。
+
+### 验证
+
+- `cmake --build ./build --target binarysub notdec TypeBuilderTest -j4` 通过。
+- `TypeBuilderTest` 9/9 通过；通过 gdb 独立调用 `test_utype_pretty_printing()` 返回 0。
+- 小型 `01_Simple1.ll` 和递归 `11_SimpleRecursive1.ll` workdir 跑通；后者的
+  `ValueTypes.txt` 已在 SCC 开头输出 `@u1`、`@u2`、`@u3` 声明，value 行使用引用。
+- 完整 `./build/binarysub` 已通过 parsing、mlsub、top-level polymorphism、recursive
+  producer-consumer、misc 和 pointer-record 前置测试，随后仍在仓库已有的
+  `test_local_persistent_set()` 第 563 行断言停止，与本打印修改无关。
+- `ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2`：14 项通过、8
+  项已有 htypes mismatch；本改动只改变 UType 文本诊断，不改变 HType 推理语义。
