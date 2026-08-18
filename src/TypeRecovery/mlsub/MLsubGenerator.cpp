@@ -251,9 +251,9 @@ void addConstraintSolverStats(binarysub::ConstraintSolverStats &Total,
   Total.mergeTasksPopped += Current.mergeTasksPopped;
   Total.mergeTasksProcessed += Current.mergeTasksProcessed;
   Total.upperBoundsAdded += Current.upperBoundsAdded;
-  Total.upperBoundDuplicates += Current.upperBoundDuplicates;
   Total.lowerBoundsAdded += Current.lowerBoundsAdded;
-  Total.lowerBoundDuplicates += Current.lowerBoundDuplicates;
+  Total.directVariableEdgeFastPathHits +=
+      Current.directVariableEdgeFastPathHits;
   Total.maxConstraintWorklistDepth =
       std::max(Total.maxConstraintWorklistDepth,
                Current.maxConstraintWorklistDepth);
@@ -319,9 +319,9 @@ void printBottomUpTimingFields(const BottomUpPhaseTiming &Timing) {
                << " merge_popped=" << Stats.mergeTasksPopped
                << " merge_processed=" << Stats.mergeTasksProcessed
                << " upper_added=" << Stats.upperBoundsAdded
-               << " upper_duplicate=" << Stats.upperBoundDuplicates
                << " lower_added=" << Stats.lowerBoundsAdded
-               << " lower_duplicate=" << Stats.lowerBoundDuplicates
+               << " direct_edge_fastpath="
+               << Stats.directVariableEdgeFastPathHits
                << " max_constraint_depth="
                << Stats.maxConstraintWorklistDepth
                << " max_merge_depth=" << Stats.maxMergeWorklistDepth;
@@ -3329,6 +3329,10 @@ bool ConstraintsGenerator::configureConstraintContext(
       -> binarysub::expected<bool, binarysub::Error> {
     return shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
   };
+  // The bound-added and nested-rewrite hooks below rescan direct variable
+  // neighbors whenever pointer/struct evidence changes. An existing direct
+  // edge therefore needs no policy recheck until one of those hooks fires.
+  Context.mergePolicyRechecksOnEvidenceChange = true;
   Context.onVariableNonVarBoundAdded =
       [this](const SimpleType &Var, const SimpleType &Bound,
              binarysub::BoundPolarity Polarity,

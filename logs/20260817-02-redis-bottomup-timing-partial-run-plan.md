@@ -51,9 +51,11 @@ override、跨 SCC summary 实例化、post-summary deferred constraint 和 merg
 ### 递归约束工作量
 
 `addSubtype()` 每次进入 `binarysub::constrain()` 后，会在局部 constraint worklist 和
-merge worklist 中继续传播。诊断计数放在这两个真实循环中，至少记录顶层 constrain
-调用、constraint task、merge task、新增上下界、重复上下界和最大 worklist 深度。
-计数通过可选诊断对象传入，不开启时只保留一次空指针判断，不引入原子操作或全局锁。
+merge worklist 中继续传播。诊断计数放在这两个真实循环中，记录顶层 constrain 调用、
+constraint task、merge task、新增上下界、direct variable edge fast path 命中和最大
+worklist 深度。此前的重复 upper/lower bound 计数只表示失败的 bound-set 查找，不能
+直接代表新增工作量，已从统计接口移除。计数通过可选诊断对象传入，不开启时只保留
+一次空指针判断，不引入原子操作或全局锁。
 
 阶段时间回答“哪一段慢”，worklist/merge/bound 计数回答“慢是因为工作量增大，还是
 每个任务变贵”。两者结合 perf 才能判断后续优化方向。
@@ -115,8 +117,9 @@ NotDec 在类型转换前识别该状态，打印最终统计并以专门的非�
 ### 代码
 
 - `external/binarysub/include/binarysub/binarysub-core.h:593` 增加
-  `ConstraintSolverStats`；`src/binarysub-core.cpp:1941` 的 `constrain()` 和第 2074 行的
-  `merge_variable_into()` 统计真实 worklist、merge、bound 新增/重复和最大深度。
+  `ConstraintSolverStats`；`src/binarysub-core.cpp` 的 `constrain()` 和
+  `constrain_worklist_only()` 统计真实 worklist、merge、bound 新增、direct variable
+  edge fast path 命中和最大深度。重复 upper/lower bound 字段及其输出已删除。
 - `external/binarysub/include/binarysub/binarysub.h:1115` 扩展
   `BulkSimplifyResult/Options`；`src/binarysub.cpp:5928` 的
   `bulkSimplifyDetailed()` 严格处理前 N 个 group，停止时返回空类型表和明确状态。
@@ -223,10 +226,10 @@ canonicalize 为 255.839 s，方向一致，但不用于正式百分比。
 | `post_summary_field_followup_merge` | 0.471 s | 0.1% |
 
 前四个重阶段合计 609.921 s，占 bottom-up 99.4%，占这次有限运行 58.9%。普通 visitor
-只有 1.674 s，不值得优先并行。`scc_deferred_calls` 入队 8683 万个约束任务，其中
-upper-bound 重复 7853 万次、lower-bound 重复 2600 万次；三个主 merge 阶段又处理了
-约 2913 万个约束任务。这里的主要成本是递归传播和重复 bound，不是生成 LLVM 指令
-对应的顶层约束。
+只有 1.674 s，不值得优先并行。`scc_deferred_calls` 入队 8683 万个约束任务；三个主
+merge 阶段又处理了约 2913 万个约束任务。旧诊断曾额外统计 upper/lower bound 失败查找，
+但这些计数不等于新增 worklist 或完整传播，后续已删除；当前以 task 数、merge 数和
+fast path 命中数作为更直接的工作量指标。
 
 30 秒 perf 样本中，`resolve_variable` 占 23.8%，
 `collectMaxDirectFieldAccessSizeBytes` 占 8.4%，约束去重哈希插入约 7%，
@@ -276,15 +279,15 @@ Redis 最新一次固定 `N=100` 运行目录为
 2. 当前 SCC 的所有函数 visitor 完成后，`ConstraintsGenerator::run()` 调用
    `applyDeferredCallConstraints()`（当前约第 5160 行），逐条执行
    `addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc)`。
-3. `addSubtype()` 进入 binarysub 的 constraint worklist，递归传播上下界并做重复 bound
-   去重；所以这 149 秒旧数据、或本次重跑的 155 秒，主要是传播，不是收集调用点，也不是
-   PNDiff solve、merge policy 或 SCC 划分。
+3. `addSubtype()` 进入 binarysub 的 constraint worklist，递归传播上下界；已经物化的
+   变量间直接边现在在入队前走 fast path。所以这 149 秒旧数据、或本次重跑的 155 秒，
+   主要仍需结合 task/merge 数和 perf 判断，不再用失败 bound 查找计数推断传播成本。
 
-本次主 SCC 的计数是 23,479 次顶层 constrain、86,833,407 个 constraint task 入队，
-其中重复 upper bound 78,534,311 次、重复 lower bound 25,997,924 次。旧表里的
-`149.889 s` 是同一阶段在另一轮运行中的 wall；本次为 `155.344 s`，差异来自大图的
-分配/指针顺序和缓存状态，语义没有变化。post-summary 的 deferred 阶段只有 `1.051 s`，
-必须与主 `scc_deferred_calls` 分开看。
+本次主 SCC 的历史计数是 23,479 次顶层 constrain、86,833,407 个 constraint task 入队；
+旧表里的 `149.889 s` 是同一阶段在另一轮运行中的 wall；本次为 `155.344 s`，差异来自
+大图的分配/指针顺序和缓存状态，语义没有变化。旧 upper/lower duplicate 计数已删除，
+后续比较应使用新的 direct-edge fast path 命中数和 task/merge 统计。post-summary 的
+deferred 阶段只有 `1.051 s`，必须与主 `scc_deferred_calls` 分开看。
 
 本轮 Redis 的 subphase 汇总是在上下文拆分前采集的，曾把 post-summary 子调用混入同名
 汇总；因此这里以 12 个连续阶段作总 wall 口径。拆分后的主/post 输出已用小 IR 验证，
@@ -296,9 +299,9 @@ Redis 最新一次固定 `N=100` 运行目录为
 1. 第一优先是三个 merge policy 和 SCC deferred-call 传播。先把每个 merge 阶段再分成
    候选收集、预检查、实际 merge/递归传播三段。候选收集可按函数、call slot 或 struct
    slot 并行，输出稳定排序的候选；实际 merge 暂时串行应用，先测可并行部分的上限。
-2. deferred-call 不能直接并发修改 `VariableState`。7853 万次重复 upper bound 表明先减少
-   重复传播可能比加锁并行更划算。可考虑带版本号的跨顶层约束去重，或先按互不相交的
-   约束图分量分批；若 Redis 大 SCC 最终只有一个连通分量，就不做分量并行。
+2. deferred-call 不能直接并发修改 `VariableState`。先用现有 bound set 识别已经物化的
+   变量直接边，避免重复进入 worklist；再根据 fast path 命中率决定是否需要更大的跨顶层
+   增量队列。若 Redis 大 SCC 最终只有一个连通分量，就不做分量并行。
 3. `group_setup` 单核 101 s，占整次有限运行 9.7%，在 256 核上会更突出。可把 root 的
    key 计算和局部分组并行，再稳定排序/合并；必须同时测内存，因为该阶段 RSS 增长约
    5.8 GiB。
@@ -360,3 +363,31 @@ Redis 最新一次固定 `N=100` 运行目录为
 结论：先保留这个小实验作为 transaction 语义基础，但不把它当成主要性能优化。下一步应
   用命中/失效计数确认 cache 是否被频繁清空；若命中率低，优先转向减少重复 constraint
   传播或做只读候选收集并行化。
+
+## direct variable edge fast path（20260818）
+
+### 实现
+
+- `external/binarysub/include/binarysub/binarysub-core.h` 的 `ConstraintSolverStats`
+  删除 `upperBoundDuplicates` / `lowerBoundDuplicates`；这两个字段统计的是失败的
+  bound-set 查找，容易被误读为新增传播工作。新增
+  `directVariableEdgeFastPathHits`，只统计实际跳过 worklist 入队的变量直接边。
+- `external/binarysub/src/binarysub-core.cpp` 的
+  `skip_cached_or_materialized_variable_edge()` 复用变量已有的
+  `upperBoundSet/lowerBoundSet`。变量 pair 已经物化时，先写入本次调用 Cache、调用一次
+  Observer，再跳过 constraint worklist；未知 merge policy 默认不启用该跳过，NotDec
+  通过 `mergePolicyRechecksOnEvidenceChange` 明确声明其 evidence hook 会重新扫描邻边。
+- 两个 constraint worklist 的 `AddToWorklist()` 都使用同一 fast path，因此既覆盖顶层
+  重复 seed，也覆盖函数/record 展开产生的重复变量 pair。新增 bound、nested rewrite 和
+  merge 的现有传播路径不变。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp` 汇总和输出 fast path 命中数，并删除旧的
+  duplicate 字段；`external/binarysub/src/binarysub-test.cpp` 增加重复函数边、重复顶层
+  变量边、Observer 可见性、反向边自动 merge，以及晚绑定 merge policy 的测试。
+
+### 验证
+
+- `cmake --build build --target notdec binarysub TypeBuilderTest -j4` 通过。
+- 独立调用 `test_constraint_solver_stats` 通过；`TypeBuilderTest` 9/9 通过。
+- 完整 `./build/binarysub` 仍在既有 parsing sample 4 处 abort：期望
+  `⊤ -> ⊤ -> ⊤ -> {}`，实际 `⊤ -> … -> … -> {}`；失败发生在新增 solver 测试之前，
+  与本改动无关。
