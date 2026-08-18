@@ -319,3 +319,44 @@ Redis 最新一次固定 `N=100` 运行目录为
 下一步更好的做法不是马上并发 `addSubtype()`，而是先细分三个 merge policy 的候选收集
 和实际递归传播时间。当前计数已经证明重心不在普通 visitor，直接并发共享约束图的风险
 大于可预期收益。
+
+## transaction root cache 实验（20260818）
+
+### 实现
+
+- `external/binarysub/src/binarysub-core.cpp:17-36` 的
+  `SimpleTypeTransactionState` 增加 transaction-local `resolvedRoots`。`resolve_variable()`
+  （第 161-208 行）在 transaction 内只读遍历一次并缓存路径，不再为了路径压缩给只读节点
+  建 snapshot。
+- `SimpleTypeTransaction::commit()`（第 109-127 行）把缓存过的路径写回最终 root；
+  `rollback()`（第 129-149 行）直接清掉缓存。`merge_variable_into_impl()`（第 1693-1699
+  行）每次真实 parent 更新后清空缓存，避免旧 root 失效。
+- `external/binarysub/src/binarysub-test.cpp:1912-1959` 增加 transaction 内不改 parent、
+  commit 压缩路径的断言；独立 smoke 还验证了 rollback 和 merge 后 cache 失效。
+
+### 验证与判断
+
+- `cmake --build ./build-relwithdebinfo-20260731 --target binarysub TypeBuilderTest notdec -j4`
+  通过；`TypeBuilderTest` 9/9。独立 smoke 用当前 binarysub 库编译运行通过。
+- 完整 `binarysub` 仍在既有 parsing sample 4 处 abort，未进入本测试段：期望
+  `⊤ -> ⊤ -> ⊤ -> {}`，实际 `⊤ -> … -> … -> {}`。
+- Redis 固定 stage-B IR、ASLR、8 线程、allocator override、`N=10`：cache 版本主 SCC
+  `call_interface_transaction=182.653s`，`call_interface_merge=202.450s`，
+  `struct_slot_merge=136.938s`，`field_followup_merge=135.157s`；完整通过 5182/870/618
+  个对应 merge policy pair 后以退出码 75 停止。
+- 无 cache parent 同口径运行：`call_interface_merge=196.343s`，
+  `struct_slot_merge=134.486s`，`field_followup_merge=144.417s`；但 parent 构建和当前
+  构建不是同一提交，且大图指针容器顺序有噪声。与此前同诊断构建的无 cache 数据相比，
+  transaction 阶段只变化约 0.5%，暂不能证明 Redis 有稳定收益；峰值 RSS 也只下降约 1%。
+
+### 复杂度评估
+
+- 实现效果：4/10；解决了 transaction 内路径压缩的回滚约束，但当前 Redis 未显示确定
+  加速。
+- 理解成本：4/10；新增一个局部 map，失效规则集中在 parent 写入点。
+- 维护成本：4/10；必须保持所有 `mergedInto` 写入都经过统一失效点，未来若出现第二个写入
+  点需要同步更新。
+
+结论：先保留这个小实验作为 transaction 语义基础，但不把它当成主要性能优化。下一步应
+  用命中/失效计数确认 cache 是否被频繁清空；若命中率低，优先转向减少重复 constraint
+  传播或做只读候选收集并行化。
