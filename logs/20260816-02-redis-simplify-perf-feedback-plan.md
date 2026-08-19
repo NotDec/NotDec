@@ -376,3 +376,87 @@ wall 从 `270.57s` 降到 `242.19s`，RSS 从 `1324.8 MiB` 降到 `1277.0 MiB`�
 本轮实现效果 8/10（移除现场约 14% 的纯环检测集合开销，严格类型结果不变），理解
 成本 1/10，维护成本 1/10。更大的 canonicalize 集合改造虽有性能收益，但当前会改变
 类型结果，不能为了速度保留。
+
+## 2026-08-19：Redis 固定版完成与 vector 累加复验
+
+### 已实现的修复
+
+本轮重新采用 `CompactTypeBuilder` 的 vector 累加方案，但保持发布时的集合语义和
+arena 生命周期边界：
+
+- `external/binarysub/src/binarysub.cpp:1100-1107` 的
+  `CompactTypeBuilder::mergeInsertVars()` 改为 append-only `std::vector`；
+  `freeze()`/`exportSnapshot()`（约 `1306-1370`）调用
+  `sortAndUniqueVars()`（约 `1387-1395`）后才生成 persistent set。child builder
+  合并也直接移动 vector，避免在 canonicalize 热路径中反复查红黑树。
+- `external/binarysub/include/binarysub/detail/PersistentSet.h:66-69,473-490`
+  保留 AVL 树形 hash 作为同形 root 的分桶键，但不再用它拒绝集合相等；不同插入顺序
+  可能产生不同 AVL 形状，集合相等必须按序列成员比较。否则会把同一变量集合误判为不等，
+  进而改变 shared hit 和 HType 结果。
+- `external/binarysub/src/binarysub.cpp:1865-1883` 的
+  `CompactTypeArena::makeFromCompactVars()` 检查 source arena，跨 arena 时先 clone
+  persistent root，避免临时 canonicalize arena 清理后留下悬空 `CompactVarSet::Storage`。
+- `external/binarysub/src/binarysub.cpp:6428-6436` 的
+  `bulkSimplifyDetailed()` 为 TBB worker 设置 128 MiB stack。之前只给显式
+  canonicalize worker pool 设置大栈，Redis allocator SCC 在 `analyzeOccurrences()`
+  的递归遍历中仍会稳定栈溢出。
+- `external/binarysub/src/binarysub-test.cpp:327-338` 更新递归 producer/consumer
+  测试的期望文本；这是递归变量选择变化后的等价表示，不是错误合并。
+
+此前 vector 实验误把 `PersistentSet` hash 当成内容 hash，且没有处理跨 arena root，
+所以出现了错误的集合不等判断和 ASan UAF。修正后，lighttpd 单线程严格 A/B 的
+DebugInfo oracle、wrong merge、fragmentation、输出 IR 和 merge decisions 均一致；
+HType 文本只出现递归 binder/匿名编号等表示变化，人工检查未发现新增 wrong merge。
+
+### Redis 完整运行
+
+使用 checkpoint `/tmp/notdec-checkpoint-redis.g9ke4Q/state` 跳过 bottom-up/top-down，
+固定 `NOTDEC_BINARYSUB_THREADS=8`、开启 canonicalize 并行、关闭 ASLR，Redis 全部
+35 个 SCC（314,398 graph nodes、201,150 roots、252,955 values）已经完成：
+
+- 总 wall `1:13:40`，退出码 `0`，成功生成 `/tmp/redis-varvec-final-out-fixed.ll`
+  （约 55 MB）。
+- 阶段诊断：prepare `0.423 s`，bulk `4297.328 s`（CPU `13851.153 s`，平均
+  `3.22` cores），lower `13.735 s`，upper `43.299 s`。
+- `/usr/bin/time -v` 峰值 resident RSS `38,635,788 KiB`（约 36.8 GiB）。
+  主 SCC 和长尾 allocator SCC 都越过了此前在 `zmalloc` 的固定 SIGSEGV 点。
+- LLVM 22 `opt -passes=verify -disable-output` 通过。`binarysub` 全套测试和
+  `TypeBuilderTest` 9/9 通过。
+
+主 SCC 的两次运行 bulk wall 约 `1734.8 s` 与 `1228.4 s`，受调度和资源争抢影响，
+不能当作严格 A/B；但固定版的阶段计时确认 simplify/canonicalize 是主耗时，lower/
+upper 只占几十秒。`perf` 在 `zmalloc` 巨型 group 的 30 秒采样中显示：
+`PolarCompactType` 哈希表 `_M_find_before_node` `51.77%`、`std::set<uint32_t>` 深
+拷贝 `9.43%`、malloc/free 合计约 `16%`，说明剩余长尾是巨型递归 CompactType 的
+重复 coalesce、集合复制和分配，而不是 LLVM 输出。
+
+### allocator SCC 为什么会再次 simplify 巨型类型
+
+`MLsubRecovery::solveAndLowerTypes()` 逐个 SCC 调用
+`ConstraintsGenerator::genTypes()`（`src/TypeRecovery/mlsub/MLsubGenerator.cpp`
+约 `6845`、`7131`），每次都会创建新的局部 `binarysub::TypeSimplifier`。因此主 SCC
+算出的 CompactType/UType 不会自动成为 allocator SCC 的缓存。`opaque_body` 只让
+visitor 跳过 allocator 的 LLVM body 约束生成；它仍会保留 formal/return variables，
+也不会切断这些变量已有的 bounds 或 recursive links。
+
+跨 SCC 调用通过 `TypeScheme(PolymorphicType(...))` 再 `instantiate()` 实现，
+`freshenAbove()` 会按调用点创建新的变量图。这是多态语义所需的 caller-context
+隔离，所以 allocator SCC 不是简单重复主 SCC 的最终 UType，而是从自己的少量 roots
+沿 bounds 重新到达主 SCC 的巨型图，并在自己的 `TypeSimplifier` 中重新 coalesce。
+
+推荐的隔离顺序如下，当前只记录方案，未把未经验证的全局 cache 合入：
+
+1. 先增加 SCC root reachability 诊断，记录 level、来源 SCC、第一次跨 SCC 的边，定位
+   `zmalloc` 的 roots 通过哪条 formal/return/recursive bound 进入巨型图。
+2. 对 `opaque_body + polymorphic allocator` 引入真正的 summary boundary：body 不参与
+   本地深度求解，跨边界变量以 opaque summary leaf 替代完整 external bound，只保留通用
+   接口和必要的 callsite instantiation 证据。
+3. 更一般地做跨 SCC bound 截断：本地 simplify 只展开本 SCC 拥有的变量，外部 level/SCC
+   变量替换为稳定 boundary variable，并保留 polarity、size、ptrLoad/ptrStore 等接口
+   证据。这比直接复用 caller-context 相关的 UType 更安全。
+4. boundary 稳定后再考虑结果缓存；cache key 必须包含稳定 graph identity、polarity、
+   target level 和 summary version，不能使用 `SimpleType*`/`CompactType*` 地址，也
+   不能直接共享 polymorphic callsite 的 fresh variables。
+
+仅并行化 SCC 会增加 RSS，且无法消除单个巨型递归 DAG 的重复工作，因此不是当前隔离
+问题的解决方案。
