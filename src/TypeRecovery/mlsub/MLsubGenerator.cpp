@@ -4,7 +4,6 @@
 #include "notdec/TypeRecovery/mlsub/MLsubGenerator.h"
 #include "Utils/CallGraphDotInfo.h"
 #include "binarysub/binarysub-core.h"
-#include "binarysub/binarysub-infer.h"
 #include "binarysub/binarysub-primitive-semantics.h"
 #include "binarysub/binarysub.h"
 #include "notdec-llvm2c/Interface.h"
@@ -6731,13 +6730,19 @@ void MLsubRecovery::bottomUpPhase() {
         auto &TData = AG.AllSCCs.at(Ind2);
         auto TargetG = TData.Generator;
         auto TargetFTy = TargetG->getNodeOrNull(F);
-        auto PolyScheme = binarysub::TypeScheme(
-            binarysub::PolymorphicType(TData.level, TargetFTy));
         auto TargetLevel = binarysub::level_of(TargetFTy);
         assert(TargetLevel >= 0);
         assert(TData.level == static_cast<unsigned int>(TargetLevel));
         assert(TData.level >= Data.level);
-        auto InsFunc = PolyScheme.instantiate(Data.level);
+        // Simple-sub creates all variables in a let RHS at lvl + 1 and stores
+        // lvl as the polymorphic cutoff.  The target SCC has already been
+        // constructed at that RHS level (TData.level), so its summary must
+        // generalize variables starting at TData.level, inclusively. Passing
+        // TData.level to instantiate_type_graph is the direct equivalent of
+        // paper-level PolymorphicType(TData.level - 1, TargetFTy), without an
+        // unsigned underflow or a misleading cutoff conversion.
+        auto InsFunc = binarysub::instantiate_type_graph(
+            TargetFTy, TargetLevel, static_cast<int>(Data.level));
         Data.Generator->deferCallConstraint(*Ent.first, *F, InsFunc,
                                             Ent.second, InsFunc);
       }
