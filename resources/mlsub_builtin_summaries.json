@@ -48,6 +48,14 @@
         { "target": { "kind": "arg", "index": 0 }, "state": "ptr" }
       ]
     },
+    "calloc": {
+      "is_polymorphic": true,
+      "pndiff": [
+        { "target": { "kind": "ret" }, "state": "ptr" },
+        { "target": { "kind": "arg", "index": 0 }, "state": "number" },
+        { "target": { "kind": "arg", "index": 1 }, "state": "number" }
+      ]
+    },
     "close": {
       "ret": { "kind": "primitive", "name": "sint", "bits": 32 },
       "args": [

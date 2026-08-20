@@ -62,10 +62,23 @@ NotDec 的 `TData.level` 是目标 SCC RHS 变量的创建层级，因此不能�
   recursive byte buffer 和 400,311 个 transparent record；旧语义分别为 154、51
   和 601,452。这支持旧边界会让调用点约束污染 callee 定义图，并放大巨型递归类型的判断。
 
-## 后续
+## 同层分组调整（已完成）
 
-当前仍需解释 `TData.level == Data.level` 的跨 SCC summary edge。严格的 Simple-sub
-let RHS 总会进入更高一层；NotDec 的 same-level edge 则可能来自 SCC 分组和多态 summary
-boundary，是在 SCC ownership 上做隔离的扩展。后续先统计并说明这些边的来源，再决定
-是否需要调整 level 或分组；本次先保留 inclusive 层级修正。allocator boundary、
-`VarOrigins` 诊断输出和 `PersistentSet` 热点分别作为后续问题处理。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:6736`：由于 `prepareSCC()` 现在会收缩所有
+  同 level 调用边，跨 generator 的 summary edge 收紧为 `TData.level > Data.level`，
+  与真正的多态 generalization boundary 一致。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:7391-7438`：恢复最大同层调用区域合并，
+  不再因为 raw SCC 任一端带 polymorphic 标记而人为切断同层边。多态函数调用的普通
+  helper 继承同一 RHS level，并和该多态函数处于同一 generator；只有进入新的多态
+  raw SCC 才会升到更高 level。
+- `resources/mlsub_builtin_summaries.json:49-57`：补齐 libc `calloc` 的全局 builtin
+  summary，标记 `is_polymorphic`，返回值为通用指针，两个 size 参数为 number。此前
+  `malloc/free/realloc` 已标记而 `calloc` 遗漏，Redis 中因此出现了不必要的同层
+  `zcalloc -> calloc` 边。
+- 临时三函数构图确认 `main L0 -> poly,ordinary_helper L1 -> calloc L2`，普通 helper
+  与多态函数合并，`calloc` 独立进入下一层；LLVM 22 verifier 通过。
+- `MLsubGeneratorTest` 19/19 通过。LLVM IR suite 的旧分组规则与新分组规则逐 case
+  对照时 HType 输出完全一致；当前工作树 golden suite 的既有差异在两种规则下均存在，
+  未更新 golden。
+
+allocator boundary、`VarOrigins` 诊断输出和 `PersistentSet` 热点仍作为后续问题处理。

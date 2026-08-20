@@ -6733,7 +6733,10 @@ void MLsubRecovery::bottomUpPhase() {
         auto TargetLevel = binarysub::level_of(TargetFTy);
         assert(TargetLevel >= 0);
         assert(TData.level == static_cast<unsigned int>(TargetLevel));
-        assert(TData.level >= Data.level);
+        // prepareSCC() contracts every same-level call edge into one
+        // generator. A call that remains here therefore crosses a real
+        // polymorphic boundary and must enter a strictly higher level.
+        assert(TData.level > Data.level);
         // Simple-sub creates all variables in a let RHS at lvl + 1 and stores
         // lvl as the polymorphic cutoff.  The target SCC has already been
         // constructed at that RHS level (TData.level), so its summary must
@@ -7388,11 +7391,14 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     Raw.Level = std::max(BaseLevel, Raw.UserLevelLowerBound);
   }
 
-  // Phase 2: collapse SCC groups for each generator. Level 0 is monomorphic
-  // module scope, so globals can connect functions even when optimization has
-  // removed the call edge. Keep all level-0 raw SCCs in one generator. Higher
-  // levels still only merge along same-level call edges to preserve polymorphic
-  // summary boundaries.
+  // Phase 2: collapse every same-level call region into one generator. A
+  // polymorphic raw SCC opens a new level on its incoming edges; ordinary
+  // helpers called from that SCC inherit the new level and belong to the same
+  // RHS inference region. Keeping the polymorphic function alone would leave
+  // same-level cross-generator calls whose variables have no sound
+  // generalization cutoff. Level 0 remains the monomorphic module scope, so
+  // globals can connect functions even when optimization removed call edges;
+  // all level-0 raw SCCs are therefore merged below even when disconnected.
   std::vector<std::size_t> Parent(RawSCCs.size());
   for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
     Parent[RawIndex] = RawIndex;
@@ -7423,14 +7429,6 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
   for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
     for (std::size_t SuccIndex : RawSCCs[RawIndex].Succs) {
       if (RawSCCs[RawIndex].Level != RawSCCs[SuccIndex].Level) {
-        continue;
-      }
-      // A polymorphic raw SCC is a summary boundary.  A same-level edge
-      // leaving or entering it must stay visible to the caller/callee
-      // instantiation logic; otherwise a large monomorphic neighbor group
-      // silently shares the polymorphic function's formal variables.
-      if (RawSCCs[RawIndex].IsPolymorphic ||
-          RawSCCs[SuccIndex].IsPolymorphic) {
         continue;
       }
       Union(RawIndex, SuccIndex);
@@ -7491,7 +7489,10 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
       if (Root == SuccRoot) {
         continue;
       }
-      assert(RawSCCs[RawIndex].Level <= RawSCCs[SuccIndex].Level);
+      // All equal-level edges were contracted above. Thus every remaining
+      // generator edge is exactly a generalization boundary rather than an
+      // implementation-detail split inside one inference level.
+      assert(RawSCCs[RawIndex].Level < RawSCCs[SuccIndex].Level);
       if (GroupSuccs[Root].insert(SuccRoot).second) {
         ++GroupInDegree.at(SuccRoot);
       }
