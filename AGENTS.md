@@ -248,6 +248,11 @@ cmake --build ./build --target all
   - 必须和 `--gen-work-dir` / `-g` 一起使用
   - `ValueTypes.txt`、`VarOrigins.txt` 只写 stable label，完整项目跑批时可避免 verbose `Value::print()` 开销
 - `--emit-tr-input-ir=<path>`
+  - 注意：输出的是 `00-lifted.ll` 版本（无向量拆标量等 MLsub 输入预处理）；
+    stage-B 的 checkpoint 锚点是 workdir 里重发射的 `02-mlsub-input.ll`（带向量
+    拆标量，内容不同）。需要可复现的 stage-A frozen IR 时，用
+    `-g --work-dir=<dir>` 生成后取 `<dir>/02-mlsub-input.ll`，不要用
+    `--emit-tr-input-ir` 的输出直接当 stage-B 输入
 - `--frozen-tr-input-ir`
 
 当前仍常用的环境变量：
@@ -257,6 +262,7 @@ cmake --build ./build --target all
 - `NOTDEC_EXTRA_CONSTRAINTS`
 - `NOTDEC_BINARYSUB_THREADS`
 - `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL`
+- `NOTDEC_DISABLE_AUTO_POLY_GLUE`
 
 说明：
 
@@ -274,6 +280,12 @@ cmake --build ./build --target all
   - 这个开关不控制更早的 bottom-up 约束生成；该阶段当前仍是串行
   - 需要编译期完全关闭 binarysub oneTBB 时，用
     `-DNOTDEC_ENABLE_BINARYSUB_PARALLEL=OFF` 重新配置 CMake
+- `NOTDEC_DISABLE_AUTO_POLY_GLUE`
+  - 关闭 prepareSCC 的"粘合剂 callee 自动升层"（auto-mark）：非 polymorphic 的
+    同层 callee 被 ≥1 个同层 polymorphic 调用者共享时自动升一层并打印 warning，
+    消除 poly -> non-poly 同层跨 SCC 边；A/B 或排查时设 `1` 关闭
+  - opaque_body 函数的出边已在 SCC 划分前移除（body 不进约束图，出边不应影响
+    SCC 结构），所以 opaque allocator 场景通常不触发 auto-mark，无需设此变量
 
 典型命令：
 

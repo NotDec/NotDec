@@ -6733,10 +6733,12 @@ void MLsubRecovery::bottomUpPhase() {
         auto TargetLevel = binarysub::level_of(TargetFTy);
         assert(TargetLevel >= 0);
         assert(TData.level == static_cast<unsigned int>(TargetLevel));
-        // prepareSCC() contracts every same-level call edge into one
-        // generator. A call that remains here therefore crosses a real
-        // polymorphic boundary and must enter a strictly higher level.
-        assert(TData.level > Data.level);
+        // prepareSCC() no longer contracts every same-level call edge: a
+        // polymorphic callee is always strictly higher, but an auto-marked
+        // glue callee can be reached from one level below. Same-level
+        // cross-generator calls remain possible and are instantiated at the
+        // same level (the glue callees are raised so most are strictly higher).
+        assert(TData.level >= Data.level);
         // Simple-sub creates all variables in a let RHS at lvl + 1 and stores
         // lvl as the polymorphic cutoff.  The target SCC has already been
         // constructed at that RHS level (TData.level), so its summary must
@@ -7200,18 +7202,26 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     TarjanStack.push_back(Node);
     TarjanOnStack.insert(Node);
 
-    for (auto &CallRecord : *Node) {
-      CallGraphNode *Callee = CallRecord.second;
-      if (Callee == nullptr || Callee->getFunction() == nullptr) {
-        continue;
-      }
-      if (TarjanIndex.find(Callee) == TarjanIndex.end()) {
-        VisitNode(Callee);
-        TarjanLowLink.at(Node) =
-            std::min(TarjanLowLink.at(Node), TarjanLowLink.at(Callee));
-      } else if (TarjanOnStack.count(Callee) != 0) {
-        TarjanLowLink.at(Node) =
-            std::min(TarjanLowLink.at(Node), TarjanIndex.at(Callee));
+    // opaque_body 函数的 body 不进入约束生成，其出边也不应参与 SCC 划分：
+    // 否则这些惰性调用会充当同层合并的"粘合剂"（如 allocator -> malloc_usable_size
+    // 把独立 polymorphic 区域粘成一个巨型 generator）。见 logs/20260819-01。
+    if (auto *SrcFn = Node->getFunction();
+        SrcFn != nullptr && isOpaqueBody(*SrcFn)) {
+      // 不跟随 opaque 函数的任何出边。
+    } else {
+      for (auto &CallRecord : *Node) {
+        CallGraphNode *Callee = CallRecord.second;
+        if (Callee == nullptr || Callee->getFunction() == nullptr) {
+          continue;
+        }
+        if (TarjanIndex.find(Callee) == TarjanIndex.end()) {
+          VisitNode(Callee);
+          TarjanLowLink.at(Node) =
+              std::min(TarjanLowLink.at(Node), TarjanLowLink.at(Callee));
+        } else if (TarjanOnStack.count(Callee) != 0) {
+          TarjanLowLink.at(Node) =
+              std::min(TarjanLowLink.at(Node), TarjanIndex.at(Callee));
+        }
       }
     }
 
@@ -7246,8 +7256,12 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     }
     VisitNode(Node);
   }
-  // 遍历所有的CallGraphNode，然后构建一个反向的，从callee到所有caller的map
+  // 遍历所有的CallGraphNode，然后构建一个反向的，从callee到所有caller的map。
+  // opaque_body 调用者的出边同样跳过，与 Tarjan 的 SCC 划分保持一致。
   for (Function &F : Module) {
+    if (isOpaqueBody(F)) {
+      continue;
+    }
     CallGraphNode *Caller = CG[&F];
     for (auto &CallRecord : *Caller) {
       CallGraphNode *Callee = CallRecord.second;
@@ -7293,13 +7307,16 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     std::set<std::size_t> Preds;
     std::set<std::size_t> Succs;
     bool IsPolymorphic = false;
+    // 非 polymorphic 的同层 callee 被多个 polymorphic SCC 共享时，会被自动
+    // 升一层当作 polymorphic 处理，避免同层合并把独立 polymorphic 区域粘成
+    // 一个巨型 generator（summary 巨大、下游 simplify 爆炸）。见
+    // logs/20260819-01 的 Redis 回归根因分析。
+    bool AutoMarkedPolymorphic = false;
     unsigned int UserLevelLowerBound = 0;
     unsigned int Level = 0;
     std::size_t TopoPosition = 0;
   };
 
-  // Phase 1: work on the original call-graph SCC DAG first. Levels are solved
-  // on raw SCCs before any same-level groups are merged.
   std::vector<RawSCCInfo> RawSCCs;
   std::map<CallGraphNode *, std::size_t> Node2RawSCCIndex;
   for (auto It = SCCResults.rbegin(); It != SCCResults.rend(); ++It) {
@@ -7377,6 +7394,17 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
   assert(TopoOrder.size() == RawSCCs.size() &&
          "SCC condensation graph must be a DAG");
 
+  // Phase 1: work on the original call-graph SCC DAG first. Levels are solved
+  // on raw SCCs before any same-level groups are merged.
+  // 两阶段识别"粘合剂" callee 并自动升层：
+  //   Pass A 先算一遍不含 auto-mark 的基础 level；
+  //   Pass B 在基础 level 上检测（避免级联抬层把真实同层关系遮住）；
+  //   Pass C 重新按最终 level 传播（auto-mark 的 SCC 按 polymorphic 对待，
+  //          其 callee 会自然继承抬高的 level）。
+  const bool DisableAutoPolyGlue =
+      std::getenv("NOTDEC_DISABLE_AUTO_POLY_GLUE") != nullptr;
+
+  // Pass A: 基础 level（不含 auto-mark）。
   for (std::size_t RawIndex : TopoOrder) {
     auto &Raw = RawSCCs[RawIndex];
     unsigned int BaseLevel = 0;
@@ -7391,14 +7419,87 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
     Raw.Level = std::max(BaseLevel, Raw.UserLevelLowerBound);
   }
 
-  // Phase 2: collapse every same-level call region into one generator. A
-  // polymorphic raw SCC opens a new level on its incoming edges; ordinary
-  // helpers called from that SCC inherit the new level and belong to the same
-  // RHS inference region. Keeping the polymorphic function alone would leave
-  // same-level cross-generator calls whose variables have no sound
-  // generalization cutoff. Level 0 remains the monomorphic module scope, so
-  // globals can connect functions even when optimization removed call edges;
-  // all level-0 raw SCCs are therefore merged below even when disconnected.
+  // Pass B: 在基础 level 上检测。一个非 polymorphic 的 callee 若被 >=1 个
+  // 同层 polymorphic 调用者共享，它和这些调用者之间的边就是同层跨 SCC 边
+  // （poly callee 本身会 +1 升层，所以同层边只可能出现在 poly -> non-poly）。
+  // 同层实例化没有健全的泛化 cutoff，因此把它升一层当作 polymorphic 处理，
+  // 这些边就变成严格升层的多态实例化，不再粘合。Redis 的 malloc_usable_size
+  // （10 个 allocator 调用者）、strlen（zstrdup）、ztryrealloc_usable_internal
+  // （3 个 allocator 调用者）都属此类。被 UserLevelLowerBound 强行提层的
+  // SCC 不覆盖。见 logs/20260819-01。
+  std::vector<std::string> AutoPolyGlueWarnings;
+  for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
+    auto &Raw = RawSCCs[RawIndex];
+    if (DisableAutoPolyGlue || Raw.IsPolymorphic || Raw.Level == 0 ||
+        Raw.UserLevelLowerBound != 0) {
+      continue;
+    }
+    std::vector<std::size_t> SameLevelPolyCallers;
+    for (std::size_t PredIndex : Raw.Preds) {
+      if (RawSCCs[PredIndex].IsPolymorphic &&
+          RawSCCs[PredIndex].Level == Raw.Level) {
+        SameLevelPolyCallers.push_back(PredIndex);
+      }
+    }
+    if (SameLevelPolyCallers.empty()) {
+      continue;
+    }
+    Raw.AutoMarkedPolymorphic = true;
+    std::vector<std::string> CalleeNames;
+    for (auto *Node : Raw.Nodes) {
+      if (auto *Fn = Node->getFunction()) {
+        if (Fn->hasName()) {
+          CalleeNames.push_back(Fn->getName().str());
+        }
+      }
+    }
+    std::vector<std::string> CallerNames;
+    for (std::size_t PredIndex : SameLevelPolyCallers) {
+      for (auto *Node : RawSCCs[PredIndex].Nodes) {
+        if (auto *Fn = Node->getFunction()) {
+          if (Fn->hasName()) {
+            CallerNames.push_back(Fn->getName().str());
+          }
+        }
+      }
+    }
+    AutoPolyGlueWarnings.push_back(
+        "auto-marked polymorphic glue callee(s) [" +
+        llvm::join(CalleeNames, ", ") + "] raised level " +
+        llvm::utostr(Raw.Level) + " -> " + llvm::utostr(Raw.Level + 1) +
+        ": shared by " + llvm::utostr(SameLevelPolyCallers.size()) +
+        " same-level polymorphic caller(s) [" +
+        llvm::join(CallerNames, ", ") +
+        "]; this turns the same-level cross-SCC edges into strictly higher "
+        "polymorphic instantiations with a sound generalization cutoff");
+  }
+  for (const auto &Warning : AutoPolyGlueWarnings) {
+    llvm::errs() << "Warning: " << Warning << "\n";
+  }
+
+  // Pass C: 最终 level。AutoMarkedPolymorphic 的 SCC 与 polymorphic 一样 +1，
+  // 由于按拓扑序（调用者先于被调用者）传播，抬高会自然级联到其 callee。
+  for (std::size_t RawIndex : TopoOrder) {
+    auto &Raw = RawSCCs[RawIndex];
+    unsigned int BaseLevel = 0;
+    for (std::size_t PredIndex : Raw.Preds) {
+      BaseLevel = std::max(BaseLevel, RawSCCs[PredIndex].Level);
+    }
+    if (Raw.IsPolymorphic || Raw.AutoMarkedPolymorphic) {
+      ++BaseLevel;
+    }
+    Raw.Level = std::max(BaseLevel, Raw.UserLevelLowerBound);
+  }
+
+  // Phase 2: collapse every same-level call region into one generator, but
+  // keep polymorphic SCCs (and auto-marked glue callees) as summary boundaries
+  // so they do not silently share variables with monomorphic same-level
+  // neighbors. The same-level cross-SCC calls they would otherwise glue are
+  // instead handled by auto-marking the shared callee one level higher (see
+  // Pass B), which keeps every polymorphic summary small. Level 0 remains the
+  // monomorphic module scope, so globals can connect functions even when
+  // optimization removed call edges; all level-0 raw SCCs are therefore merged
+  // below even when disconnected.
   std::vector<std::size_t> Parent(RawSCCs.size());
   for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
     Parent[RawIndex] = RawIndex;
@@ -7429,6 +7530,17 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
   for (std::size_t RawIndex = 0; RawIndex < RawSCCs.size(); ++RawIndex) {
     for (std::size_t SuccIndex : RawSCCs[RawIndex].Succs) {
       if (RawSCCs[RawIndex].Level != RawSCCs[SuccIndex].Level) {
+        continue;
+      }
+      // A polymorphic raw SCC is a summary boundary.  A same-level edge
+      // leaving or entering it must stay visible to the caller/callee
+      // instantiation logic; otherwise a large monomorphic neighbor group
+      // silently shares the polymorphic function's formal variables.
+      // 自动标记的粘合剂 callee 同样按 polymorphic 处理，不参与同层合并。
+      if (RawSCCs[RawIndex].IsPolymorphic ||
+          RawSCCs[RawIndex].AutoMarkedPolymorphic ||
+          RawSCCs[SuccIndex].IsPolymorphic ||
+          RawSCCs[SuccIndex].AutoMarkedPolymorphic) {
         continue;
       }
       Union(RawIndex, SuccIndex);
@@ -7489,10 +7601,13 @@ void MLsubRecovery::prepareSCC(CallGraph &CG) {
       if (Root == SuccRoot) {
         continue;
       }
-      // All equal-level edges were contracted above. Thus every remaining
-      // generator edge is exactly a generalization boundary rather than an
-      // implementation-detail split inside one inference level.
-      assert(RawSCCs[RawIndex].Level < RawSCCs[SuccIndex].Level);
+      // Equal-level edges between polymorphic SCCs and their monomorphic
+      // neighbors are kept (polymorphic SCCs are summary boundaries and are
+      // not contracted), so a remaining generator edge can be same-level too.
+      // The auto-marked glue callees are raised above their polymorphic
+      // callers, so most same-level edges only survive where the callee is a
+      // monomorphic helper of a single polymorphic region.
+      assert(RawSCCs[RawIndex].Level <= RawSCCs[SuccIndex].Level);
       if (GroupSuccs[Root].insert(SuccRoot).second) {
         ++GroupInDegree.at(SuccRoot);
       }
