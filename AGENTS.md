@@ -262,7 +262,6 @@ cmake --build ./build --target all
 - `NOTDEC_EXTRA_CONSTRAINTS`
 - `NOTDEC_BINARYSUB_THREADS`
 - `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL`
-- `NOTDEC_DISABLE_AUTO_POLY_GLUE`
 
 说明：
 
@@ -280,12 +279,6 @@ cmake --build ./build --target all
   - 这个开关不控制更早的 bottom-up 约束生成；该阶段当前仍是串行
   - 需要编译期完全关闭 binarysub oneTBB 时，用
     `-DNOTDEC_ENABLE_BINARYSUB_PARALLEL=OFF` 重新配置 CMake
-- `NOTDEC_DISABLE_AUTO_POLY_GLUE`
-  - 关闭 prepareSCC 的"粘合剂 callee 自动升层"（auto-mark）：非 polymorphic 的
-    同层 callee 被 ≥1 个同层 polymorphic 调用者共享时自动升一层并打印 warning，
-    消除 poly -> non-poly 同层跨 SCC 边；A/B 或排查时设 `1` 关闭
-  - opaque_body 函数的出边已在 SCC 划分前移除（body 不进约束图，出边不应影响
-    SCC 结构），所以 opaque allocator 场景通常不触发 auto-mark，无需设此变量
 
 典型命令：
 
