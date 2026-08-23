@@ -220,3 +220,22 @@ screen 日志是 `/tmp/notdec-source-tmux-poly-20260822.log`。启动后配置�
 15.6 GiB；`00-lifted.ll`、`02-mlsub-input.ll`、CallGraph、SCC 和 DebugInfo oracle
 均已写出。运行仍在继续，后续以同一日志、work/eval 目录记录最终 wall time、峰值 RSS、
 wrong merge 和 fragmentation；长跑期间不要重链上述 `notdec` 二进制。
+
+### 匿名审计器实现记录（2026-08-23）
+
+- 新增 `include/notdec/TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.h:12-97`
+  与 `src/TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.cpp:48-1188`。核心函数
+  `analyzePointerUses()`、`analyzeRawBufferSlot()`、`analyzeDeallocatorSlot()`、
+  `analyzeAnonymousPolymorphicBoundaries()` 和
+  `writeAnonymousPolymorphicBoundaryReport()` 只读取 LLVM 操作、数据流、调用者
+  多样性与内存访问形状；返回值/参数和 raw-buffer/deallocator 证据按槽位保存，函数名
+  仅作为审计输出标签。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp:91-98,5993-6031` 增加
+  `NOTDEC_ANONYMOUS_POLY_AUDIT` 与 `NOTDEC_ANONYMOUS_POLY_AUDIT_ONLY`。默认恢复行为
+  不变；显式 audit-only 才在约束生成前返回，避免大项目实验误触发生产路径。
+- `src/CMakeLists.txt:33` 注册新分析器；`unittests/Retypd/MLsubGeneratorTest.cpp:652-874`
+  增加匿名构造模块，验证 allocator/factory/raw-buffer/deallocator 的正负证据，并在
+  全部函数重命名后确认分数和置信度不变。
+- 验证：`cmake --build build --target MLsubGeneratorTest -j4` 成功；
+  `./build/bin/MLsubGeneratorTest` 的 `20/20` 测试通过。该实现当前只生成审计报告，
+  尚未把源码级匿名候选自动接入 SCC/多态恢复。

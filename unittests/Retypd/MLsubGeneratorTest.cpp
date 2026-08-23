@@ -1,6 +1,7 @@
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "TypeRecovery/mlsub/Metadata.h"
 #include "binarysub/binarysub.h"
+#include "notdec/TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.h"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <llvm/IR/Argument.h>
@@ -649,6 +650,227 @@ TEST(MLsub, GenericFFmpegContextAPIsArePolymorphic) {
   EXPECT_EQ(Ordinary->getMetadata(
                 notdec::mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION),
             nullptr);
+}
+
+TEST(MLsub, AnonymousPolymorphicBoundaryEvidenceIgnoresNames) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("anonymous-poly-test", Ctx);
+  M->setDataLayout("e-p:64:64");
+  auto *PtrTy = llvm::PointerType::getUnqual(Ctx);
+  auto *VoidTy = llvm::Type::getVoidTy(Ctx);
+  auto *I8Ty = llvm::Type::getInt8Ty(Ctx);
+  auto *I16Ty = llvm::Type::getInt16Ty(Ctx);
+  auto *I64Ty = llvm::Type::getInt64Ty(Ctx);
+
+  // The base allocator is deliberately just an anonymous-looking declaration.
+  // The wrapper must be recognized from return forwarding and heterogeneous
+  // caller uses, without consulting either symbol.
+  auto *AllocatorTy = llvm::FunctionType::get(PtrTy, {I64Ty}, false);
+  auto *BaseAllocator = llvm::Function::Create(
+      AllocatorTy, llvm::Function::ExternalLinkage, "source_alloc", M.get());
+  auto *Wrapper = llvm::Function::Create(
+      AllocatorTy, llvm::Function::ExternalLinkage, "project_alloc", M.get());
+  {
+    auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", Wrapper);
+    llvm::IRBuilder<> B(Entry);
+    B.CreateRet(B.CreateCall(BaseAllocator, {Wrapper->getArg(0)}));
+  }
+
+  auto *Factory = llvm::Function::Create(
+      AllocatorTy, llvm::Function::ExternalLinkage, "fixed_factory", M.get());
+  {
+    auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", Factory);
+    llvm::IRBuilder<> B(Entry);
+    auto *Storage = B.CreateCall(BaseAllocator, {B.getInt64(16)});
+    auto *Field = B.CreateGEP(I8Ty, Storage, B.getInt64(8));
+    B.CreateStore(B.getInt64(7), Field);
+    B.CreateRet(Storage);
+  }
+
+  auto *SinkTy = llvm::FunctionType::get(
+      VoidTy, {PtrTy, PtrTy, I64Ty}, false);
+  auto *Sink = llvm::Function::Create(SinkTy, llvm::Function::ExternalLinkage,
+                                      "byte_sink", M.get());
+  auto *RawWrapper = llvm::Function::Create(
+      SinkTy, llvm::Function::ExternalLinkage, "project_write", M.get());
+  {
+    auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", RawWrapper);
+    llvm::IRBuilder<> B(Entry);
+    auto It = RawWrapper->arg_begin();
+    llvm::Value *Owner = &*It++;
+    llvm::Value *Buffer = &*It++;
+    llvm::Value *Length = &*It++;
+    B.CreateCall(Sink, {Owner, Buffer, Length});
+    B.CreateRetVoid();
+  }
+
+  auto *ReleaseTy = llvm::FunctionType::get(VoidTy, {PtrTy}, false);
+  auto *BaseRelease = llvm::Function::Create(
+      ReleaseTy, llvm::Function::ExternalLinkage, "source_release", M.get());
+  auto *Release = llvm::Function::Create(
+      ReleaseTy, llvm::Function::ExternalLinkage, "project_release", M.get());
+  auto *ReleaseCounter = new llvm::GlobalVariable(
+      *M, I64Ty, false, llvm::GlobalValue::ExternalLinkage,
+      llvm::ConstantInt::get(I64Ty, 0), "release_counter");
+  {
+    auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", Release);
+    auto *Forward = llvm::BasicBlock::Create(Ctx, "forward", Release);
+    auto *Done = llvm::BasicBlock::Create(Ctx, "done", Release);
+    llvm::IRBuilder<> B(Entry);
+    B.CreateCondBr(B.CreateICmpEQ(Release->getArg(0),
+                                 llvm::ConstantPointerNull::get(PtrTy)),
+                   Done, Forward);
+    B.SetInsertPoint(Forward);
+    llvm::Value *OldCount = B.CreateLoad(I64Ty, ReleaseCounter);
+    B.CreateStore(B.CreateAdd(OldCount, B.getInt64(1)), ReleaseCounter);
+    B.CreateCall(BaseRelease, {Release->getArg(0)});
+    B.CreateBr(Done);
+    B.SetInsertPoint(Done);
+    B.CreateRetVoid();
+  }
+
+  auto *FixedDestructor = llvm::Function::Create(
+      ReleaseTy, llvm::Function::ExternalLinkage, "fixed_destructor", M.get());
+  {
+    auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", FixedDestructor);
+    llvm::IRBuilder<> B(Entry);
+    auto *Field = B.CreateGEP(I8Ty, FixedDestructor->getArg(0), B.getInt64(8));
+    B.CreateLoad(I64Ty, Field);
+    B.CreateCall(BaseRelease, {FixedDestructor->getArg(0)});
+    B.CreateRetVoid();
+  }
+
+  // Four structurally different allocation-result and raw-buffer uses provide
+  // call-site diversity.  The owner objects intentionally keep one common
+  // shape, so whole-function raw-buffer classification would be observably
+  // less precise than slot-level evidence.
+  for (unsigned Index = 0; Index < 4; ++Index) {
+    auto *CallerTy = llvm::FunctionType::get(VoidTy, {}, false);
+    auto *Caller = llvm::Function::Create(
+        CallerTy, llvm::Function::ExternalLinkage,
+        "caller" + std::to_string(Index), M.get());
+    auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", Caller);
+    llvm::IRBuilder<> B(Entry);
+
+    llvm::Value *Allocated = B.CreateCall(Wrapper, {B.getInt64(32 + Index)});
+    llvm::Value *DirectAllocated =
+        B.CreateCall(BaseAllocator, {B.getInt64(64 + Index)});
+    if (Index == 0) {
+      B.CreateStore(B.getInt32(1), Allocated);
+      B.CreateStore(B.getInt8(1), DirectAllocated);
+    } else if (Index == 1) {
+      auto *Field = B.CreateGEP(I8Ty, Allocated, B.getInt64(8));
+      B.CreateStore(B.getInt64(2), Field);
+      auto *DirectField = B.CreateGEP(I8Ty, DirectAllocated, B.getInt64(4));
+      B.CreateStore(B.getInt32(2), DirectField);
+    } else if (Index == 2) {
+      auto *Field = B.CreateGEP(I8Ty, Allocated, B.getInt64(16));
+      B.CreateLoad(I16Ty, Field);
+      auto *DirectField = B.CreateGEP(I8Ty, DirectAllocated, B.getInt64(12));
+      B.CreateLoad(I16Ty, DirectField);
+    } else {
+      B.CreateLoad(I8Ty, Allocated);
+      auto *DirectField = B.CreateGEP(I8Ty, DirectAllocated, B.getInt64(24));
+      B.CreateLoad(I64Ty, DirectField);
+    }
+
+    auto *Owner = B.CreateAlloca(I64Ty);
+    B.CreateStore(B.getInt64(Index), Owner);
+    auto *Buffer = B.CreateAlloca(I8Ty, B.getInt32(8 + Index));
+    auto *Byte = B.CreateGEP(I8Ty, Buffer, B.getInt64(Index));
+    B.CreateStore(B.getInt8(Index), Byte);
+    B.CreateCall(RawWrapper, {Owner, Buffer, B.getInt64(8 + Index)});
+    llvm::Value *Released = nullptr;
+    if (Index == 0) {
+      Released = Allocated;
+    } else if (Index == 1) {
+      Released = Owner;
+    } else if (Index == 2) {
+      Released = Buffer;
+    } else {
+      Released = Byte;
+    }
+    B.CreateCall(Release, {Released});
+    B.CreateRetVoid();
+  }
+
+  // Keep a real caller for the factory so its fixed initialization appears in
+  // the same report and exercises the allocator negative gate.
+  auto *FactoryCallerTy = llvm::FunctionType::get(VoidTy, {}, false);
+  auto *FactoryCaller = llvm::Function::Create(
+      FactoryCallerTy, llvm::Function::ExternalLinkage, "factory_caller",
+      M.get());
+  {
+    auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", FactoryCaller);
+    llvm::IRBuilder<> B(Entry);
+    B.CreateCall(Factory, {B.getInt64(16)});
+    auto *Fixed = B.CreateAlloca(I64Ty, B.getInt32(2));
+    B.CreateCall(FixedDestructor, {Fixed});
+    // Real optimized modules may pass poison/null through an irrelevant slot.
+    // Such constants have no materialized use list and must remain auditable.
+    B.CreateCall(RawWrapper,
+                 {llvm::PoisonValue::get(PtrTy),
+                  llvm::PoisonValue::get(PtrTy), B.getInt64(0)});
+    B.CreateRetVoid();
+  }
+
+  auto Analyze = [&]() {
+    auto Rows = notdec::mlsub::analyzeAnonymousPolymorphicBoundaries(*M);
+    std::map<const llvm::Function *, notdec::mlsub::AnonymousPolyBoundaryEvidence>
+        ByFunction;
+    for (auto &Row : Rows) {
+      ByFunction.emplace(Row.Function, std::move(Row));
+    }
+    return ByFunction;
+  };
+
+  auto BeforeRename = Analyze();
+  ASSERT_NE(BeforeRename.find(Wrapper), BeforeRename.end());
+  ASSERT_NE(BeforeRename.find(Factory), BeforeRename.end());
+  ASSERT_NE(BeforeRename.find(RawWrapper), BeforeRename.end());
+  ASSERT_NE(BeforeRename.find(Release), BeforeRename.end());
+  ASSERT_NE(BeforeRename.find(FixedDestructor), BeforeRename.end());
+  EXPECT_EQ(BeforeRename.at(Wrapper).AllocatorConfidence, "high");
+  EXPECT_TRUE(BeforeRename.at(Wrapper).PureReturnedCallForwarder);
+  EXPECT_NE(BeforeRename.at(Factory).AllocatorConfidence, "high");
+  EXPECT_TRUE(BeforeRename.at(Factory).ReturnedStorageAccessedInBody);
+
+  const auto &RawSlots = BeforeRename.at(RawWrapper).RawBufferSlots;
+  ASSERT_EQ(RawSlots.size(), 2U);
+  EXPECT_EQ(RawSlots[1].ArgIndex, 1U);
+  EXPECT_EQ(RawSlots[1].Confidence, "high");
+  EXPECT_GT(RawSlots[1].Score, RawSlots[0].Score);
+  ASSERT_EQ(BeforeRename.at(Release).DeallocatorSlots.size(), 1U);
+  EXPECT_EQ(BeforeRename.at(Release).DeallocatorSlots[0].Confidence, "high");
+  ASSERT_EQ(BeforeRename.at(FixedDestructor).DeallocatorSlots.size(), 1U);
+  EXPECT_EQ(BeforeRename.at(FixedDestructor).DeallocatorSlots[0].Confidence,
+            "low");
+
+  unsigned RenameIndex = 0;
+  for (llvm::Function &F : *M) {
+    F.setName("f" + std::to_string(RenameIndex++));
+  }
+  auto AfterRename = Analyze();
+  ASSERT_EQ(BeforeRename.size(), AfterRename.size());
+  for (const auto &[Function, Before] : BeforeRename) {
+    const auto &After = AfterRename.at(Function);
+    EXPECT_EQ(Before.AllocatorScore, After.AllocatorScore);
+    EXPECT_EQ(Before.AllocatorConfidence, After.AllocatorConfidence);
+    ASSERT_EQ(Before.RawBufferSlots.size(), After.RawBufferSlots.size());
+    for (std::size_t I = 0; I < Before.RawBufferSlots.size(); ++I) {
+      EXPECT_EQ(Before.RawBufferSlots[I].Score,
+                After.RawBufferSlots[I].Score);
+      EXPECT_EQ(Before.RawBufferSlots[I].Confidence,
+                After.RawBufferSlots[I].Confidence);
+    }
+    ASSERT_EQ(Before.DeallocatorSlots.size(), After.DeallocatorSlots.size());
+    for (std::size_t I = 0; I < Before.DeallocatorSlots.size(); ++I) {
+      EXPECT_EQ(Before.DeallocatorSlots[I].Score,
+                After.DeallocatorSlots[I].Score);
+      EXPECT_EQ(Before.DeallocatorSlots[I].Confidence,
+                After.DeallocatorSlots[I].Confidence);
+    }
+  }
 }
 
 TEST(MLsub, PhiNodeCanBeUsedByAnEarlierListedBlock) {

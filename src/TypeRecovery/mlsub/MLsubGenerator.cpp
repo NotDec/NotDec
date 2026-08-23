@@ -11,6 +11,7 @@
 #include "notdec-llvm2c/Utils.h"
 #include "notdec/TypeRecovery/mlsub/HTypeDebug.h"
 #include "notdec/TypeRecovery/mlsub/HTypeNormalize.h"
+#include "notdec/TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.h"
 #include "notdec/TypeRecovery/mlsub/Metadata.h"
 #include "notdec/TypeRecovery/mlsub/TypeBuilder.h"
 #include "notdec/TypeRecovery/LowTy.h"
@@ -90,6 +91,12 @@ constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
 constexpr llvm::StringLiteral kMallocWrappersFile = "MallocWrappers.txt";
 constexpr llvm::StringLiteral kPolymorphicBufferFunctionsFile =
     "PolymorphicBufferFunctions.txt";
+constexpr llvm::StringLiteral kAnonymousPolyBoundaryAuditEnv =
+    "NOTDEC_ANONYMOUS_POLY_AUDIT";
+constexpr llvm::StringLiteral kAnonymousPolyBoundaryAuditOnlyEnv =
+    "NOTDEC_ANONYMOUS_POLY_AUDIT_ONLY";
+constexpr llvm::StringLiteral kAnonymousPolyBoundaryAuditFile =
+    "AnonymousPolymorphicBoundaryAudit.jsonl";
 constexpr llvm::StringLiteral kCallSlotMergeDecisionsFile =
     "CallSlotMergeDecisions.txt";
 constexpr llvm::StringLiteral kLocalSubtypeMergeStatsFile =
@@ -5982,6 +5989,46 @@ void MLsubRecovery::run() {
 
   CallGraphAnalysis Ana;
   CallG = std::make_unique<CallGraph>(Ana.run(M, MAM));
+
+  // The anonymous detector is initially report-only.  Keeping it behind an
+  // explicit audit flag lets large-project experiments inspect precision and
+  // recall before any candidate changes SCC partitioning or type constraints.
+  bool AnonymousAuditOnly = envFlagEnabled(kAnonymousPolyBoundaryAuditOnlyEnv);
+  if (envFlagEnabled(kAnonymousPolyBoundaryAuditEnv) || AnonymousAuditOnly) {
+    if (WorkDir) {
+      auto Evidence = analyzeAnonymousPolymorphicBoundaries(M);
+      std::error_code EC;
+      auto Path = join(*WorkDir, kAnonymousPolyBoundaryAuditFile.str());
+      llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Text);
+      if (EC) {
+        llvm::errs() << "Warning: cannot write "
+                     << kAnonymousPolyBoundaryAuditFile << ": "
+                     << EC.message() << "\n";
+      } else {
+        writeAnonymousPolymorphicBoundaryReport(M, Evidence, Out);
+        llvm::errs() << "Info: wrote anonymous polymorphic boundary audit: "
+                     << Path << " (" << Evidence.size() << " functions)\n";
+      }
+    } else {
+      llvm::errs() << "Warning: " << kAnonymousPolyBoundaryAuditEnv
+                   << "=1 requires --gen-work-dir to write its report.\n";
+    }
+  }
+
+  // Large-project rule experiments need only the audit artifact.  Returning
+  // here avoids constructing MLsub constraints, while limiting the shortcut to
+  // an explicit diagnostic environment variable.  Use an LLVM IR output: C,
+  // Solidity and HType dump backends would request missing recovered types.
+  if (AnonymousAuditOnly && WorkDir) {
+    binarysub::binarysub_set_trace_stream(nullptr);
+    if (BinarysubTraceFile) {
+      BinarysubTraceFile->flush();
+      BinarysubTraceFile.reset();
+    }
+    llvm::errs() << "Info: anonymous polymorphic boundary audit-only run "
+                    "stopped before constraint generation.\n";
+    return;
+  }
 
   if (WorkDir) {
     std::error_code EC;
