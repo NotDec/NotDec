@@ -82,3 +82,30 @@ global pointer slots, and recovered function-parameter layout slices. The
 lifting runner mirrors the same manifest-driven style, but keeps its oracles
 smaller than a full-text `.ll` diff by checking summaries or selected workdir
 logs instead.
+
+## Running and interpreting type-recovery tests
+
+Use the configured build directory and select the current suites with CTest:
+
+- `notdec.lifting.wasm`
+- `notdec.type_recovery.llvm_ir.tr_level_2`
+- `notdec.type_recovery.sysy.tr_level_2`
+- `notdec.type_recovery.realworld.tr_level_2`
+
+```bash
+ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
+ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy).tr_level_2' --output-on-failure
+ctest --test-dir build -R 'notdec.type_recovery.(llvm_ir|sysy|realworld).tr_level_2' --output-on-failure
+cmake --build build --target TypeBuilderTest binarysub -j4
+./build/bin/TypeBuilderTest
+./build/binarysub
+```
+
+`test/legacy/` and suite-local `legacy/` directories are historical references,
+not current goldens. Do not assume the obsolete `--only-opt` call in `test.sh`
+is a supported CLI option. Before a broad run, confirm required external data,
+dependencies, and submodule state.
+
+For type-recovery assertions, compare the suite's HType oracle or workdir HType
+artifacts. Output LLVM IR only establishes verifier validity; it is not a
+type-inference oracle.

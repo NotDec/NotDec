@@ -8,6 +8,8 @@
     - [WebAssembly Frontend](docs/wasm-frontend.md)
     - [Decompiler Middle End](docs/optimizers.md)
     - [Type Recovery Merge Policies](docs/type-recovery-merge-policies.md)
+    - [Source-IR Merge Evaluation](docs/source-ir-merge-evaluation.md)
+    - [Performance Profiling](docs/performance-profiling.md)
     - [Decompiler Back End](docs/backend.md)
 - [Papers&Resources](papers.md)
 - [Ghidra](ghidra.md)

@@ -29,9 +29,12 @@
   - `ValueTypes.txt` 和 `VarOrigins.txt` 只写 stable value label，不补完整 LLVM value 文本
   - 适合完整项目跑批；需要看具体指令文本时不要开启
 - `--emit-tr-input-ir=<path>`
-  - 跑完 pre-type-recovery 标准化 pass，导出类型恢复真正消费的输入 IR
+  - 跑完 pre-type-recovery 标准化 pass，导出 stage-A IR
   - 支持输出到 `.ll` 或 `.bc`
   - 导出后直接退出，不进入 `MLsubRecoveryMain`
+  - 它不是包含标量化等 MLsub 入口准备的最终 checkpoint；需要可复现的实际
+    MLsub 输入时，用正常 `-g --work-dir=<dir>` 运行后取
+    `<dir>/02-mlsub-input.ll`
 - `--frozen-tr-input-ir`
   - 声明当前输入已经是 `--emit-tr-input-ir` 导出的冻结 IR
   - 用于显式进入阶段 B 语义
@@ -306,3 +309,31 @@
 - [`external/NotDec-bin2llvm/DEBUG.md`](/sn640/NotDec/external/NotDec-bin2llvm/DEBUG.md)
 
 主仓库这里只保留通用的调试说明，不重复写 bin2llvm 的本机命令。
+
+## 6. 冻结输入和环境变量
+
+涉及 frozen stage-A/stage-B 输入、约束注入或类型恢复 A/B 时，先在本节确认
+阶段边界。`--emit-tr-input-ir=<path>` 运行 pre-type-recovery pipeline，写出 `.ll`
+或 `.bc` 后退出；`--frozen-tr-input-ir` 把 stage-A 导出产物作为 stage-B 输入，跳过
+这段预处理。
+`NOTDEC_EXTRA_CONSTRAINTS` 只可用于 stage-B，必须与 `--frozen-tr-input-ir` 一起用，
+不能和 `--emit-tr-input-ir` 混用。
+
+若同时需要 workdir，请以工作目录重发射的 `02-mlsub-input.ll` 作为实际 MLsub
+checkpoint：它包含 type-recovery 入口的标量化等输入准备，可能与
+`--emit-tr-input-ir` 写出的 stage-A 文件不同。`02-mlsub-input.anchor.json` 是约束
+文件对齐 checkpoint 的哈希锚点。
+
+常用环境变量如下：
+
+- `NOTDEC_SUMMARY_OVERRIDE`：summary/lower-bound override，方向为
+  `OverrideTy <: F`。
+- `NOTDEC_SIGNATURE_OVERRIDE`：函数自身签名 upper-bound override，方向为
+  `F <: OverrideTy`。
+- `NOTDEC_EXTRA_CONSTRAINTS`：冻结 stage-B IR 的额外 MLsub/PNDiff 约束。
+- `NOTDEC_BINARYSUB_THREADS`：bulk simplify 线程数；`1` 表示单线程，未设置时用
+  硬件线程数。
+- `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=0`：只关闭 oneTBB
+  canonicalize 并行；更早的 bottom-up 约束生成仍是串行。若要在编译期关闭
+  binarysub oneTBB，重新配置 CMake 并传
+  `-DNOTDEC_ENABLE_BINARYSUB_PARALLEL=OFF`。

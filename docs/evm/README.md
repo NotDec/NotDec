@@ -2,6 +2,9 @@
 
 这组文档介绍 Solidity 源码编译到 EVM 后常见的底层形状。
 
+EVM 批处理路径、历史 screen 约定和 CheckedBoundsPass 抽样口径见
+[Apehex EVM 跑批说明](apehex-batch-loop.md)。
+
 这里先不讲反编译器识别和实现。重点是先看懂：
 
 - Solidity 用户写了什么。

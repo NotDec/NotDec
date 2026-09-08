@@ -64,3 +64,7 @@
   （sound 合并改变输出说明规则不成立）。
 - 正确性：`--merge-eval-dir` 的 `bad_unions` 必须为 0，先于 fragmentation。
 - 性能：memcached 286+get 切片、wasm32 fortune（i32 数据流回归）不可退化。
+
+完整的带 DebugInfo 源码级 IR 评估流程、输出含义和最小化定位方法见
+[Source-IR Merge Evaluation](source-ir-merge-evaluation.md)。做带
+`--merge-eval-dir` 的策略修改前必须先读该文档。
