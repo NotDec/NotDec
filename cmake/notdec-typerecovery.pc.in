@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: notdec-typerecovery
+Description: NotDec type-recovery pass library and support headers
+Version: @PROJECT_VERSION@
+Cflags: -I${includedir} -I${includedir}/notdec -I${includedir}/notdec-llvm2c -I${includedir}/binarysub -I@NOTDEC_LLVM_INSTALL_DIR@/include -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS
+Libs: -L${libdir} -lnotdec-typerecovery -lnotdec-evm-pattern-utils -lnotdec-backend-core -lbinarysub_lib
+Libs.private: -L@NOTDEC_LLVM_INSTALL_DIR@/lib -lLLVM-22 -ltbb -lpthread -ldl -lz

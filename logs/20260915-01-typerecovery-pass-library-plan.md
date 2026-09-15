@@ -131,7 +131,22 @@ Implemented in this batch:
   - `NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=1` inside Microsub2 now returns exit 1
     with `[microsub2] type recovery failed: ...` instead of terminating.
 
-The library target still uses the process-wide NotDec workdir/environment
-state (as before) and `std::abort()` paths remain.  Microsub2 now keeps
-diagnostic-stop exceptions inside the library, while a later batch can
-replace the remaining global/env/abort behavior.
+## Packaging batch
+
+* The root `CMakeLists.txt` now installs `notdec-typerecovery`,
+  `notdec-evm-pattern-utils`, `notdec-backend-core`, and `binarysub_lib` into
+  a `notdec-typerecovery` install component, together with the main,
+  binarysub, and llvm2c/backend-core headers.
+* `cmake/notdec-typerecovery.pc.in` generates a pkg-config file with the
+  static-archive order and the LLVM/TBB private link flags.  It uses
+  `${pcfiledir}` for relocatable prefix resolution.
+* Validation:
+  - `cmake --install build-notdec-nothreads2 --prefix /tmp/notdec-install-test
+    --component notdec-typerecovery` installs the four archives and the `.pc`.
+  - `pkg-config --cflags --libs --static notdec-typerecovery` compiles and
+    links the temporary pass-composition consumer, which still runs on the
+    Microsub2 `s001` module and emits HType.
+* The library still uses process-wide NotDec workdir/environment state and
+  `std::abort()` paths remain.  Microsub2 keeps diagnostic-stop exceptions
+  inside the library; a later batch can replace the remaining global/env/abort
+  behavior.

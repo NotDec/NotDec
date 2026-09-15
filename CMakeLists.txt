@@ -229,3 +229,33 @@ if (BUILD_TESTING)
 	add_subdirectory(unittests)
 	add_subdirectory(test)
 endif ()
+
+
+#===============================================================================
+# Type-recovery Pass library packaging
+#===============================================================================
+install(TARGETS
+notdec-typerecovery
+notdec-evm-pattern-utils
+notdec-backend-core
+binarysub_lib
+ARCHIVE DESTINATION lib COMPONENT notdec-typerecovery
+LIBRARY DESTINATION lib COMPONENT notdec-typerecovery
+)
+
+install(DIRECTORY include/ DESTINATION include
+COMPONENT notdec-typerecovery)
+install(DIRECTORY external/binarysub/include/ DESTINATION include
+COMPONENT notdec-typerecovery)
+install(DIRECTORY external/NotDec-llvm2c/include/ DESTINATION include
+COMPONENT notdec-typerecovery)
+
+configure_file(
+"${PROJECT_SOURCE_DIR}/cmake/notdec-typerecovery.pc.in"
+"${PROJECT_BINARY_DIR}/notdec-typerecovery.pc"
+@ONLY
+)
+install(FILES "${PROJECT_BINARY_DIR}/notdec-typerecovery.pc"
+DESTINATION lib/pkgconfig
+COMPONENT notdec-typerecovery
+)
