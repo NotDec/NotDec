@@ -13,64 +13,7 @@
 #include <sstream>
 #include <string>
 
-std::string getSuffix(std::string fname) {
-  std::size_t ind = fname.find_last_of('.');
-  if (ind != std::string::npos) {
-    return fname.substr(ind);
-  }
-  return std::string();
-}
 namespace notdec {
-
-namespace {
-std::string CurrentWorkDir;
-// Fast workdir type reports keep stable value ids but omit verbose LLVM value
-// strings. Keep the mode beside CurrentWorkDir because those report writers
-// are spread across passes and already use this process-wide run context.
-bool FastWorkDir = false;
-}
-
-std::string getDefaultWorkDir(const std::string &inputPath) {
-  return inputPath + ".notdec";
-}
-
-void setWorkDir(std::string path) { CurrentWorkDir = std::move(path); }
-
-void setFastWorkDir(bool enabled) { FastWorkDir = enabled; }
-
-llvm::StringRef getWorkDir() { return CurrentWorkDir; }
-
-bool hasWorkDir() { return !CurrentWorkDir.empty(); }
-
-bool isFastWorkDir() { return FastWorkDir; }
-
-std::optional<std::string> getWorkDirOpt() {
-  if (!hasWorkDir()) {
-    return std::nullopt;
-  }
-  return CurrentWorkDir;
-}
-
-void appendWorkDirLog(llvm::StringRef fileName, llvm::StringRef content) {
-  auto WorkDir = getWorkDirOpt();
-  if (!WorkDir) {
-    return;
-  }
-
-  std::error_code EC = llvm::sys::fs::create_directories(*WorkDir);
-  if (EC) {
-    return;
-  }
-
-  auto Path = join(*WorkDir, fileName.str());
-  llvm::raw_fd_ostream OS(
-      Path, EC, llvm::sys::fs::OF_Text | llvm::sys::fs::OF_Append);
-  if (EC) {
-    return;
-  }
-
-  OS << content;
-}
 
 std::string getFuncSetName(const std::set<llvm::Function *> &SCC) {
   std::string SCCNames;
@@ -85,31 +28,8 @@ std::string getFuncSetName(const std::set<llvm::Function *> &SCC) {
   return SCCNames;
 }
 
-std::string readFileToString(const char *path) {
-  std::ifstream t(path);
-  std::stringstream buffer;
-  buffer << t.rdbuf();
-  return buffer.str();
-}
-
-std::string join(std::string path, std::string elem) {
-  return path.back() == '/' ? path + elem : path + "/" + elem;
-}
-
 [[nodiscard]] bool equal(llvm::StringRef S1, const char* S2) {
   return S1 == S2;
-}
-
-[[nodiscard]] bool printModule(llvm::Module &M, const char *path) {
-  std::error_code EC;
-  llvm::raw_fd_ostream os(path, EC);
-  if (EC) {
-    std::cerr << "Cannot open output file: " << path << std::endl;
-    std::cerr << EC.message() << std::endl;
-    std::abort();
-  }
-  M.print(os, nullptr);
-  return true;
 }
 
 [[nodiscard]] std::string toString(const clang::QualType &QT) {

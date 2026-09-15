@@ -1,7 +1,7 @@
 #include "notdec/TypeRecovery/mlsub/MergePolicyEval.h"
 
 #include "notdec/TypeRecovery/mlsub/MLsubGenerator.h"
-#include "notdec-llvm2c/Utils.h"
+#include "notdec/Utils/Utils.h"
 
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/BinaryFormat/Dwarf.h>
@@ -561,7 +561,7 @@ struct MergePolicyEval::Impl {
       return;
     }
     llvm::raw_fd_ostream Out(
-        llvm2c::join(OutputDir, "DebugInfoValueTypes.txt"), EC,
+        join(OutputDir, "DebugInfoValueTypes.txt"), EC,
         llvm::sys::fs::OF_Text);
     if (EC) {
       llvm::errs() << "Warning: failed to write DebugInfoValueTypes.txt: "
@@ -592,7 +592,7 @@ struct MergePolicyEval::Impl {
 
   void writeBadUnions() const {
     std::error_code EC;
-    llvm::raw_fd_ostream Out(llvm2c::join(OutputDir, "bad_unions.jsonl"), EC,
+    llvm::raw_fd_ostream Out(join(OutputDir, "bad_unions.jsonl"), EC,
                              llvm::sys::fs::OF_Text);
     if (EC) {
       llvm::errs() << "Warning: failed to write bad_unions.jsonl: "
@@ -615,7 +615,7 @@ struct MergePolicyEval::Impl {
   void writeFragmentedTypes(const FragmentedComponentMap &TypeComponents) const {
     std::error_code EC;
     llvm::raw_fd_ostream Out(
-        llvm2c::join(OutputDir, "fragmented_types.jsonl"), EC,
+        join(OutputDir, "fragmented_types.jsonl"), EC,
         llvm::sys::fs::OF_Text);
     if (EC) {
       llvm::errs() << "Warning: failed to write fragmented_types.jsonl: "
@@ -767,7 +767,7 @@ struct MergePolicyEval::Impl {
 
     EC = {};
     llvm::raw_fd_ostream SummaryOut(
-        llvm2c::join(OutputDir, "merge-eval-summary.json"), EC,
+        join(OutputDir, "merge-eval-summary.json"), EC,
         llvm::sys::fs::OF_Text);
     if (EC) {
       llvm::errs() << "Warning: failed to write merge-eval-summary.json: "

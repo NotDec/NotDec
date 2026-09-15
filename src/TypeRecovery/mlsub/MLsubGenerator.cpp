@@ -6,9 +6,7 @@
 #include "binarysub/binarysub-core.h"
 #include "binarysub/binarysub-primitive-semantics.h"
 #include "binarysub/binarysub.h"
-#include "notdec-llvm2c/Interface.h"
 #include "binarysub/HType.h"
-#include "notdec-llvm2c/Utils.h"
 #include "notdec/TypeRecovery/mlsub/HTypeDebug.h"
 #include "notdec/TypeRecovery/mlsub/HTypeNormalize.h"
 #include "notdec/TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.h"
@@ -9778,7 +9776,13 @@ void ConstraintsGenerator::MLsubVisitor::handlePHINodes() {
 }
 
 unsigned ConstraintsGenerator::getLLVMTypeSize(Type *ElemTy) {
-  return llvm2c::getLLVMTypeSize(ElemTy, PointerSize);
+  if (ElemTy->isPointerTy()) {
+    assert(PointerSize != 0);
+    return PointerSize;
+  }
+  const auto Size = ElemTy->getPrimitiveSizeInBits();
+  assert(Size != 0);
+  return Size;
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {

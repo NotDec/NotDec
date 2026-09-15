@@ -1,7 +1,7 @@
 #ifndef _NOTDEC_MLSUB_HTYPE_DEBUG_H_
 #define _NOTDEC_MLSUB_HTYPE_DEBUG_H_
 
-#include "notdec-llvm2c/Interface.h"
+#include "notdec-backends/Core/HTypeResult.h"
 #include <llvm/ADT/StringRef.h>
 
 namespace llvm {

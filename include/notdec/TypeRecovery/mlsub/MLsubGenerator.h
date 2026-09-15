@@ -37,15 +37,12 @@
 #include <llvm/Support/FormattedStream.h>
 #include <llvm/Support/JSON.h>
 
-#include <clang/AST/Type.h>
-#include <clang/Frontend/ASTUnit.h>
-#include <clang/Tooling/Tooling.h>
 
 #include "TypeRecovery/mlsub/MLsubGraph.h"
 #include "TypeRecovery/mlsub/MergePolicyEval.h"
 #include "binarysub/PNDiff.h"
 #include "binarysub/binarysub-core.h"
-#include "notdec-llvm2c/Interface.h"
+#include "notdec-backends/Core/HTypeResult.h"
 #include "notdec-llvm2c/Interface/ExtValuePtr.h"
 #include "notdec-llvm2c/Interface/ValueNamer.h"
 

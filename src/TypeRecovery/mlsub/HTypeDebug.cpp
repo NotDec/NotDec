@@ -1,7 +1,7 @@
 #include "notdec/TypeRecovery/mlsub/HTypeDebug.h"
 
 #include "binarysub/HType.h"
-#include "notdec-llvm2c/Utils.h"
+#include "notdec/Utils/Utils.h"
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringExtras.h>
@@ -130,7 +130,7 @@ void writeDebugEVMMarkerFacts(llvm::StringRef DebugDir,
 
   std::error_code EC;
   llvm::raw_fd_ostream Out(
-      llvm2c::join(DebugDir.str(), kEVMMarkerFactsFile.str()), EC,
+      join(DebugDir.str(), kEVMMarkerFactsFile.str()), EC,
       llvm::sys::fs::OF_Text);
   if (EC) {
     llvm::errs() << "Error printing to " << kEVMMarkerFactsFile << ", "
@@ -168,7 +168,7 @@ void writeDebugValueHTypes(llvm::StringRef DebugDir,
                            const llvm2c::HTypeResult &Result) {
   std::error_code EC;
   llvm::raw_fd_ostream Out(
-      llvm2c::join(DebugDir.str(), kValueHTypesFile.str()), EC,
+      join(DebugDir.str(), kValueHTypesFile.str()), EC,
       llvm::sys::fs::OF_Text);
   if (EC) {
     llvm::errs() << "Error printing to " << kValueHTypesFile << ", "
@@ -182,7 +182,7 @@ void writeDebugImportantHTypes(llvm::StringRef DebugDir,
                                const llvm2c::HTypeResult &Result) {
   std::error_code EC;
   llvm::raw_fd_ostream Out(
-      llvm2c::join(DebugDir.str(), kImportantHTypesFile.str()), EC,
+      join(DebugDir.str(), kImportantHTypesFile.str()), EC,
       llvm::sys::fs::OF_Text);
   if (EC) {
     llvm::errs() << "Error printing to " << kImportantHTypesFile << ", "
