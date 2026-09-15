@@ -5680,16 +5680,16 @@ void ConstraintsGenerator::recordStore(ExtValuePtr Addr, SimpleType ValueTy,
                     .Source = Source});
 }
 
-void ConstraintsGenerator::addEVMConstantMemoryField(ExtValuePtr Addr,
-                                                     SimpleType ValueTy) {
+void ConstraintsGenerator::addConstantMemoryField(ExtValuePtr Addr,
+                                                  SimpleType ValueTy) {
   auto *ConstAddr = std::get_if<ConstantAddr>(&Addr);
   if (ConstAddr == nullptr) {
     return;
   }
 
-  // EVM native memory uses inttoptr constants as byte offsets into one memory
-  // object. Keep only constant offsets here; dynamic offsets need separate
-  // array/unknown modeling.
+  // A constant address is an offset into the one memory object, so record the
+  // accessed field there. Keep only constant offsets here; dynamic offsets need
+  // separate array/unknown modeling.
   auto Offset = getSigned64ConstantAddress(*ConstAddr->Val);
   if (!Offset.has_value()) {
     return;
@@ -8115,8 +8115,11 @@ void ConstraintsGenerator::MLsubVisitor::visitInsertValueInst(
 
 void ConstraintsGenerator::MLsubVisitor::visitCastInst(CastInst &I) {
   if (isa<BitCastInst, PtrToIntInst, IntToPtrInst>(I)) {
-    if (isa<IntToPtrInst>(I) && I.getModule() != nullptr &&
-        isEVMModule(*I.getModule())) {
+    // A constant inttoptr is an address: hand it to the memory object as a
+    // field so the constant node is connected by an offset edge.  This is not
+    // EVM-specific: a constant only becomes an inttoptr when the code is about
+    // to use it as an address.
+    if (isa<IntToPtrInst>(I)) {
       if (auto *CI = dyn_cast<ConstantInt>(I.getOperand(0))) {
         ConstantAddr Addr{.Val = CI};
         cg.getOrInsertNode(Addr);
@@ -9838,9 +9841,7 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   auto BitSize = cg.getLLVMTypeSize(I.getType());
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 0);
 
-  if (I.getModule() != nullptr && isEVMModule(*I.getModule())) {
-    cg.addEVMConstantMemoryField(Addr, RetVal);
-  }
+  cg.addConstantMemoryField(Addr, RetVal);
   cg.addSubtype(PtrVal, binarysub::make_ptr_load(RetVal, BitSize));
 }
 
@@ -9872,9 +9873,7 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 1);
 
   cg.recordStore(Addr, StoreVal, BitSize, &I);
-  if (I.getModule() != nullptr && isEVMModule(*I.getModule())) {
-    cg.addEVMConstantMemoryField(Addr, StoreVal);
-  }
+  cg.addConstantMemoryField(Addr, StoreVal);
   cg.addSubtype(PtrVal, binarysub::make_ptr_store(StoreVal, BitSize));
 }
 

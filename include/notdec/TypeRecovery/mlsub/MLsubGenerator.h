@@ -600,7 +600,7 @@ struct ConstraintsGenerator {
   }
   void recordStore(ExtValuePtr Addr, SimpleType ValueTy, unsigned BitSize,
                    llvm::Instruction *Source);
-  void addEVMConstantMemoryField(ExtValuePtr Addr, SimpleType ValueTy);
+  void addConstantMemoryField(ExtValuePtr Addr, SimpleType ValueTy);
   SimpleType getOrCreateStorageField(llvm::StringRef FieldName,
                                      unsigned BitSize = 0);
 
