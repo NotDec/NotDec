@@ -25,6 +25,7 @@ target_link_libraries(notdec-evm-pattern-utils
 add_library(notdec-typerecovery STATIC
 	# Type recovery itself.
 	Passes/DangerousTypePatternScan.cpp
+	Passes/FreePhiSplitPass.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/mlsub/HTypeDebug.cpp
 	TypeRecovery/mlsub/HTypeNormalize.cpp

@@ -730,6 +730,8 @@ class MLsubRecovery {
   std::string EmitPostConstraintStateDir;
   std::string LoadPostConstraintStateDir;
   int TypeRecoveryLevel = 0;
+  bool ThrowOnDiagnosticStop = true;
+  std::string FailureReason;
   bool LoadedPostConstraintState = false;
   std::shared_ptr<MergePolicyEval> MergeEval;
   bool EnableStructPtrLoadStoreMerge = false;
@@ -787,6 +789,11 @@ public:
     LoadPostConstraintStateDir = std::move(LoadDir);
   }
   void setTypeRecoveryLevel(int Level) { TypeRecoveryLevel = Level; }
+  void setThrowOnDiagnosticStop(bool Throw) {
+    ThrowOnDiagnosticStop = Throw;
+  }
+  bool failed() const { return !FailureReason.empty(); }
+  const std::string &failureReason() const { return FailureReason; }
   const llvm::Module &getCheckpointModule() const { return Mod; }
   llvm::StringRef getCheckpointDataLayout() const { return data_layout; }
   unsigned getCheckpointPointerSize() const { return PointerSize; }
@@ -814,6 +821,7 @@ public:
     EnableStructPtrLoadStoreMerge = Enable;
   }
   void run();
+  void runImpl();
   void loadSummaryFile(llvm::Module &M, const char *path,
                        bool StrictValidation = true);
   void loadSignatureFile(llvm::Module &M, const char *path,

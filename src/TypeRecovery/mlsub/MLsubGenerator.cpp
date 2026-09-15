@@ -5856,7 +5856,7 @@ SimpleType ConstraintsGenerator::addRemapType(ExtValuePtr Val,
   return It.first->second;
 }
 
-void MLsubRecovery::run() {
+void MLsubRecovery::runImpl() {
   auto &M = const_cast<llvm::Module &>(Mod);
   LoadedPostConstraintState = false;
   if (!MergeEvalDir.empty()) {
@@ -6105,6 +6105,23 @@ void MLsubRecovery::run() {
   if (BinarysubTraceFile) {
     BinarysubTraceFile->flush();
     BinarysubTraceFile.reset();
+  }
+}
+
+void MLsubRecovery::run() {
+  FailureReason.clear();
+  try {
+    runImpl();
+  } catch (const SimplifyDiagnosticStop &Stop) {
+    if (ThrowOnDiagnosticStop) {
+      throw;
+    }
+    FailureReason = Stop.what();
+  } catch (const std::exception &Error) {
+    if (ThrowOnDiagnosticStop) {
+      throw;
+    }
+    FailureReason = Error.what();
   }
 }
 

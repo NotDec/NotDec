@@ -112,9 +112,26 @@ Implemented in this batch:
 * The rebuilt NotDec CLI, run on the same MicroSub2 `.ll`, still completes
   with `Constraint generation done! SCC count:1`.
 
-## Follow-up
+## Follow-up batch
+
+* Extracted `FreePhiSplitPass` from the anonymous namespace in
+  `src/Passes/PassManager.cpp` into
+  `include/notdec/Passes/FreePhiSplitPass.h` and
+  `src/Passes/FreePhiSplitPass.cpp`; added it to `notdec-typerecovery`.
+  `PassManager.cpp` now includes the public header.
+* Added `MLsubRecovery::setThrowOnDiagnosticStop(bool)` (default `true`) and
+  `failed()/failureReason()`.  `MLsubRecovery::run()` is now a wrapper around
+  `runImpl()` that catches `SimplifyDiagnosticStop` and `std::exception`; when
+  the flag is false it stores the failure instead of throwing across the
+  library boundary.  The NotDec CLI keeps the default throwing behavior.
+* Validation after this batch:
+  - `notdec-typerecovery` and `notdec` build.
+  - Microsub2 enabled build links the new pass and runs the full default
+    smoke 9/9 with type recovery.
+  - `NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=1` inside Microsub2 now returns exit 1
+    with `[microsub2] type recovery failed: ...` instead of terminating.
 
 The library target still uses the process-wide NotDec workdir/environment
-state (as before) and the Pass manager composition is left to the consumer.
-Microsub2 wiring and exclusive option cleanup will be handled in the
-integration batch.
+state (as before) and `std::abort()` paths remain.  Microsub2 now keeps
+diagnostic-stop exceptions inside the library, while a later batch can
+replace the remaining global/env/abort behavior.
