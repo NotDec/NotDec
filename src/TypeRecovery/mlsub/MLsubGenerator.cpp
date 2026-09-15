@@ -7904,10 +7904,18 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
         return binarysub::make_variable(
             lvl, getSize(getExtValuePtr(C, User, OpInd)));
       } else {
+        // Constant address arithmetic such as
+        // `i64 add (i64 ptrtoint (ptr @mem to i64), C)` appears in
+        // Microsub2-lifted IR.  It cannot be connected to a pointee layout
+        // here, but aborting the whole type-recovery run turns a local
+        // unknown into a benchmark-wide failure.  Keep it as an ordinary
+        // size-typed variable instead.
         llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                     << "ERROR: ConstraintsGenerator::convertSimpleTypeVal "
-                        "unhandled ConstantExpr: "
+                     << "WARN: ConstraintsGenerator::convertSimpleTypeVal "
+                        "unhandled ConstantExpr, treating as variable: "
                      << *C << "\n";
+        return binarysub::make_variable(
+            lvl, getSize(getExtValuePtr(C, User, OpInd)));
       }
     } else if (auto gv = dyn_cast<GlobalValue>(C)) { // global variable
       return binarysub::make_variable(lvl, getSize(gv));
@@ -7940,10 +7948,11 @@ SimpleType ConstraintsGenerator::convertSimpleTypeVal(Value *Val,
           lvl, getSize(getExtValuePtr(C, User, OpInd)));
     }
     llvm::errs() << __FILE__ << ":" << __LINE__ << ": "
-                 << "ERROR: ConstraintsGenerator::convertSimpleTypeVal "
-                    "unhandled type of constant: "
+                 << "WARN: ConstraintsGenerator::convertSimpleTypeVal "
+                    "unhandled type of constant, treating as variable: "
                  << *C << "\n";
-    std::abort();
+    return binarysub::make_variable(
+        lvl, getSize(getExtValuePtr(C, User, OpInd)));
   } else if (auto arg = dyn_cast<Argument>(Val)) { // for function argument
     return binarysub::make_variable(lvl, getSize(arg));
   }
