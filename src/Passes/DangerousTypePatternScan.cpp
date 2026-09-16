@@ -38,6 +38,17 @@ bool isByteGEP(const GetElementPtrInst &GEP) {
   return Src->isIntegerTy(8) || Src->isPointerTy();
 }
 
+// Reads a constant offset without tripping APInt::getZExtValue()'s
+// "active bits <= 64" assertion.  EVM IR is i256-based, so a constant GEP
+// index or addend can legitimately exceed 64 bits; such a value cannot be a
+// byte offset anyway, so skip the normalization instead of aborting.
+std::optional<uint64_t> getConstantOffset(const ConstantInt &C) {
+  if (C.getBitWidth() > 64) {
+    return std::nullopt;
+  }
+  return C.getZExtValue();
+}
+
 NormPtr normalizePointer(Value *V, const DataLayout &DL, unsigned Depth = 0) {
   if (Depth > 6) {
     return NormPtr{V, 0};
@@ -56,10 +67,13 @@ NormPtr normalizePointer(Value *V, const DataLayout &DL, unsigned Depth = 0) {
                     cast<PointerType>(GEP->getSourceElementType())) /
                 8;
       }
-      if (C && Scale != 0) {
-        NormPtr P = normalizePointer(GEP->getPointerOperand(), DL, Depth + 1);
-        P.Offset += static_cast<int64_t>(C->getZExtValue()) * Scale;
-        return P;
+      auto Offset = C == nullptr ? std::nullopt : getConstantOffset(*C);
+      if (Offset.has_value()) {
+        if (Scale != 0) {
+          NormPtr P = normalizePointer(GEP->getPointerOperand(), DL, Depth + 1);
+          P.Offset += static_cast<int64_t>(*Offset) * Scale;
+          return P;
+        }
       }
     }
     // 多索引常量 GEP（如 wasm 全局内存 [N x i8]）不好在无类型下算大小，
@@ -69,9 +83,11 @@ NormPtr normalizePointer(Value *V, const DataLayout &DL, unsigned Depth = 0) {
   if (auto *Add = dyn_cast<BinaryOperator>(V)) {
     if (Add->getOpcode() == Instruction::Add) {
       if (auto *C = dyn_cast<ConstantInt>(Add->getOperand(1))) {
-        NormPtr P = normalizePointer(Add->getOperand(0), DL, Depth + 1);
-        P.Offset += static_cast<int64_t>(C->getZExtValue());
-        return P;
+        if (auto Offset = getConstantOffset(*C)) {
+          NormPtr P = normalizePointer(Add->getOperand(0), DL, Depth + 1);
+          P.Offset += static_cast<int64_t>(*Offset);
+          return P;
+        }
       }
     }
   }
