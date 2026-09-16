@@ -2668,10 +2668,14 @@ void appendVarOriginEntries(
 std::shared_ptr<ConstraintsGenerator> getFuncCG(AllGraphs &AG,
                                                 const llvm::Function *F) {
   auto *CGN = AG.CG->getOrInsertFunction(const_cast<llvm::Function *>(F));
-  if (!AG.Func2SCCIndex.count(CGN)) {
+  const auto It = AG.Func2SCCIndex.find(CGN);
+  // A node without an SCC has no summary (the call graph may gain nodes after
+  // the partition was built).  The index itself is checked as well: a stale
+  // entry must degrade to "no summary" instead of throwing out of range.
+  if (It == AG.Func2SCCIndex.end() || It->second >= AG.AllSCCs.size()) {
     return nullptr;
   }
-  return AG.AllSCCs.at(AG.Func2SCCIndex.at(CGN)).Generator;
+  return AG.AllSCCs[It->second].Generator;
 }
 
 struct PNDiffStateInfo {
@@ -6788,8 +6792,14 @@ void MLsubRecovery::bottomUpPhase() {
           continue;
         }
         auto Ind2 = TargetIt->second;
+        if (Ind2 >= AG.AllSCCs.size()) {
+          llvm::errs() << "Warning: skip call with out-of-range MLsub SCC index: "
+                       << F->getName() << " (index " << Ind2 << " of "
+                       << AG.AllSCCs.size() << ")\n";
+          continue;
+        }
         assert(Ind2 > Ind);
-        auto &TData = AG.AllSCCs.at(Ind2);
+        auto &TData = AG.AllSCCs[Ind2];
         auto TargetG = TData.Generator;
         auto TargetFTy = TargetG->getNodeOrNull(F);
         auto TargetLevel = binarysub::level_of(TargetFTy);
