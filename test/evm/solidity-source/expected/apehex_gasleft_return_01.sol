@@ -1,4 +1,5 @@
 contract Decompiled {
+    uint256 public whole;
     uint256 public slot_0;
 
     function public_0xd8b30904() public returns (uint256 ret0) {
