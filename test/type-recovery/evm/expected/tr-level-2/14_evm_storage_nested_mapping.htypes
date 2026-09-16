@@ -8,7 +8,6 @@ struct struct_0 {
 };
 
 struct struct_1 {
-  top:0 whole; /* storage path:  */
   struct_2 slot_1; /* storage path: slot:1 (slot 1) */
 }; /* EVM storage root */
 
