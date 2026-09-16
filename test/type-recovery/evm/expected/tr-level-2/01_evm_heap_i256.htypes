@@ -23,7 +23,7 @@
 [-] main::%scratch => lower=bottom:256 ; upper=top:256
 [+] main::%scratch.addr => lower=bottom:256 ; upper=top:256
 [+] main::%word => lower=bottom:256 ; upper=top:256
-[+] main::arg0 => lower=bottom:256 ; upper=top:256
+[-] main::arg0 => lower=bottom:256 ; upper=top:256
 [+] notdec_evm_finalize_alloc::arg0 => lower=bottom:256 ; upper=top:256
 [+] notdec_evm_finalize_alloc::arg1 => lower=bottom:256 ; upper=top:256
 
@@ -31,3 +31,4 @@
 type => top:256
 
 [storage]
+

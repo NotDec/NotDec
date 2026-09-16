@@ -4,6 +4,7 @@
 typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
 
 struct struct_0 {
+  top:0 whole; /* storage path:  */
   struct_1 slot_0; /* storage path: slot:0 (slot 0) */
 }; /* EVM storage root */
 
@@ -45,3 +46,4 @@ type => top:64
 [storage]
 decl => struct_0
 type => struct_0
+
