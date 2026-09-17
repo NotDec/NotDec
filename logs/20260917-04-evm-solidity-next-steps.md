@@ -465,6 +465,34 @@ condition_todo（813）、goto（424）、real_jump（376）、dangling_goto（3
 - dynamic ABI return（bytes/string/array）只有单 word static return 稳；
 - `selfdestruct`、`tx.origin` 等环境语义在 body 里没有恢复（gasleft 的 `kill()`
   then 分支为空是典型例子）。
+**状态：环境语义与 selfdestruct 已补。**
+
+- `evmEnvBuiltinExpr()` 新增：`evm_gasprice -> tx.gasprice`、
+  `evm_origin -> tx.origin`、`evm_timestamp -> block.timestamp`、
+  `evm_number -> block.number`、`evm_chainid -> block.chainid`、
+  `evm_gaslimit -> block.gaslimit`、`evm_prevrandao -> block.prevrandao`、
+  `evm_coinbase -> block.coinbase`、`evm_address -> address(this)`、
+  `evm_selfbalance -> address(this).balance`。
+  `evm_callvalue` 故意不加：`msg.value` 在非 payable 函数里非法，而后端目前不追踪
+  payability（试加后 13 个 pattern case 编译失败，已回退该分支）。
+- 地址值判断抽成 `isAddressValuedExpr()`（msg.sender / tx.origin /
+  block.coinbase / address(this) / address 参数）；`wordCastAddressExpr()` 统一
+  转 `uint256(uint160(...))`。`block.coinbase` 是 address payable，
+  `uint160()` 不收，额外包一层 `address(...)`。storage 赋值和单 word return 也套用
+  该转换，避免 `slot = tx.origin` 这类类型错误。
+- 新增 `formatSelfDestruct()`：`evm_selfdestruct` 之前被完全丢弃，现在输出
+  `selfdestruct(payable(<address>))`（word 先 `uint160/address/payable`，
+  address 值直接 `payable`）。
+
+oracle/验证：
+
+- `apehex_gasleft_return_01` 的 `kill()` then 分支从空变成
+  `selfdestruct(payable(tx.origin));`，与原始 Solidity 一致；
+- 新增 source golden `env_builtins_public_entry_01` 锁定 8 个环境 builtin 的打印与
+  转换；
+- compile suite 指标：unresolved 337 -> **330**，condition TODO 813 -> **789**，
+  budget 已同步下调。source suite 85/85，四个 EVM suite 全绿。
+
 
 ### P3-8 `--tr-level=3` 会 abort（易踩坑）
 

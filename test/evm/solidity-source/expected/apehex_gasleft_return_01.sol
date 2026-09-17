@@ -14,6 +14,7 @@ contract Decompiled {
         // block_0:
         if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
           // block_1:
+          selfdestruct(payable(tx.origin));
         }
         else {
           // block_2:

@@ -516,6 +516,12 @@
       "source": "cases/revert_error_string_folded_selector_01.sol",
       "input": "ir/revert_error_string_folded_selector_01.ll",
       "expected": "expected/revert_error_string_folded_selector_01.sol"
+    },
+    {
+      "name": "env_builtins_public_entry_01",
+      "source": "cases/env_builtins_public_entry_01.sol",
+      "input": "ir/env_builtins_public_entry_01.ll",
+      "expected": "expected/env_builtins_public_entry_01.sol"
     }
   ]
 }
