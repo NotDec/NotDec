@@ -336,6 +336,46 @@ encoded_candidate。
 用 pattern suite 的 `expected_revert_kinds` / `expected_panic_codes` oracle 验证
 误分类不上升。若 helper-encoded 形状确实无法解码，就保持现状并记录原因。
 
+**状态：已实现，收益远超预期。**
+
+先用临时 instrumentation 给 428 个 `encoded_candidate` 分类，发现根因不是优先级：
+
+| 路径 | 数量 | 说明 |
+| --- | ---: | --- |
+| zero-size | **388** | arg2 常量 0，但 arg1（offset）非 0 |
+| no-selector | 253 | payload HType 有 selector store，但取不出 selector 常量 |
+| raw-bytes | 26 | bytes header 形状 |
+| helper-encoded | 1 | helper 先写 selector 再编码 |
+
+其中 388 个 zero-size 是**语义误分类**：EVM `REVERT` 只返回 `size` 字节，
+size 为 0 就是空 revert，与 offset 无关。之前统一归到 `encoded_candidate`，
+既让 marker 不准确，又挡住了 Solidity 后端的 `require` 折叠
+（`guardRevertRequire` 只折叠 `empty`）。
+
+改动（`SolidityRevertPass.cpp` 的 `classifyRevertFromHType`）：
+`isZeroSizeValue(arg2)` 分支的 `Kind` 从 `encoded_candidate` 改为 `empty`。
+其余路径（no-selector / raw-bytes / helper-encoded）确实缺证据，保持
+`encoded_candidate`。
+
+oracle/测试：
+- pattern manifest 的 5 个 case 更新 `expected_revert_kinds`（empty 与
+  encoded_candidate 此消彼长，其它 kind 逐一核对不变）；
+- 新增 source golden `zero_size_revert_public_entry_01`：`revert(mem+64, 0)`
+  守卫折叠成 `require(arg0 != 0); slot_0 = arg0;`。
+
+结果（103 个 pattern case，默认路径）：
+
+| 指标 | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| solc 可编译 | 103/103 | 103/103 |
+| `revert(); // encoded_candidate` | 428 | **40** |
+| `require(` 语句 | 280 | **666** |
+| `if (false /* TODO` | 451 | **289** |
+| unresolved | 337 | 337（不变） |
+
+source suite 83/83 全绿（含 `solc --bin`）。这是纯语义修正，不依赖
+P0-2b 的路线选择。
+
 ### P2-6 结构化质量（goto / remaining-body）
 
 41/103 个真实 case 还有 `// goto block_`，423 处，且 30 个 remaining-body 完全

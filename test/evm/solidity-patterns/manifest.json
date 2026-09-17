@@ -1911,11 +1911,11 @@
         "notdec.solidity.revert": 143
       },
       "expected_revert_kinds": {
-        "empty": 9,
+        "empty": 88,
         "panic": 30,
         "error_string": 17,
         "custom_error_candidate": 0,
-        "encoded_candidate": 87,
+        "encoded_candidate": 8,
         "returndata_forward": 0
       },
       "expected_panic_codes": {
@@ -2421,11 +2421,11 @@
         "notdec.solidity.revert": 147
       },
       "expected_revert_kinds": {
-        "empty": 12,
+        "empty": 91,
         "panic": 30,
         "error_string": 18,
         "custom_error_candidate": 0,
-        "encoded_candidate": 87,
+        "encoded_candidate": 8,
         "returndata_forward": 0
       },
       "expected_panic_codes": {
@@ -4645,8 +4645,8 @@
         "notdec.solidity.revert": 115
       },
       "expected_revert_kinds": {
-        "empty": 10,
-        "encoded_candidate": 71,
+        "empty": 80,
+        "encoded_candidate": 1,
         "panic": 10,
         "custom_error_candidate": 17,
         "error_string": 6,
@@ -4702,8 +4702,8 @@
         "notdec.solidity.revert": 48
       },
       "expected_revert_kinds": {
-        "empty": 2,
-        "encoded_candidate": 36,
+        "empty": 29,
+        "encoded_candidate": 9,
         "panic": 4,
         "error_string": 2,
         "custom_error_candidate": 4
@@ -4742,8 +4742,8 @@
         "notdec.solidity.revert": 42
       },
       "expected_revert_kinds": {
-        "empty": 4,
-        "encoded_candidate": 24,
+        "empty": 28,
+        "encoded_candidate": 0,
         "panic": 4,
         "custom_error_candidate": 10
       },

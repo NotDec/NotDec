@@ -609,10 +609,14 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
     return Match;
   }
 
+  // EVM REVERT returns exactly the given size bytes, so a zero size is an
+  // empty revert regardless of the offset operand.  Treating it as an encoded
+  // payload hid the guard shape from the Solidity backend and blocked
+  // require() folding.
   if (isZeroSizeValue(Revert.getArgOperand(2))) {
     SolidityRevertMatch Match;
     Match.Revert = &Revert;
-    Match.Kind = "encoded_candidate";
+    Match.Kind = "empty";
     return Match;
   }
 
