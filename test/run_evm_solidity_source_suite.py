@@ -49,6 +49,8 @@ def write_log(
     command: list[str],
     process: subprocess.CompletedProcess[str],
     diff: list[str],
+    solc_command: list[str] | None = None,
+    solc_process: subprocess.CompletedProcess[str] | None = None,
 ) -> None:
     sections = [
         "## notdec",
@@ -57,6 +59,17 @@ def write_log(
         "",
         process.stdout,
     ]
+    if solc_command is not None and solc_process is not None:
+        sections.extend(
+            [
+                "",
+                "## solc",
+                f"$ {format_command(solc_command)}",
+                f"exit={solc_process.returncode}",
+                "",
+                solc_process.stdout,
+            ]
+        )
     if diff:
         sections.extend(["", "## diff", *diff])
     log_path.write_text("\n".join(sections))
@@ -68,6 +81,12 @@ def main() -> int:
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--workdir", required=True)
+    parser.add_argument(
+        "--solc",
+        default="",
+        help="Optional solc binary; when set, every generated .sol must compile "
+        "with --bin",
+    )
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest).resolve()
@@ -121,7 +140,14 @@ def main() -> int:
             )
             ok = not diff
 
-        write_log(log_path, command, notdec, diff)
+        solc_command: list[str] | None = None
+        solc_process: subprocess.CompletedProcess[str] | None = None
+        if ok and args.solc:
+            solc_command = [args.solc, "--bin", str(output_sol)]
+            solc_process = run_command(solc_command, project_root, env)
+            ok = solc_process.returncode == 0
+
+        write_log(log_path, command, notdec, diff, solc_command, solc_process)
         if ok:
             passed += 1
             print(f"[PASS ] {name}")

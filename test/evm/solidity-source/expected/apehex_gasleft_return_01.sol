@@ -12,13 +12,12 @@ contract Decompiled {
 
     function kill() public {
         // block_0:
-        if (false /* TODO: evm.eq */) {
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_1:
+        }
+        else {
           // block_2:
           revert(); // error_string, selector=0x8c379a0, string_length=32
         }
-        else {
-          // block_1:
-        }
-        // TODO: recover remaining body
     }
 }

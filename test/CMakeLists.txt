@@ -1,5 +1,9 @@
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+# Optional solc binary for the EVM solidity source suite.  The default build
+# does not invoke solc; set this to compile-check every generated .sol.
+set(NOTDEC_SOLC "" CACHE FILEPATH "Optional solc binary for EVM Solidity compile checks")
+
 function(add_type_recovery_suite test_name manifest_relpath)
 	add_test(
 		NAME ${test_name}
@@ -69,6 +73,10 @@ function(add_evm_solidity_rewrite_suite test_name manifest_relpath)
 endfunction()
 
 function(add_evm_solidity_source_suite test_name manifest_relpath)
+	set(solc_args "")
+	if(NOTDEC_SOLC)
+		list(APPEND solc_args --solc "${NOTDEC_SOLC}")
+	endif()
 	add_test(
 		NAME ${test_name}
 		COMMAND
@@ -82,6 +90,7 @@ function(add_evm_solidity_source_suite test_name manifest_relpath)
 			${PROJECT_SOURCE_DIR}
 			--workdir
 			${CMAKE_CURRENT_BINARY_DIR}/artifacts/${test_name}
+			${solc_args}
 	)
 endfunction()
 

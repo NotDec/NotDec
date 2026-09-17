@@ -10,6 +10,17 @@ Default CTest runs the stable part of the chain:
 ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
 ```
 
+Every generated `.sol` can additionally be compile-checked with solc.  Set the
+`NOTDEC_SOLC` CMake cache variable to a solc binary at configure time:
+
+```bash
+cmake -S . -B build -DNOTDEC_SOLC=/path/to/solc
+ctest --test-dir build -R notdec.evm.solidity_source --output-on-failure
+```
+
+The check is opt-in because solc is not part of the normal NotDec build; an
+empty `NOTDEC_SOLC` keeps the automated test independent of it.
+
 Apehex source-backed candidates should be picked from smaller runtime bytecode
 to larger contracts:
 
