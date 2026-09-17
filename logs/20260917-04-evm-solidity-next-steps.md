@@ -154,6 +154,53 @@ Solidity helper 函数。
 `test/evm/solidity-patterns/cases/` 里 private 调用密集的 case 建 oracle，
 再决定。
 
+**状态：调查完成，停在路线选择（按 AGENTS.md 的 goal 约定暂停）。**
+
+规模盘点（对 pattern suite 的 `out.ll` 统计）：
+
+- 77/103 个 case 有 private 调用；9053 个 call site、2737 个不同 callee；
+- callee 指令数：<=10 有 480 个，11-30 有 1281 个，31-100 有 773 个，>100 有 203 个；
+- 当前 Solidity 输出里 private 类 unresolved 共 430 处（58 个 case、269 个不同名字），
+  其中 side-effect-free（无 store / 无 side-effecting evm call / 无 alloca）的
+  callee 只占 36 处，纯表达式内联最多只能解决 <10%。
+
+全量 inline 实验（用 `opt -mtriple=unknown-unknown-unknown -passes=inline` 对
+103 个 `out.ll` 内联，再把 triple 改回 evm，跑 `notdec --tr-level=2` + solc）：
+
+| 指标 | 现状 | 全量 inline 后 |
+| --- | ---: | ---: |
+| solc 可编译 | 103/103 | 98/103（5 个新失败） |
+| private unresolved | 430 | 166（-61%） |
+| 总 unresolved | 515 | 1103 |
+| `evm.storage.load` unresolved | 0（藏在 private body 里） | 685 |
+| `evm.storage.packed.load` unresolved | 0 | 91 |
+| `evm_sload` unresolved | 36 | 44 |
+| IR 体积 | 26.0MB | 28.7MB（+10.6%） |
+
+典型例子 `1274`：inline 前 `approve()` 是
+`return 0 /* TODO: private__0x88c_0x88c */ != 0;`，inline 后 call boundary 消失、
+函数折叠成 `return 1;`；但同一模块里新暴露 13 处 `evm.storage.load` unresolved。
+
+结论：
+
+- LLVM inliner 语义上是安全的（就是同一份 IR 展平），符合“不搞错跨函数
+  memory/storage 语义”的判断标准；430 处 private 值里 61% 能被它消掉。
+- 真正的后续阻塞不是调用边界，而是 (a) 后端 storage helper 覆盖
+  （`evm.storage.load` / `packed.load` / `evm_sload` 变可见后解析不了）、
+  (b) 5 个新 solc 失败要逐个 triage、(c) pattern suite 的 oracle 会大面积变化、
+  IR 体积 +10%。
+- 后端 helper 路线（Reader 输出 private 函数 + local materialization + 多返回值）
+  是更大的新功能，而且正好要重新实现跨函数 memory/storage/returndata 语义，风险
+  高于 inline 路线。
+- 无论走哪条路线，先把 `private.ret` / `abi_decode_word_from_calldata__*` 这类
+  ABI decode helper 的结果用 P0-1 同款 metadata 映射回参数下标，都是无悔收益
+  （当前 63+ 处，且两条路线都需要）。
+
+建议顺序：A1 后端 storage helper 覆盖 -> A2 有界 private-helper inline pass
+（只 inline `private__*`、size cap、fixpoint、带 stat 和关闭开关）-> A3 oracle
+重建 + private 密集 case 的 source golden；期间 triage 那 5 个 solc 失败。
+在用户确认路线前不继续改 pipeline。
+
 ### P1-3 条件恢复随值一起收敛
 
 现状：`getCondition()` 只要表达式里还有 unresolved 就退回 TODO，因此条件缺口
