@@ -370,6 +370,14 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
   TypeRecoveryLevel = level;
   MergeStructPtrLoadStore = MergeStructPtrLoadStoreArg;
   TargetArch Arch = classifyTargetArch(Mod.getTargetTriple().getTriple());
+  // The EVM Solidity pipeline is validated at --tr-level<=2.  Level 3 adds
+  // MLsubRecoveryOpt, which is still an unimplemented stub that asserts; clamp
+  // instead of crashing on the CLI default.
+  if (Arch == TargetArch::Evm && level >= 3) {
+    llvm::errs() << "Warning: EVM target supports --tr-level<=2; using 2.\n";
+    level = 2;
+    TypeRecoveryLevel = level;
+  }
   switch (Arch) {
   case TargetArch::Wasm:
     break;

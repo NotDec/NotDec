@@ -11,6 +11,7 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -329,6 +330,16 @@ int main(int argc, char *argv[]) {
                  << InputSuffixDesc << ".\n";
     return 1;
   }
+  if (!outputFilename.empty()) {
+    // Missing output directories should be a normal CLI error, not an abort
+    // deep inside the pass manager when the writer fails to open the file.
+    llvm::StringRef Parent = llvm::sys::path::parent_path(outputFilename);
+    if (!Parent.empty() && !llvm::sys::fs::exists(Parent)) {
+      llvm::errs() << "Error: output directory does not exist: " << Parent
+                   << "\n";
+      return 1;
+    }
+  }
   if (HasPostConstraintCheckpoint && trLevel < 2) {
     llvm::errs() << "Error: post-constraint checkpoint options require "
                     "--tr-level >= 2.\n";
@@ -503,7 +514,7 @@ int main(int argc, char *argv[]) {
     if (EC) {
       std::cerr << "Cannot open output file." << std::endl;
       std::cerr << EC.message() << std::endl;
-      std::abort();
+      return 1;
     }
     M.print(os, nullptr);
     std::cout << "IR dumped to " << outputFilename << std::endl;
@@ -513,14 +524,14 @@ int main(int argc, char *argv[]) {
     if (EC) {
       std::cerr << "Cannot open output file." << std::endl;
       std::cerr << EC.message() << std::endl;
-      std::abort();
+      return 1;
     }
     llvm::WriteBitcodeToFile(M, os);
     std::cout << "Bitcode dumped to " << outputFilename << std::endl;
   } else {
     std::cout << "Error: Unknown suffix to output " << outputFilename
               << std::endl;
-    std::abort();
+    return 1;
   }
 
   notdec::frontend::free_buffer();

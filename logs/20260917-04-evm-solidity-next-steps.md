@@ -454,6 +454,15 @@ build-notdec-nothreads/bin/notdec test/evm/solidity-patterns/cases/calldata_min_
 `--tr-level=2` 所以没有暴露。建议二选一：EVM target 下把 level 3 当作 level 2
 处理并给 warning，或者把该 pass 改成 no-op/明确报错，避免 core dump。
 
+**状态：已修。** 在 `PassEnv::build_passes()` 里，EVM target 且 `level >= 3` 时
+打 warning 并把 level 夹到 2（`TypeRecoveryLevel` 同步更新）。CLI 默认的
+`--tr-level=3` 现在与 `--tr-level=2` 输出一致，不再 core dump。
+
+顺带修掉同类的 CLI footgun：`-o <dir>/out.{sol,ll,bc}` 在目录不存在时原先会
+`std::abort()`（本轮踩了两次）。现在 `main` 在跑 pipeline 前检查输出目录，
+不存在就报 `Error: output directory does not exist` 并 `return 1`；
+`.ll`/`.bc`/未知后缀的 writer 失败也都改成 `return 1`。
+
 ### P3-9 测试与构建基建
 
 - pattern suite 目前只看 IR marker，不看生成的 `.sol`；建议把 solc 抽样检查
