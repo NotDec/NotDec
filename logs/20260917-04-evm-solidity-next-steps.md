@@ -463,6 +463,31 @@ condition_todo（813）、goto（424）、real_jump（376）、dangling_goto（3
 - `StructuredNodeKind::Switch` 目前打印成 `/* TODO: switch */` + case 注释，
   不是真正的 `switch` 语句；
 - dynamic ABI return（bytes/string/array）只有单 word static return 稳；
+
+**多 word ABI return 已补（P2-7）。**
+
+- 新增 `formatMultiWordReturn()`：匹配 `evm_return(mem, base, 32*n)`（2 <= n <= 4），
+  支持两种 buffer 形状——静态帧（每个 word 一个 `inttoptr(const)`）和
+  calloc-backed（`inttoptr(add(ptrtoint(calloc), 32*i))`），把 0/32/... 的 store
+  收集成 `return (v0, ..., vn-1);`；任一 word 缺失就退回旧行为。
+- bool word：reader 把多 word 返回一律声明成 uint256，而 `valueExpr()` 会拆掉
+  `zext i1`，所以比较表达式会打印成 Solidity bool；新增 `isBoolValuedExpr()`，
+  在 tuple 元素位置降成 `(cond) ? 1 : 0`。
+- `n > 4` 保持旧行为：case 2001 的 5-word 返回在没有 viaIR 的 solc 下
+  `Stack too deep`，不生成无法编译的代码。
+- 顺带把单 word 的非 constant-offset 分支也改用同一个 offset-aware
+  store 查找，覆盖 `inttoptr(add(base, 0))` 形状。
+
+oracle/指标：
+
+- 新增 source golden `multi_word_return_public_entry_01`（`return (arg0, arg1);`），
+  source suite 86/86；
+- compile suite：compile_failures 0，其它指标不变；
+- `unresolved_value_occurrences` **330 -> 377（+47）**：这不是恢复退化，而是此前
+  "完全没有 return 语句"的函数现在把 tuple 里的未知元素显式打印成
+  `0 /* TODO: unresolved value */`（与单 word return 的行为一致）。budget 已按此
+  上调并在此记录理由；后续 P0-2b 解决 private 值后应自然回落。
+
 - `selfdestruct`、`tx.origin` 等环境语义在 body 里没有恢复（gasleft 的 `kill()`
   then 分支为空是典型例子）。
 **状态：环境语义与 selfdestruct 已补。**
