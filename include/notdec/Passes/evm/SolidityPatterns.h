@@ -61,6 +61,16 @@ struct AbiDecoderHelperRenamePass
   static bool isRequired() { return true; }
 };
 
+// Traces the returned words of outlined ABI decoder helpers back to their
+// constant calldata offsets and annotates the caller's extractvalue with the
+// ABI argument index.  This keeps the decoder half of private-helper recovery
+// in metadata instead of requiring call/local materialization in the backend.
+struct AbiDecodeResultPass : llvm::PassInfoMixin<AbiDecodeResultPass> {
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Rewrites low-level EVM storage reads/writes into composable storage helper
 // calls after MLsub has recovered the contract-global storage HType.  The pass
 // keeps the address expression rules local and does not create a separate

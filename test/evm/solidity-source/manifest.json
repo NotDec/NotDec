@@ -492,6 +492,12 @@
       "source": "cases/calldata_min_size_sub_public_entry_01.sol",
       "input": "ir/calldata_min_size_sub_public_entry_01.ll",
       "expected": "expected/calldata_min_size_sub_public_entry_01.sol"
+    },
+    {
+      "name": "abi_decode_result_public_entry_01",
+      "source": "cases/abi_decode_result_public_entry_01.sol",
+      "input": "ir/abi_decode_result_public_entry_01.ll",
+      "expected": "expected/abi_decode_result_public_entry_01.sol"
     }
   ]
 }

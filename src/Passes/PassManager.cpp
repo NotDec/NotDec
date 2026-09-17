@@ -390,6 +390,7 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       MPM.addPass(evm::EvmCalldataAccessPass());
       MPM.addPass(evm::AbiDecoderHelperRenamePass());
       MPM.addPass(createModuleToFunctionPassAdaptor(InstCombinePass()));
+      MPM.addPass(evm::AbiDecodeResultPass());
     }
     MPM.addPass(VerifierPass(false));
     if (level >= 2) {

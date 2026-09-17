@@ -254,6 +254,55 @@ late placement 的覆盖损失变成 `abi_return` 大幅下降（如 66 -> 30）
   (ii) 放弃 IR inline，转 Route B（后端 helper + local materialization），接受其
   跨函数 memory/storage/returndata 语义风险。
 
+### P0-2b ABI decoder 结果映射（已落地，默认路径）
+
+在不改 pipeline、不改 pattern oracle 的前提下，先把 private-helper 问题里**无争议的
+decode 半边**做掉：
+
+实现：
+
+- 新增 `src/Passes/evm/solidity-patterns/AbiDecodeResultPass.cpp`，放在 EVM front
+  passes 末尾（`InstCombinePass` 之后）。pass 只分析非 public entry 的函数：
+  - 单一 `ret`；标量返回看作 element 0，struct 返回要求由 `insertvalue` 链在
+    poison/undef 上完整构造；
+  - 每个 element 必须能回溯到 `inttoptr(add(ptrtoint(calldata), const))` 的 load，
+    从而得到常量 calldata 字节偏移；
+  - 只有当整个 helper 的 element 都能回溯时才收进表。
+- 对 public entry 里的调用点，把每个 element 对应的 ABI 下标写回该
+  `extractvalue`（标量返回写回 call 本身）：`(offset - 4) / 32`。
+  关键点是 element 顺序不等同参数顺序——真实 helper 里 element 0 常是
+  `base+32`、element 1 是 `base`，必须沿 insertvalue 链算，不能按 tuple 顺序猜。
+- metadata 仍是 backend-interface only（同名 `notdec.solidity.calldata.index`，
+  不走 marker surface）。
+- 后端 `BodyBuilder::valueExpr()` 把 metadata 解析抽成
+  `annotatedAbiArgumentExpr()`，extractvalue / load / call 三处共用；bool/bytesN
+  等非 word 参数继续走 unresolved。
+
+oracle：
+
+- 新增 source-suite golden `abi_decode_result_public_entry_01`：helper 返回
+  `{word@base+32, word@base}`，输出锁定为 `slot_0 = arg1; slot_1 = arg0;`，
+  直接证明 element 到参数下标的映射方向；
+- pattern manifest 的 `abi_decoder_helper_rename_01` 增加
+  `expected_metadata_counts` 和 `expected_metadata_string_values`（index 0）。
+
+结果（默认路径，103 个 pattern case 全量审计）：
+
+| 指标 | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| solc 可编译 | 103/103 | 103/103 |
+| 总 unresolved | 515 | **399** |
+| private unresolved | 430 | **336** |
+| `private.ret*` unresolved | 63 | **33** |
+| `abi_decode_*` unresolved | 11 | **5** |
+| `if (false /* TODO` | 522 | **480** |
+| `while (false /* TODO` | 46 | 46 |
+| `// goto block_` | 423 | 423 |
+
+`notdec.evm.solidity_patterns` / `_rewrite` / `_source` 全绿（source 81/81
+含 `solc --bin`）。这一步不动 pipeline、不新增 marker，因此是纯增量收益，
+后续 Route A/B 都需要它。
+
 ### P1-3 条件恢复随值一起收敛
 
 现状：`getCondition()` 只要表达式里还有 unresolved 就退回 TODO，因此条件缺口
