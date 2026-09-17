@@ -594,3 +594,66 @@ build-notdec-nothreads/bin/notdec test/evm/solidity-patterns/cases/calldata_min_
 判断标准统一为：pattern suite oracle 不退化 + source suite golden 更新后通过 +
 `solc --bin` 编译率不下降 + 量化 marker 数字下降。不能靠放宽 matcher 硬猜。
 
+
+## 六、本轮 goal 收尾总结（2026-09-17 EVM Solidity 语义恢复）
+
+### 交付的提交
+
+llvm2c（submodule main）：
+
+- `646560b` solidity: recover calldata guards and fold them into require
+- `daa7fc2` solidity: name ABI arguments from calldata index metadata
+- `ac1817f` solidity: resolve ABI decoder results from calldata index metadata
+- `2cbdb85` solidity: recover environment builtins and selfdestruct
+- `14a01b7` solidity: recover multi-word ABI returns
+- `b98c2dd` solidity: generalize return buffer matching and bool return coercion
+
+顶层（v2）：`c02118b7`、`ff93df50`、`455cef47`、`ebff20b6`、`053e30a5`、
+`e60ba8b0`、`8aadfb48`、`3ef31ee0`、`f6168238`、`60cb427f`、`975125cd`、
+`87afd41e`、`fed7dc6d`、`4b3c1267`、`a71cbcf8`，全部已 push。
+
+### 最终基线（103 个 pattern case 默认路径）
+
+| 指标 | goal 起点 | 最终 |
+| --- | ---: | ---: |
+| solc 可编译 | 103/103 | 103/103 |
+| 渲染出的 `revert(); // encoded_candidate` | 428 | 0 |
+| `require(` 语句 | 280 | 666 |
+| `if (false /* TODO` | 522 | 288 |
+| `false /* TODO`（全上下文） | 813 | 789 |
+| unresolved value（含新 surface） | 515 | 387 |
+| 声明了 returns 但没有 return 语句的函数 | 70 | 16 |
+| real jump（`// goto`） | 423 | 376 |
+| source golden suite | 79 | 87/87 |
+
+测试基建：
+
+- `NOTDEC_SOLC` 可选 solc 检查（source suite 全量编译）；
+- `notdec.evm.solidity_pattern_compile`：103 case 全量编译 + 6 个 ratchet 指标
+  （compile_failures / unresolved / condition_todo / goto / real_jump /
+  dangling_goto）；
+- 新增 source golden：calldata sub、decoder 直连/嵌套、zero-size revert、
+  folded selector、env builtins、多 word return、formal buffer return。
+
+### 未完成与阻塞
+
+1. **P0-2b（private body helper 调用结果）仍未完成，需要路线决定。**
+   Route A（IR inline）实测会让 9-11 个 case 丢 checked-bounds/abi-return 覆盖、
+   structurer 退化（goto 423 -> 4755），必须先 retune matcher + 重建 oracle；
+   Route B（后端 helper + local materialization）是新功能且要重做跨函数
+   memory/storage 语义。两条路都需要明确选择后单独立项，详见 P0-2 小节。
+2. 16 个无 return 函数：14 个是 5-10 word 深 tuple（非 viaIR solc 的
+   `Stack too deep`），1 个三 word（word 0 由 helper 通过 buffer 指针写入，
+   需要 interprocedural store 匹配），1 个 selector-inline helper。
+3. 376 个 real jump / 36 个 dangling（结构器 region 选择，P2-6）。
+4. 36 个 `evm_sload` 是 keccak 计算槽（mapping 访问的内存布局证明）。
+
+### 复现命令
+
+```bash
+cmake -S . -B build-notdec-nothreads -DNOTDEC_SOLC=/sn640/EthIR/source/solcv8.25
+ninja -C build-notdec-nothreads notdec
+ctest --test-dir build-notdec-nothreads -R "notdec.evm.solidity" --output-on-failure
+ctest --test-dir build-notdec-nothreads -R "notdec.evm.solidity_pattern_compile" -V
+```
+
