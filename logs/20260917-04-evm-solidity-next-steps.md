@@ -201,6 +201,59 @@ Solidity helper 函数。
 重建 + private 密集 case 的 source golden；期间 triage 那 5 个 solc 失败。
 在用户确认路线前不继续改 pipeline。
 
+**状态（后续实现与回退）：A2 pass 实现并实测后被回退，代码未保留；阻塞点
+已量化并记录在此。**
+
+实现过的原型（已删除）：
+
+- `PrivateHelperInlinePass`：只 inline callee 名以 `private__` 开头的函数，
+  size cap 120（可调），最多 5 轮 fixpoint，`InlineFunction()` +
+  WeakTrackingVH，带 inlined/oversize statistic。
+- 试了两个 placement：
+  - early：`buildFunctionOptimizations` 之后、`SelectorEntryOutlining` 之前；
+  - late：front passes 之后、type recovery 之前。
+
+early placement 开启后的 3 个代表 case（slots 保留、solc 全过）：
+
+| case | 默认 unresolved | 开启 inline |
+| --- | ---: | ---: |
+| 1274 | 10（private 8） | 3（private 0） |
+| 24541 | 8 | 4（private 0） |
+| 26499 | 6 | 6（private 2，callee 超 cap） |
+
+但 early placement 的全量 opt-in 审计不成立：
+
+| 指标 | 默认 | early inline |
+| --- | ---: | ---: |
+| solc 可编译 | 103/103 | 93/103（9 个 solc 失败 + 1 个 abort） |
+| 总 unresolved | 515 | 299 |
+| private unresolved | 430 | 26 |
+| `evm.calldataload.load` unresolved | 3 | 111 |
+| `if (false /* TODO` | 522 | 1788 |
+| `while (false /* TODO` | 46 | 702 |
+| `// goto block_` | 423 | 4755 |
+
+即：private 值确实被打通了，但 flatten 后的 CFG 让 structurer 退化
+（goto/条件 TODO 暴涨），同时 pattern suite 从 103/103 掉到 32/103：
+66 个 case 的 revert/hidden marker 计数增加（同一处语义在多个 call site 被复制），
+并有真实覆盖损失——11 个 case 丢 `storage_byte_array_length_bounds`、
+5 个丢 `checked_mul`、1 个丢 `checked_add`、`memory_allocation_bounds` 下降。
+
+late placement 的覆盖损失变成 `abi_return` 大幅下降（如 66 -> 30）和
+`memory_allocation_bounds` 下降，而且 backend 收益基本消失（1274 只到 10）。
+
+结论：
+
+- Route A 的障碍不是 inliner 本身，而是 **pattern matcher/oracle 按 outlined
+  形状调优 + structurer 对 flatten 后大函数退化**；直接转正会同时损失
+  checked-bounds/abi-return 覆盖和控制流质量。
+- 因此本轮回退代码，默认路径回到 3/3 suite 全绿；P0-2 的调用边界打通被证明
+  可行但需要独立工作流：retune checked-bounds/abi-return matcher on inlined IR、
+  处理大函数结构化、重建 pattern oracle、抽 private 密集 source golden。
+- 下一步二选一：(i) 开专门一轮做上述 retune + oracle 重建，再把 inline 默认打开；
+  (ii) 放弃 IR inline，转 Route B（后端 helper + local materialization），接受其
+  跨函数 memory/storage/returndata 语义风险。
+
 ### P1-3 条件恢复随值一起收敛
 
 现状：`getCondition()` 只要表达式里还有 unresolved 就退回 TODO，因此条件缺口
