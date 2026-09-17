@@ -679,6 +679,22 @@ std::optional<uint64_t> getOffsetFromBase(Value *Offset, Value *Base) {
 }
 
 std::optional<uint64_t> getSelectorWord(Value *V) {
+  // InstCombine folds the selector shl into the stored ABI word, so accept a
+  // folded constant as well as the pre-fold evm_shl call.  A zero word is not a
+  // selector: panic code 0 also looks like a low-224-zero constant and must stay
+  // available as payload evidence.
+  if (const auto *Constant = dyn_cast_or_null<ConstantInt>(V)) {
+    APInt Word = Constant->getValue().zextOrTrunc(256);
+    if (Word.trunc(224) != 0) {
+      return std::nullopt;
+    }
+    uint64_t Selector = Word.lshr(224).getZExtValue();
+    if (Selector == 0) {
+      return std::nullopt;
+    }
+    return Selector;
+  }
+
   auto *Selector = dyn_cast_or_null<CallBase>(V);
   if (Selector == nullptr || !isCallTo(Selector, "evm_shl") ||
       Selector->arg_size() != 2) {

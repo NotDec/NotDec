@@ -586,6 +586,12 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
     Payload.PanicCodeStores =
         getHTypeStoreValuesAtOffsetBefore(Stores, PayloadBase, 4, Revert);
     Payload.HasPanicCode = !Payload.PanicCodeStores.empty();
+    Payload.ErrorLengthStores =
+        getHTypeStoreValuesAtOffsetBefore(Stores, PayloadBase, 36, Revert);
+    Payload.HasErrorLength = !Payload.ErrorLengthStores.empty();
+    Payload.HasErrorData =
+        !getHTypeStoreValuesAtOffsetBefore(Stores, PayloadBase, 68, Revert)
+             .empty();
   }
   return Payload;
 }
@@ -670,8 +676,13 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
   }
   Match.Selector = Selector;
 
+  // Panic(uint256) is a fixed 36-byte payload.  A computed size operand such
+  // as sub(end, base) still means 36 bytes, so the selector plus panic-code
+  // evidence is the reliable condition; requiring a literal 36 only missed the
+  // helper-encoded shapes.
   if (Selector.has_value() && *Selector == 0x4e487b71 &&
-      isConstantIntValue(Revert.getArgOperand(2), 36)) {
+      (isConstantIntValue(Revert.getArgOperand(2), 36) ||
+       Payload->SelectorFromStoreEvidenceOnly)) {
     Match.Kind = "panic";
     bool Conflict = false;
     if (Payload->HasPanicCode) {
@@ -690,9 +701,10 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
     return Match;
   }
 
-  if (Selector.has_value() && *Selector == 0x08c379a0 &&
-      Payload->HasErrorHead &&
-      Payload->HasErrorLength) {
+  // 0x08c379a0 is Solidity's Error(string) selector, so the selector alone
+  // already identifies the kind.  Classify it even when the record shape is
+  // only visible through store evidence; the length/literal stay optional.
+  if (Selector.has_value() && *Selector == 0x08c379a0) {
     Match.Kind = "error_string";
     bool Conflict = false;
     Match.ErrorStringLength =
@@ -705,10 +717,6 @@ classifyRevertFromHType(llvm2c::HTypeResult &HTypes,
           decodeErrorStringLiteral(Payload->Base, Stores, Revert);
     }
     return Match;
-  }
-  if (Selector.has_value() && *Selector == 0x08c379a0 &&
-      Payload->SelectorFromStoreEvidenceOnly) {
-    return std::nullopt;
   }
 
   if (Selector.has_value()) {

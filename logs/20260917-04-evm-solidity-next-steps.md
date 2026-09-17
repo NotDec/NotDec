@@ -376,6 +376,51 @@ oracle/测试：
 source suite 83/83 全绿（含 `solc --bin`）。这是纯语义修正，不依赖
 P0-2b 的路线选择。
 
+**第二步：识别 InstCombine 折叠后的常量 selector（已实现）。**
+
+zero-size 修完后，剩下的 `encoded_candidate` 里又用 instrumentation 分类：
+no-selector 路径的 offset-0 store 共 251 处，其中 250 处是**纯常量**
+（Top-32 位分别是 0x4e487b71 72 处、0x08c379a0 64 处，其余是 custom selector）。
+`getSelectorWord()` 之前只认 `evm_shl(shift, payload)`，认不出折叠后的常量，
+所以 panic/Error/custom 都掉进了 `encoded_candidate`；而且 error-selector 形状在
+`SelectorFromStoreEvidenceOnly` 分支直接 `return nullopt`，这些 revert 在 Solidity
+输出里**完全消失**。
+
+改动：
+
+- `getSelectorWord()`（`SolidityPatterns.cpp`）接受 low-224 位为 0 的**非零**常量，
+  零值不当作 selector（panic code 0 也要能作为 payload 证据被读到）；
+- `getRevertPayloadHType()` 的 store-evidence-only 分支补 offset 36（error length）
+  和 offset 68（error data）的 store 证据；
+- panic 分支：selector + panic-code 证据即可，不再要求字面 size == 36
+  （helper 形状的 size 是 `sub(end, base)`，字面 36 永远不出现）；
+- error 分支：0x08c379a0 本身足以确定 kind，删掉“只有 store evidence 就
+  `return nullopt`”的丢弃路径，length/literal 保持可选。
+
+oracle：
+
+- 47 个 pattern case 更新 `notdec.solidity.revert` / `expected_revert_kinds` /
+  `expected_panic_codes` / `notdec.solidity.checked_bounds` 计数（只更新已存在的
+  key，派生 marker/hidden 计数由 runner 自动跟随）；
+- 新增 source golden `revert_error_string_folded_selector_01`：把
+  `revert_error_string_01` 的 selector store 换成折叠常量，输出必须逐字节一致。
+
+结果（103 个 pattern case，默认路径）：
+
+| 指标 | 改动前 | 改动后 |
+| --- | ---: | ---: |
+| solc 可编译 | 103/103 | 103/103 |
+| 渲染出的 `revert(); // encoded_candidate` | 40 | **0** |
+| 渲染出的 `revert(); // error_string` | 151 | **439** |
+| 渲染出的 `revert(); // custom_error_candidate` | 88 | 106 |
+| `if (false /* TODO` | 289 | 288 |
+| `// goto block_` | 423 | 424 |
+
+级联效果：`CheckedBoundsMatchers` 通过 `notdec.solidity_revert.panic_code` 元数据识别
+checked arithmetic；panic 分类变多后，9 个 case 的 `notdec.solidity.checked_bounds`
+从 0 变成 2-16（更多 checked 运算被恢复）。error_string 的 +288 是把之前被丢弃的
+revert 重新渲染出来，source suite 84/84 全绿。
+
 ### P2-6 结构化质量（goto / remaining-body）
 
 41/103 个真实 case 还有 `// goto block_`，423 处，且 30 个 remaining-body 完全
