@@ -3,5 +3,7 @@
   "max_compile_failures": 0,
   "max_unresolved_value_occurrences": 337,
   "max_condition_todo_occurrences": 813,
-  "max_goto_occurrences": 424
+  "max_goto_occurrences": 424,
+  "max_real_jump_occurrences": 376,
+  "max_dangling_goto_occurrences": 36
 }

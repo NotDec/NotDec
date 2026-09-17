@@ -4,10 +4,50 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+LABEL_RE = re.compile(r"// block_(\d+):")
+GOTO_RE = re.compile(r"// goto block_(\d+)")
+
+
+def count_goto_kinds(text: str) -> tuple[int, int, int, int]:
+    """Split rendered gotos into total / fallthrough / dangling / real-jump.
+
+    A fallthrough goto is immediately followed (ignoring closing braces) by its
+    own target label, so dropping it would not change control flow.  A dangling
+    goto targets a label that is never rendered.  The rest are real jumps the
+    structured output cannot express.
+    """
+    lines = text.splitlines()
+    labels = {int(m.group(1)) for m in LABEL_RE.finditer(text)}
+    total = 0
+    fallthrough = 0
+    dangling = 0
+    real = 0
+    for index, line in enumerate(lines):
+        match = GOTO_RE.search(line)
+        if match is None:
+            continue
+        total += 1
+        target = int(match.group(1))
+        if target not in labels:
+            dangling += 1
+            continue
+        lookahead = index + 1
+        while lookahead < len(lines) and lines[lookahead].strip() in ("", "}", "};"):
+            lookahead += 1
+        if lookahead < len(lines) and re.search(
+            rf"// block_{target}:", lines[lookahead]
+        ):
+            fallthrough += 1
+        else:
+            real += 1
+    return total, fallthrough, dangling, real
 
 
 def run_command(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -58,6 +98,9 @@ def main() -> int:
     unresolved = 0
     condition_todo = 0
     gotos = 0
+    goto_fallthrough = 0
+    goto_dangling = 0
+    goto_real = 0
     gen_failures = 0
     compile_failures = 0
 
@@ -83,7 +126,11 @@ def main() -> int:
         text = output_sol.read_text()
         unresolved += text.count("TODO: unresolved value")
         condition_todo += text.count("false /* TODO")
-        gotos += text.count("// goto block_")
+        total, fallthrough, dangling, real = count_goto_kinds(text)
+        gotos += total
+        goto_fallthrough += fallthrough
+        goto_dangling += dangling
+        goto_real += real
 
         if args.solc:
             solc_command = [args.solc, "--bin", str(output_sol)]
@@ -111,7 +158,22 @@ def main() -> int:
             budget["max_condition_todo_occurrences"],
         ),
         ("goto_occurrences", gotos, budget["max_goto_occurrences"]),
+        (
+            "real_jump_occurrences",
+            goto_real,
+            budget["max_real_jump_occurrences"],
+        ),
+        (
+            "dangling_goto_occurrences",
+            goto_dangling,
+            budget["max_dangling_goto_occurrences"],
+        ),
     ]
+    print(
+        "goto breakdown: total={} fallthrough={} dangling={} real={}".format(
+            gotos, goto_fallthrough, goto_dangling, goto_real
+        )
+    )
     ok = gen_failures == 0
     for name, actual, limit in checks:
         status = "PASS" if actual <= limit else "FAIL"

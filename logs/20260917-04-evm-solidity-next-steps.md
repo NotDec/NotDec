@@ -429,6 +429,33 @@ revert 重新渲染出来，source suite 84/84 全绿。
 下一步需要按 pattern suite 归类 goto 的形状（共享 tail、多出口、loop exit 等），
 一次只放宽一条结构器规则，避免全局控制流回退。
 
+**goto 形状归类（已完成，进入 metric）。** 对当前 103 个 case 的输出做逐行分析：
+
+| 类别 | 数量 | 说明 |
+| --- | ---: | --- |
+| total | 424 | 全部 `// goto block_` |
+| fallthrough | 12 | goto 之后（跳过 `}`）就是它自己的 label，删掉不改控制流 |
+| dangling | 36 | target label 从未被渲染（13 个 case，典型 target 是 block_1/3 这类共享 revert/merge 块） |
+| **real jump** | **376** | target 存在但不是 fallthrough，真正的无结构跳转（41 个 case） |
+
+结论：
+
+- 结构器已有 `dropGotoIntoFollowingNode()` / `dropIfGotoToFollowingBranch()` 在
+  清理 fallthrough goto，确实只剩 12 处；说明剩余 376 处不是打印层能修的。
+- 376 处 real jump 的典型形状是：
+  `if (c) { // goto A } // block B: // goto C // block A: ...`，来自
+  `buildVirtualizedBranchSource()`（被移除的 virtual edge 放 If.Then，kept target
+  只作为兄弟 Goto，没有把目标体结构化进 else）。
+- **这是语义问题不是观感问题**：renderer 把 Goto 打印成注释，等于这些跳转在生成的
+  Solidity 里没有发生；41 个 case 的输出在 real jump 处可能偏离 IR 语义。
+- 下一步：按 region 形状分类（共享 join、多前驱、loop exit、dephication 边），
+  一次只放宽一条结构器规则，用 compile suite 的 `real_jump_occurrences` budget
+  当 ratchet（本轮已加入 suite，实际 376）。
+
+compile suite 现在输出并 ratchet 6 个指标：compile_failures、unresolved（337）、
+condition_todo（813）、goto（424）、real_jump（376）、dangling_goto（36）。
+
+
 ### P2-7 打印层零散缺口
 
 - event signature：57/103 仍是 `Event_0x<topic0>` + `// TODO: recover event signature`；
