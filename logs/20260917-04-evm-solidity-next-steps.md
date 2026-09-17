@@ -465,9 +465,13 @@ build-notdec-nothreads/bin/notdec test/evm/solidity-patterns/cases/calldata_min_
 
 ### P3-9 测试与构建基建
 
-- pattern suite 目前只看 IR marker，不看生成的 `.sol`；建议把 solc 抽样检查
-  （例如每个 pattern case 至少能编译，或按 patterns 分类抽 10-20 个）接进
-  CI/可选 ctest，本轮只做了 source suite 的可选 `--solc`；
+- pattern suite 目前只看 IR marker，不看生成的 `.sol`；**已补**：新增
+  `test/run_evm_solidity_pattern_compile_suite.py` +
+  `test/evm/solidity-patterns/compile-budget.json`，对全部 103 个 pattern case
+  跑 `notdec --tr-level=2 -o .sol`，要求 solc 全部可编译，并 ratchet 三个指标：
+  `TODO: unresolved value`（337）、`false /* TODO`（813，含 if/while/require
+  全部上下文）、`// goto block_`（424）。只在配置了 `NOTDEC_SOLC` 时注册，
+  默认 ctest 不依赖 solc。指标改善时在同一 commit 里下调 budget。
 - 修复 standalone `external/NotDec-llvm2c` 的测试入口，让
   `structuring-analysis-test` 能跑（它直接覆盖 `LLVMFunctionCFGBuilder` 和
   branch polarity）；

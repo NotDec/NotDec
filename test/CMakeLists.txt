@@ -94,6 +94,33 @@ function(add_evm_solidity_source_suite test_name manifest_relpath)
 	)
 endfunction()
 
+# Whole-corpus Solidity compile + metric budget suite.  It is only registered
+# when NOTDEC_SOLC is set, so the default test run stays independent of solc.
+function(add_evm_solidity_pattern_compile_suite test_name cases_relpath
+                                                budget_relpath)
+	if(NOT NOTDEC_SOLC)
+		return()
+	endif()
+	add_test(
+		NAME ${test_name}
+		COMMAND
+			${Python3_EXECUTABLE}
+			${CMAKE_CURRENT_SOURCE_DIR}/run_evm_solidity_pattern_compile_suite.py
+			--binary
+			$<TARGET_FILE:notdec>
+			--cases
+			${CMAKE_CURRENT_SOURCE_DIR}/${cases_relpath}
+			--budget
+			${CMAKE_CURRENT_SOURCE_DIR}/${budget_relpath}
+			--project-root
+			${PROJECT_SOURCE_DIR}
+			--workdir
+			${CMAKE_CURRENT_BINARY_DIR}/artifacts/${test_name}
+			--solc
+			"${NOTDEC_SOLC}"
+	)
+endfunction()
+
 add_lifting_suite(
 	notdec.lifting.wasm
 	lifting/wasm/manifest.json
@@ -102,6 +129,12 @@ add_lifting_suite(
 add_evm_solidity_patterns_suite(
 	notdec.evm.solidity_patterns
 	evm/solidity-patterns/manifest.json
+)
+
+add_evm_solidity_pattern_compile_suite(
+	notdec.evm.solidity_pattern_compile
+	evm/solidity-patterns/cases
+	evm/solidity-patterns/compile-budget.json
 )
 
 add_evm_solidity_rewrite_suite(
