@@ -1,7 +1,7 @@
 {
   "comment": "Ratchet budgets for the whole-pattern-corpus Solidity compile suite. 'condition_todo_occurrences' counts every 'false /* TODO' occurrence (if/while/require contexts). Lower a budget when a change improves the metric; do not raise one without recording why in logs/.",
   "max_compile_failures": 0,
-  "max_unresolved_value_occurrences": 377,
+  "max_unresolved_value_occurrences": 387,
   "max_condition_todo_occurrences": 789,
   "max_goto_occurrences": 424,
   "max_real_jump_occurrences": 376,

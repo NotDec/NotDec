@@ -528,6 +528,12 @@
       "source": "cases/multi_word_return_public_entry_01.sol",
       "input": "ir/multi_word_return_public_entry_01.ll",
       "expected": "expected/multi_word_return_public_entry_01.sol"
+    },
+    {
+      "name": "formal_buffer_return_public_entry_01",
+      "source": "cases/formal_buffer_return_public_entry_01.sol",
+      "input": "ir/formal_buffer_return_public_entry_01.ll",
+      "expected": "expected/formal_buffer_return_public_entry_01.sol"
     }
   ]
 }

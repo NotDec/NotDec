@@ -477,6 +477,22 @@ condition_todo（813）、goto（424）、real_jump（376）、dangling_goto（3
   `Stack too deep`，不生成无法编译的代码。
 - 顺带把单 word 的非 constant-offset 分支也改用同一个 offset-aware
   store 查找，覆盖 `inttoptr(add(base, 0))` 形状。
+**单 word return 的 buffer base 泛化（同轮）。**
+
+- `storeOffsetFromReturnBase()` / `findReturnBufferStoreBefore()` 现在无条件使用
+  （`BasePtr` 允许为空），匹配 `inttoptr(base)` 和 `inttoptr(add(base, C))`，
+  不再要求 base 是 calloc 或常量——outlined wrapper 从 formal 里 load 出的
+  返回缓冲指针（`%evm.mload`）也能命中。
+- 声明返回类型通过新的 `ActiveReturnTypes` 传给后端；新增
+  `wordReturnExpr()`：当声明类型不是 bool 时，把 bool 值表达式降成
+  `(cond) ? 1 : 0`（泛化后暴露了 2 个 `Return argument type bool ... uint256`
+  solc 失败）。
+
+结果：声明了 returns 但没有 return 语句的函数 **40 -> 16**（只剩 1 个单 word、
+1 个三 word、14 个 5-10 word 深 tuple）；compile_failures 0；新增 source golden
+`formal_buffer_return_public_entry_01`（`return arg0;`），source suite 87/87。
+`unresolved` budget 377 -> **387**（新 surface 的占位符，同上理由）。
+
 
 oracle/指标：
 
