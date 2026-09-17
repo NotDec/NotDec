@@ -117,6 +117,27 @@ offset 常量满足 `>=4 && (offset-4)%32==0` 就给新 load 写
 验证：pattern suite 加 metadata 计数 oracle；`calldata` 类 4 个 case +
 `abi_decoder_helper_rename_01` 的 golden 输出对比；再抽真实 case 看 29 处是否下降。
 
+**状态：已完成。** 实现与验证：
+
+- `EvmCalldataAccessPass::annotateCalldataArgumentIndex()` 在
+  `rewriteCalldataLoad()` 里对 public entry 的常量 offset 满足
+  `>=4 && (offset-4)%32==0` 的 load 直接 `setMetadata`
+  `notdec.solidity.calldata.index`（十进制字符串）。这里刻意不走
+  `addStringMetadata()`——它不是 rewrite surface，不该生成 marker/hidden 计数，
+  runner 也把该 kind 放进 `METADATA_ONLY_KINDS`。
+- 后端 `valueExpr()` 的 LoadInst 分支优先读 metadata，再退回原 matcher；
+  新增 `isWordLikeParameter()`：只有 `uint*/int*/address` 参数才允许用标识符
+  顶替原始 calldata word。bool / bytesN / bytes / string / array 仍退回
+  unresolved，否则 ABI decoder 的 `raw < 2`、storage packing、selector 比较
+  会打印出 `bool < int_const`、`bytes4 & uint256` 这类非法表达式
+  （真实 case `24534` 在 P0-1 第一版暴露了这两类）。
+- oracle：pattern manifest 对 3 个 calldata case 加 metadata 计数 +
+  `expected_metadata_string_values`（公开单参数=0、sub 三参数=2、private helper=0）；
+  source suite 新增 `calldata_min_size_sub_public_entry_01` golden，锁定
+  `slot_0 = arg2;`。
+- 结果：pattern 103/103 可编译；`evm.calldataload.load` unresolved 29 -> 3；
+  总 unresolved 538 -> 515；条件 TODO 813 -> 781；source suite 80/80 通过。
+
 ### P0-2 private call / helper 结果恢复
 
 现状：~384/538 个 unresolved value 是 `private__0x..._0x...`、`private.ret1` 这类

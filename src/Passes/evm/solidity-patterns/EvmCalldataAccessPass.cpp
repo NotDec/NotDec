@@ -33,6 +33,8 @@ STATISTIC(NumCalldataPolymorphicHelpers,
           "Number of private calldata helpers marked as polymorphic");
 STATISTIC(NumCalldataMinSizeGuards,
           "Number of calldata minimum size guards rewritten");
+STATISTIC(NumCalldataArgumentIndexes,
+          "Number of calldata loads annotated with an ABI argument index");
 
 namespace notdec::passes::evm {
 namespace {
@@ -513,7 +515,33 @@ bool markPolymorphicHelpers(Module &M) {
   return Changed;
 }
 
-bool rewriteCalldataLoad(CallBase &Call, Value *Calldata, Value *Base) {
+// A constant calldata byte offset inside the ABI argument area identifies ABI
+// parameter (Offset - 4) / 32.  Record it on the rewritten load so the Solidity
+// backend can name the parameter without repeating the IR shape match.
+void annotateCalldataArgumentIndex(Instruction &Load, Value *Offset) {
+  const auto *Constant = dyn_cast<ConstantInt>(Offset);
+  if (Constant == nullptr) {
+    return;
+  }
+  const APInt &Value = Constant->getValue();
+  if (Value.getActiveBits() > 64) {
+    return;
+  }
+  uint64_t ByteOffset = Value.getZExtValue();
+  if (ByteOffset < 4 || (ByteOffset - 4) % 32 != 0) {
+    return;
+  }
+  // This is a backend interface annotation, not a rewrite surface: the load
+  // itself stays as-is, so bypass addStringMetadata() and its marker calls.
+  LLVMContext &Ctx = Load.getContext();
+  Load.setMetadata(KIND_SOLIDITY_CALLDATA_ARG_INDEX,
+                   MDNode::get(Ctx, MDString::get(
+                                        Ctx, std::to_string((ByteOffset - 4) / 32))));
+  ++NumCalldataArgumentIndexes;
+}
+
+bool rewriteCalldataLoad(CallBase &Call, Value *Calldata, Value *Base,
+                         bool IsPublicEntry) {
   if (!detail::isCallTo(&Call, "evm_calldataload") ||
       !usesCurrentCalldata(Call, 0, Calldata) || Call.arg_size() != 2) {
     return false;
@@ -526,6 +554,11 @@ bool rewriteCalldataLoad(CallBase &Call, Value *Calldata, Value *Base) {
                                   Call.getName() + ".load");
   Load->setAlignment(Align(1));
   Load->copyMetadata(Call, {LLVMContext::MD_dbg, LLVMContext::MD_annotation});
+  // ABI argument numbering is only meaningful relative to the public entry
+  // wrapper; outlined private helpers receive ABI words through formals.
+  if (IsPublicEntry) {
+    annotateCalldataArgumentIndex(*Load, Offset);
+  }
   Call.replaceAllUsesWith(Load);
   Call.eraseFromParent();
   ++NumCalldataLoadsRewritten;
@@ -578,6 +611,7 @@ bool rewriteFunction(Function &F) {
 
   bool Changed = false;
   Changed |= !Guards.empty();
+  const bool IsPublicEntry = detail::isPublicEntryFunction(F);
   for (CallBase *Call : Calls) {
     if (Call->getParent() == nullptr) {
       continue;
@@ -591,7 +625,7 @@ bool rewriteFunction(Function &F) {
         BestMinSize = Guard.MinSize;
       }
     }
-    if (rewriteCalldataLoad(*Call, Calldata, Base)) {
+    if (rewriteCalldataLoad(*Call, Calldata, Base, IsPublicEntry)) {
       Changed = true;
       continue;
     }

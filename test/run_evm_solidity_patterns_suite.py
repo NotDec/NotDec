@@ -22,6 +22,14 @@ CPP_CHECKED_BOUNDS_MARKER_FUNCTION_RE = re.compile(
 CPP_CHECKED_BOUNDS_MARKER_PAIR_RE = re.compile(
     r'if \(Kind == "([^"]+)"\) \{\s*return "([^"]+)";\s*\}'
 )
+# Metadata kinds that exist only as oracles/backend anchors.  Unlike the
+# rewrite passes they do not also emit a notdec_solidity_rewrite_* marker, so
+# they must not feed the marker/hidden counts derived from
+# expected_metadata_counts.
+METADATA_ONLY_KINDS = {
+    "notdec.solidity.checked_bounds",
+    "notdec.solidity.calldata.index",
+}
 CHECKED_BOUNDS_KIND_TO_MARKER = {
     "checked_add": "notdec_solidity_rewrite_checked_add",
     "checked_sub": "notdec_solidity_rewrite_checked_sub",
@@ -475,6 +483,13 @@ def main() -> int:
                 "nonpayable_functions": case["expected_nonpayable_functions"]
             }
             expected_counts.update(case.get("expected_metadata_counts", {}))
+            for metadata_name, values in case.get(
+                "expected_metadata_string_values", {}
+            ).items():
+                for value, count in values.items():
+                    expected_counts[
+                        f"metadata_string_value:{metadata_name}={value}"
+                    ] = count
             expect_rewrite_markers = case.get(
                 "expect_rewrite_markers",
                 manifest.get("expect_rewrite_markers", False),
@@ -487,7 +502,7 @@ def main() -> int:
                 for metadata_name, count in case.get(
                     "expected_metadata_counts", {}
                 ).items():
-                    if metadata_name == "notdec.solidity.checked_bounds":
+                    if metadata_name in METADATA_ONLY_KINDS:
                         continue
                     expected_counts[
                         f"rewrite_marker:{rewrite_marker_name(metadata_name)}"
@@ -498,7 +513,7 @@ def main() -> int:
                     for metadata_name, count in case.get(
                         "expected_metadata_counts", {}
                     ).items()
-                    if metadata_name != "notdec.solidity.checked_bounds"
+                    if metadata_name not in METADATA_ONLY_KINDS
                 )
                 expected_counts["rewrite_hidden_markers"] = hidden_count
                 expected_counts["rewrite_hidden_metadata"] = hidden_count
@@ -607,11 +622,21 @@ def main() -> int:
                 )
                 if (
                     expect_rewrite_markers
-                    and metadata_name != "notdec.solidity.checked_bounds"
+                    and metadata_name not in METADATA_ONLY_KINDS
                 ):
                     actual_counts[
                         f"rewrite_marker:{rewrite_marker_name(metadata_name)}"
                     ] = count_rewrite_markers(output_ll, metadata_name)
+            for metadata_name, values in case.get(
+                "expected_metadata_string_values", {}
+            ).items():
+                actual_values = count_metadata_string_values(
+                    output_ll, metadata_name
+                )
+                for value in values:
+                    actual_counts[
+                        f"metadata_string_value:{metadata_name}={value}"
+                    ] = actual_values.get(str(value), 0)
             if expect_rewrite_hidden:
                 actual_counts["rewrite_hidden_markers"] = count_hidden_markers(
                     output_ll

@@ -15,6 +15,9 @@ extern const char *KIND_SOLIDITY_ABI_RETURN;
 extern const char *KIND_SOLIDITY_REVERT;
 extern const char *KIND_SOLIDITY_CHECKED_BOUNDS;
 extern const char *KIND_SOLIDITY_EVENT;
+// Decimal ABI argument index (as a string) attached to a rewritten calldata
+// word load whose constant byte offset is 4 + 32*i.
+extern const char *KIND_SOLIDITY_CALLDATA_ARG_INDEX;
 
 // Splits selector-entry inline fallback/receive bodies into standalone helper
 // functions when the CFG boundary is clear.  The pass keeps dispatcher-only
