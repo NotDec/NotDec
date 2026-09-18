@@ -226,3 +226,28 @@ total 424 / fallthrough 12 / dangling 69 / real 343，说明 helper 输出没有
   改动前后在噪声范围内（baseline 分别约 31s / 35s / 6.9s / 3.0s），没有明显上涨。
 - 输出 IR 的 `llvm-as` 检查由 pattern/rewrite suite 覆盖，四套全绿。
 
+
+### 复用收尾：抽取共享的 SSA 使用分析头文件（2026-09-18）
+
+原先 Solidity 后端里的 `hasOneUseIgnoreCast` / `onlyUsedInCurrentBlock` 是从 C 后端
+`StructuralAnalysis.cpp` 抄过来的副本。现在抽成不依赖 clang 的公共头文件：
+
+- 新增 `include/notdec-backends/Core/ValueUseAnalysis.h`
+  （namespace `notdec::backend::core`，inline 的 `hasOneUseIgnoreCast` /
+  `usedInBlock` / `onlyUsedInCurrentBlock`，语义与 C 后端原实现一致）；
+- `lib/notdec-llvm2c/StructuralAnalysis.cpp` 删除本地三个定义，`addExprOrStmt` 改用
+  `notdec::backend::core::onlyUsedInCurrentBlock`；
+  `include/notdec-llvm2c/StructuralAnalysis.h` 删掉这两个函数声明；
+- `lib/Solidity/BodyBuilder.cpp` 删除副本，`valueNeedsMaterialization` 改用
+  `core::onlyUsedInCurrentBlock`。
+
+不能直接 include `StructuralAnalysis.h` 的原因：它把 clang AST 全部拉进来
+（Solidity 后端目前不依赖 clang），实现又在 `notdec-backend-c` 库里。
+"哪些 value 需要缓存"的策略仍留在各自后端：C 后端物化除可折叠外的全部值、
+`LoadInst` 一律不折叠；Solidity 后端目前只对渲染出来的 helper 调用套用同一判断，
+纯算术/内建表达式继续按表达式折叠。
+
+验证：`ninja -C build-notdec-nothreads notdec` 后四套 suite 全绿，八项预算数值与重构前
+完全一致（unresolved 264 / condition TODO 729 / goto 424 / real 343 / dangling 69，
+helper 1339 / call sites 1301），属于纯重构。
+
