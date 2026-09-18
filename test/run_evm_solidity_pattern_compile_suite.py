@@ -13,6 +13,38 @@ from pathlib import Path
 
 LABEL_RE = re.compile(r"// block_(\d+):")
 GOTO_RE = re.compile(r"// goto block_(\d+)")
+FUNCTION_RE = re.compile(r"^\s*(function|constructor|fallback|receive|modifier)\b")
+
+
+def split_functions(text: str) -> list[list[str]]:
+    """Split the contract text into per-function line lists.
+
+    Rendered block labels restart at 0 in every function, so goto targets must
+    be resolved inside the same function: a file-global match would let a goto
+    in one function resolve against an unrelated label in another and hide real
+    jumps.
+    """
+    functions: list[list[str]] = []
+    current: list[str] | None = None
+    depth = 0
+    for line in text.splitlines():
+        if current is None:
+            if not FUNCTION_RE.match(line):
+                continue
+            current = [line]
+            depth = line.count("{") - line.count("}")
+            if depth <= 0 and "{" in line:
+                functions.append(current)
+                current = None
+            continue
+        current.append(line)
+        depth += line.count("{") - line.count("}")
+        if depth <= 0:
+            functions.append(current)
+            current = None
+    if current:
+        functions.append(current)
+    return functions
 
 
 def count_goto_kinds(text: str) -> tuple[int, int, int, int]:
@@ -21,32 +53,33 @@ def count_goto_kinds(text: str) -> tuple[int, int, int, int]:
     A fallthrough goto is immediately followed (ignoring closing braces) by its
     own target label, so dropping it would not change control flow.  A dangling
     goto targets a label that is never rendered.  The rest are real jumps the
-    structured output cannot express.
+    structured output cannot express.  Labels and gotos are matched inside one
+    generated function, because block labels restart at 0 per function.
     """
-    lines = text.splitlines()
-    labels = {int(m.group(1)) for m in LABEL_RE.finditer(text)}
     total = 0
     fallthrough = 0
     dangling = 0
     real = 0
-    for index, line in enumerate(lines):
-        match = GOTO_RE.search(line)
-        if match is None:
-            continue
-        total += 1
-        target = int(match.group(1))
-        if target not in labels:
-            dangling += 1
-            continue
-        lookahead = index + 1
-        while lookahead < len(lines) and lines[lookahead].strip() in ("", "}", "};"):
-            lookahead += 1
-        if lookahead < len(lines) and re.search(
-            rf"// block_{target}:", lines[lookahead]
-        ):
-            fallthrough += 1
-        else:
-            real += 1
+    for lines in split_functions(text):
+        labels = {int(m.group(1)) for line in lines for m in LABEL_RE.finditer(line)}
+        for index, line in enumerate(lines):
+            match = GOTO_RE.search(line)
+            if match is None:
+                continue
+            total += 1
+            target = int(match.group(1))
+            if target not in labels:
+                dangling += 1
+                continue
+            lookahead = index + 1
+            while lookahead < len(lines) and lines[lookahead].strip() in ("", "}", "};"):
+                lookahead += 1
+            if lookahead < len(lines) and re.search(
+                rf"// block_{target}:", lines[lookahead]
+            ):
+                fallthrough += 1
+            else:
+                real += 1
     return total, fallthrough, dangling, real
 
 

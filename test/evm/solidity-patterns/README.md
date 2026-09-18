@@ -5,7 +5,9 @@ backend over the whole pattern corpus and ratchets the output baseline:
 
 - every generated `.sol` must compile with the configured solc;
 - `TODO: unresolved value`, `false /* TODO` and `// goto block_` occurrence
-  counts must stay within the budgets in `compile-budget.json`.
+  counts must stay within the budgets in `compile-budget.json`.  Goto targets
+  are resolved per generated function, because rendered block labels restart at
+  0 in every function and a file-global match would hide real jumps.
 
 It is opt-in because it needs solc.  Configure with:
 

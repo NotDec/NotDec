@@ -534,6 +534,12 @@
       "source": "cases/formal_buffer_return_public_entry_01.sol",
       "input": "ir/formal_buffer_return_public_entry_01.ll",
       "expected": "expected/formal_buffer_return_public_entry_01.sol"
+    },
+    {
+      "name": "private_helper_call_public_entry_01",
+      "source": "cases/private_helper_call_public_entry_01.sol",
+      "input": "ir/private_helper_call_public_entry_01.ll",
+      "expected": "expected/private_helper_call_public_entry_01.sol"
     }
   ]
 }
