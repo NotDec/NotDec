@@ -4,6 +4,9 @@ The pattern suite checks IR metadata only.  This suite runs the Solidity
 backend over the whole pattern corpus and ratchets the output baseline:
 
 - every generated `.sol` must compile with the configured solc;
+- the number of rendered `private__*` helper functions and helper call sites
+  must stay at or above the floors in `compile-budget.json`, so recovered
+  helper structure cannot disappear silently;
 - `TODO: unresolved value`, `false /* TODO` and `// goto block_` occurrence
   counts must stay within the budgets in `compile-budget.json`.  Goto targets
   are resolved per generated function, because rendered block labels restart at

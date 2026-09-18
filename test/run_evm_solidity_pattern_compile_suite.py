@@ -14,6 +14,11 @@ from pathlib import Path
 LABEL_RE = re.compile(r"// block_(\d+):")
 GOTO_RE = re.compile(r"// goto block_(\d+)")
 FUNCTION_RE = re.compile(r"^\s*(function|constructor|fallback|receive|modifier)\b")
+# evm2llvm outlines shared code into private__* helpers.  The backend renders
+# the recoverable ones as Solidity functions and their call sites; these two
+# counts are coverage floors so the recovery cannot silently disappear.
+HELPER_DEF_RE = re.compile(r"^    function (private__[A-Za-z0-9_]*)\(", re.M)
+HELPER_NAME_RE = re.compile(r"\b(private__[A-Za-z0-9_]*)\(")
 
 
 def split_functions(text: str) -> list[list[str]]:
@@ -136,6 +141,8 @@ def main() -> int:
     goto_real = 0
     gen_failures = 0
     compile_failures = 0
+    helper_functions = 0
+    helper_call_sites = 0
 
     for case in cases:
         output_sol = workdir / (case.stem + ".sol")
@@ -164,6 +171,9 @@ def main() -> int:
         goto_fallthrough += fallthrough
         goto_dangling += dangling
         goto_real += real
+        definitions = len(HELPER_DEF_RE.findall(text))
+        helper_functions += definitions
+        helper_call_sites += len(HELPER_NAME_RE.findall(text)) - definitions
 
         if args.solc:
             solc_command = [args.solc, "--bin", str(output_sol)]
@@ -207,11 +217,27 @@ def main() -> int:
             gotos, goto_fallthrough, goto_dangling, goto_real
         )
     )
+    floors = [
+        (
+            "helper_functions",
+            helper_functions,
+            budget.get("min_helper_functions", 0),
+        ),
+        (
+            "helper_call_sites",
+            helper_call_sites,
+            budget.get("min_helper_call_sites", 0),
+        ),
+    ]
     ok = gen_failures == 0
     for name, actual, limit in checks:
         status = "PASS" if actual <= limit else "FAIL"
         print(f"[{status}] {name}: actual={actual} budget={limit}")
         ok = ok and actual <= limit
+    for name, actual, floor in floors:
+        status = "PASS" if actual >= floor else "FAIL"
+        print(f"[{status}] {name}: actual={actual} floor={floor}")
+        ok = ok and actual >= floor
     print(f"Summary: cases={len(cases)} gen_failures={gen_failures}")
     return 0 if ok else 1
 

@@ -5,5 +5,7 @@
   "max_condition_todo_occurrences": 729,
   "max_goto_occurrences": 424,
   "max_real_jump_occurrences": 343,
-  "max_dangling_goto_occurrences": 69
+  "max_dangling_goto_occurrences": 69,
+  "min_helper_functions": 1339,
+  "min_helper_call_sites": 1301
 }

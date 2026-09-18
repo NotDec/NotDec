@@ -210,3 +210,19 @@ total 424 / fallthrough 12 / dangling 69 / real 343，说明 helper 输出没有
 - 暂不输出：含 `evm_signextend/evm_sdiv/evm_smod/evm_sar` 的 helper（会渲染成 `intN(...)`，
   与 uint256 签名不匹配）；helper 体内的 calldata 读取、memory 读写、struct 返回。
 
+
+### 收尾指标与耗时（2026-09-18）
+
+- helper 覆盖作为**下限**写入 compile suite 预算：
+  `min_helper_functions = 1339`、`min_helper_call_sites = 1301`
+  （103 个 case，77 个输出 helper）。plan 里写的是"pattern suite 增加 helper 数 oracle"，
+  实际放在 compile suite：pattern suite 只查 IR metadata，而 helper 计数是 `.sol` 属性，
+  放这里才能和 solc 编译一起回归。
+- "声明了返回值却没有 return" 的函数保持 baseline 的 16（8 个 case）。剩余的都是本轮
+  明确跳过的形态（calldata 解码 helper、memory helper、signed 运算 helper、struct 返回），
+  不是 Route B 引入的退化。
+- 四套 suite 耗时（本机，同一 workdir）：
+  patterns ≈28s、pattern_compile ≈33s、rewrite ≈6.6s、source ≈2.8s；
+  改动前后在噪声范围内（baseline 分别约 31s / 35s / 6.9s / 3.0s），没有明显上涨。
+- 输出 IR 的 `llvm-as` 检查由 pattern/rewrite suite 覆盖，四套全绿。
+
