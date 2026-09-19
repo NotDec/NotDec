@@ -385,3 +385,38 @@ grep -E "::arg1 =>" /tmp/out.htypes
   2. 决定 entry 的标记范围后，同步更新 `0011/0009/0031` 三个 `abi_param.*` oracle；
   3. 若采纳 helper 变体，需要解释 pattern suite 的 2 个非 oracle 失败。
 
+
+### 多态标记第二轮：两项收尾工作（2026-09-18）
+
+按用户要求把上节列的两件事都推进了。
+
+**（B）helper 变体的 pattern 失败定位完毕**：把"仅 internal helper 无条件标记多态"重新打开后，
+pattern suite 的 5 个失败里：
+
+- `0011_multi_public`：新增的 `abi_param.*` oracle 数值变化——标记后该 case 的 record 变成
+  逐函数（`record` 1=2 / 0=5，mismatch 0），正是我们想要的行为，已更新 oracle；
+- 另外 4 个（`2001`、`1988`、`24590`、`24259`）：全部是 `notdec.solidity.abi_return`
+  **各 +2**（70→72、48→50、8→10、8→10），并带动 `rewrite_hidden_*` 同步 +2。
+  人工核对 1988/24590 的新增点是 `evm_return(mem, ptr, <动态长度>)`（如
+  `%evm.sub` / `%evm.mload`），即动态长度返回点，之前因为 calldata 并集污染了 buffer 视图
+  而漏识别；这是**改善**而非回归，oracle 已按实际值更新（4 个 case 的
+  `expected_metadata_counts["notdec.solidity.abi_return"]`）。
+
+**（A）24259 在 entry 多态下不收敛的定位（部分完成）**：
+
+- 现象：CPU 打满（`User time 419s`、99% CPU、RSS ~2.0 GB），不是死锁；
+- 调用图分析：24259 共 25 个函数、18 个带 calldata 形参、**0 个环**（无递归），所以不是
+  递归自环导致的逐调用点实例化；
+- `NOTDEC_CONSTRAINT_DIAG=1` 显示 SCC 自底向上阶段**正常跑完**（`bottom_up_done=42/42`，
+  每个 SCC 各阶段 wall_ms≈0），日志停在 post-summary 的三个 merge policy 打印之后，
+  之后再没有任何 diag 输出但进程继续 100% CPU 跑——**爆炸点在后处理（merge policy 之后、
+  简化/传播阶段）**，可能在逐调用点实例化把 struct-ptr/字段合并候选放大之后；
+- `NOTDEC_SIMPLIFY_DIAG=1` 没有产生额外输出，需要下一步在 post-summary 之后的分阶段
+  （或给简化循环加计数/上限日志）继续定位。
+
+**当前落地的状态**：只保留 helper 变体（`markPolymorphicHelpers` 不再要求 offset 冲突，
+metadata 值区分 `calldata_offset`/`calldata_buffer`）；`shouldMarkPolymorphicFunction` 仍然
+只覆盖 internal helper，entry 变体带注释禁用（原因指向 24259）。
+
+验证：四套 EVM suite 全绿（pattern / compile / rewrite / source）。
+

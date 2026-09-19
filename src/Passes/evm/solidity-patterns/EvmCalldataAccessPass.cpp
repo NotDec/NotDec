@@ -57,6 +57,10 @@ bool shouldRewriteCalldataMinSizeGuards(Function &F) {
 }
 
 bool shouldMarkPolymorphicFunction(Function &F) {
+  // Outlined shared helpers only.  Marking the ABI entries as well isolates
+  // them too (they are called from the dispatcher with its own %calldata), but
+  // that variant does not converge on case 24259, so it stays disabled until
+  // the divergence is understood.
   return detail::isEvmPrivateHelperFunction(F);
 }
 
@@ -492,23 +496,30 @@ bool markPolymorphicHelpers(Module &M) {
     if (Calldata == nullptr) {
       continue;
     }
-    SmallVector<unsigned, 4> OffsetArgNos = getCalldataOffsetArgNos(F, Calldata);
-    bool Polymorphic = false;
-    for (unsigned ArgNo : OffsetArgNos) {
+    if (F.getMetadata(mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION) != nullptr) {
+      continue;
+    }
+
+    // Every outlined helper that reads the calldata pointer is generic over the
+    // caller's buffer view: one shared formal type would otherwise merge the
+    // constant-offset reads of every call site into a single module-wide record
+    // that describes no entry's parameter list.  Marking the helper polymorphic
+    // makes the SCC boundary instantiate each call site independently.  The
+    // metadata value only records whether the offset formals vary per call site.
+    bool VaryingOffsets = false;
+    for (unsigned ArgNo : getCalldataOffsetArgNos(F, Calldata)) {
       if (hasPolymorphicCallsiteOffset(F, ArgNo)) {
-        Polymorphic = true;
+        VaryingOffsets = true;
         break;
       }
-    }
-    if (!Polymorphic ||
-        F.getMetadata(mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION) != nullptr) {
-      continue;
     }
 
     F.setMetadata(mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION,
                   MDNode::get(F.getContext(),
                               {MDString::get(F.getContext(),
-                                             "calldata_offset")}));
+                                             VaryingOffsets
+                                                 ? "calldata_offset"
+                                                 : "calldata_buffer")}));
     ++NumCalldataPolymorphicHelpers;
     Changed = true;
   }
