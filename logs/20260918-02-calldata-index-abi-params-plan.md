@@ -264,3 +264,64 @@ TR 改善时逐函数 record 应当向 annotated 收敛。
 - 四套 EVM suite 全绿（pattern / compile / rewrite / source）；pattern suite 新增 oracle 通过；
 - 后端输出不变（compile suite 指标与预算一致）。
 
+
+### 根因调查：calldata 记录为什么是模块级的（2026-09-18）
+
+**现象**：103 个 case 里 102 个只有一种 calldata 记录类型，所有 public 入口的 `%calldata`
+（`::arg1`）都显示同一个 `struct_N*`；对比 pre-TR 逐函数标注，record 偏多 2106 个入口。
+
+**机制（已用最小复现确认）**：每个入口把自己的 `%calldata` 传进被多个入口共享的
+outline 解码 helper；类型恢复的调用约束（`visitCallBase` → `deferCallConstraint` →
+`addSubtype(F, ActualFunc)`，参数位置逆变 ⇒ 调用方实参 ≤ helper 形参）把**每个调用方
+对 calldata 的字段要求**（常量偏移读取产生的 record 要求）汇进 helper 的那个形参，
+形成"模块级并集"记录；由于该记录同时是各调用方的上界，所有入口打印出来都是同一份。
+
+最小复现 `/tmp/rb/calldata_unify_repro3.ll`（约 50 行）：
+
+- helper 在 `calldata + 4` 读一个字；
+- 入口 A 只通过 helper 解码；入口 B 自己读 `calldata + 36`，同时也调 helper；
+- 结果：A、B、helper 三者的 `%calldata` **都是** `struct_1 { field@4, field@36 }`。
+- 把 helper 调用去掉（`repro1`）时，A、B 各自只有自己的记录 ⇒ 共享 helper 的调用约束是并集来源。
+
+**尝试的修法（原型，已还原）**：在 `MLsubVisitor::visitCallBase` 里对 calldata 实参
+单独处理——实参槽位不参与函数类型约束（用形参节点占位，自边无效果），另加一条反向边
+`addSubtype(形参, 实参)`，期望"helper 自己恢复的字段仍能到达调用方、调用方的字段不再上升"。
+补丁：`/tmp/rb/calldata_arg_sever.patch`（47 行，仅这两个 hunk）。
+
+实测（103 case、2316 入口，用 `AbiParamRecoveryPass` 的 oracle 对比）：
+
+| 指标 | 现状 | 原型 |
+| --- | --- | --- |
+| record == annotated | 177 | **1463** |
+| record 偏多（并集） | 2106 | **2** |
+| record 偏少 | 33 | 851 |
+| record>0 且 annotated==0 | 1179 | **0** |
+
+四套 suite：compile / rewrite / source 通过；pattern suite **99/103**。失败的 4 个里 3 个是
+本次新增的 `abi_param.*` oracle（数值随修复变化，属预期），但 `0032_...` 是**真回归**：
+`notdec.solidity.abi_return` 46 → 42（4 个返回点不再被识别）。
+
+**结论**：
+1. 并集确实来自共享 helper 的调用约束，方向判断正确；
+2. 但当前"切断实参槽位"的实现把 **helper 自己恢复的字段也一起切断了**（under 33→851），
+   因为该约束在实现上是双向生效的，不能用一条反向边补偿；
+3. 还影响到 ABI return 分类（helper 内 buffer 记录变化）——说明 calldata/memory 的
+   类型对象之间还有耦合，需要更细的隔离。
+
+**下一步候选**（未开始）：
+- **按调用点特化解码 helper（IR 层）**：对常量 base 的调用点克隆 helper 并代入常量，
+  使每个克隆只服务一个调用点 ⇒ 并集天然收敛到单函数，且不动 TR 核心；代价是 IR 体积
+  和输出函数数增加，需要评估 structurer/后端影响；
+- **在类型系统里区分"要求(requirement)与证据(evidence)"方向**：让 calldata 实参只把
+  自己的要求留在本函数、helper 的要求能下行到调用方；这需要改 lattice/subtype 传播语义，
+  必须配套 `test/type-recovery/**` 期望值重生成；
+- 或先保留现状，只把本 pass 的测量结果当作"TR 改善的标尺"。
+
+复现命令：
+
+```bash
+build-notdec-nothreads/bin/notdec /tmp/rb/calldata_unify_repro3.ll -o /tmp/out.sol \
+  --tr-level=2 --dump-htypes=/tmp/out.htypes
+grep -E "::arg1 =>" /tmp/out.htypes
+```
+
