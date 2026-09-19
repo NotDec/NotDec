@@ -2896,19 +2896,44 @@ void writePNDiffAnnotatedModule(const llvm::Module &M, const std::string &Path,
   M.print(Out, &Writer);
 }
 
+// True when `Name` ends in one of the generic allocator entry points.  The
+// name is matched component-wise because the microsub2 lifter does not call
+// `malloc` directly: calls go through IDA-named PLT stubs
+// (`ida_malloc_0x37b0`, `ida__calloc_0x39f0`, ...) or through the synthesized
+// opaque-import declarations
+// (`__microsub2_opaque_import___imp_malloc_r64_a1_sig_ri64_ai64`).  An exact
+// string comparison therefore never matched anything and no generic malloc
+// wrapper was ever detected in the microsub2 corpus (all 534 coreutils work
+// dirs reported "No generic malloc wrappers detected"), which left
+// allocation-site types unified and mixed.
+bool isGenericAllocatorName(llvm::StringRef Name) {
+  auto isAllocatorComponent = [](llvm::StringRef Component) {
+    return Component == "malloc" || Component == "calloc" ||
+           Component == "realloc" || Component == "reallocarray" ||
+           Component == "recallocarray" || Component == "strdup" ||
+           Component == "strndup";
+  };
+  llvm::StringRef Rest = Name;
+  while (!Rest.empty()) {
+    auto [Head, Tail] = Rest.split('_');
+    if (!Head.empty() && isAllocatorComponent(Head)) {
+      return true;
+    }
+    Rest = Tail;
+  }
+  return false;
+}
+
 bool isMallocWrapperAllocator(const llvm::Function *F) {
   if (F == nullptr || !F->hasName()) {
     return false;
   }
-  auto Name = F->getName();
   // Generic allocator entry points whose pure forwarding wrappers can be
   // treated as polymorphic. The use checker below still rejects any function
   // that initializes or otherwise touches the returned memory, so adding the
   // realloc/strdup family only extends detection to the same wrapper shape
   // already accepted for malloc/calloc (tmux's xrealloc/xstrdup etc.).
-  return Name == "malloc" || Name == "calloc" || Name == "realloc" ||
-         Name == "reallocarray" || Name == "recallocarray" ||
-         Name == "strdup";
+  return isGenericAllocatorName(F->getName());
 }
 
 bool isIgnorableMallocWrapperUser(const llvm::Instruction *I) {
@@ -2943,9 +2968,37 @@ bool isKnownNoReturnCall(const llvm::CallBase &CB) {
          Name == "__assert_fail";
 }
 
-bool isNullPointerValue(const llvm::Value *V) {
+// A pointer-sized integer is how the microsub2 lifter models a pointer *value*
+// (memory addresses stay `ptr`); the NotDec frontends use real pointer types.
+bool isPointerShapedType(const llvm::Type *Ty, const llvm::Module *M) {
+  if (Ty == nullptr) {
+    return false;
+  }
+  if (Ty->isPointerTy()) {
+    return true;
+  }
+  auto *IT = llvm::dyn_cast<llvm::IntegerType>(Ty);
+  return IT != nullptr && M != nullptr &&
+         IT->getBitWidth() == M->getDataLayout().getPointerSizeInBits(0);
+}
+
+bool isPointerShapedValue(const llvm::Value *V) {
+  if (V == nullptr) {
+    return false;
+  }
+  if (auto *F = llvm::dyn_cast<llvm::Function>(V)) {
+    return isPointerShapedType(F->getReturnType(), F->getParent());
+  }
+  if (auto *CB = llvm::dyn_cast<llvm::CallBase>(V)) {
+    return isPointerShapedType(CB->getType(), CB->getModule());
+  }
+  return isPointerShapedType(V->getType(), nullptr);
+}
+
+bool isNullPointerValue(const llvm::Value *V, const llvm::Module *M) {
   auto *C = llvm::dyn_cast_or_null<llvm::Constant>(V);
-  return C != nullptr && C->getType()->isPointerTy() && C->isNullValue();
+  return C != nullptr && C->isNullValue() &&
+         isPointerShapedType(C->getType(), M);
 }
 
 bool blockCanReachReturn(llvm::BasicBlock *Start) {
@@ -2986,6 +3039,18 @@ bool blockCanReachReturn(llvm::BasicBlock *Start) {
 // function, means the function is a factory/initializer, not a generic wrapper.
 struct MallocWrapperUseChecker {
   const llvm::CallBase *Alloc = nullptr;
+  const bool Debug = std::getenv("NOTDEC_MALLOC_WRAPPER_DEBUG") != nullptr;
+
+  bool Fail(const char *Why, const llvm::Value *V) {
+    if (Debug) {
+      llvm::errs() << "[malloc-wrapper-flow] " << Why << ": ";
+      if (V != nullptr) {
+        V->print(llvm::errs());
+      }
+      llvm::errs() << "\n";
+    }
+    return false;
+  }
   llvm::SmallPtrSet<const llvm::Value *, 32> ValueSeen;
   llvm::SmallPtrSet<const llvm::Value *, 32> UseSeen;
   llvm::SmallPtrSet<const llvm::AllocaInst *, 8> SlotValueSeen;
@@ -3002,13 +3067,16 @@ struct MallocWrapperUseChecker {
 
   bool isMallocResultValue(llvm::Value *V) {
     if (V == nullptr) {
-      return false;
+      return Fail("isMallocResultValue: null value", V);
     }
     if (V == Alloc) {
       return true;
     }
     if (!ValueSeen.insert(V).second) {
-      return false;
+      // Already visited: assume the flow is a wrapper flow (same convention as
+      // the slot guards).  Returning false here made the answer depend on the
+      // user-list order, which rejected the i64-pointer microsub2 wrappers.
+      return true;
     }
 
     if (auto *I = llvm::dyn_cast<llvm::Instruction>(V)) {
@@ -3032,10 +3100,16 @@ struct MallocWrapperUseChecker {
       }
       if (auto *Load = llvm::dyn_cast<llvm::LoadInst>(I)) {
         auto *Slot = getLocalSlot(Load->getPointerOperand());
-        return Slot != nullptr && slotStoresOnlyMallocResult(Slot);
+        if (Slot == nullptr) {
+          return Fail("load is not from a local slot", Load);
+        }
+        if (!slotStoresOnlyMallocResult(Slot)) {
+          return Fail("slot stores more than the alloc result", Load);
+        }
+        return true;
       }
     }
-    return false;
+    return Fail("value is not the alloc result", V);
   }
 
   bool slotStoresOnlyMallocResult(llvm::AllocaInst *Slot) {
@@ -3047,18 +3121,18 @@ struct MallocWrapperUseChecker {
     for (auto *User : Slot->users()) {
       auto *I = llvm::dyn_cast<llvm::Instruction>(User);
       if (I == nullptr) {
-        return false;
+        return Fail("non-instruction slot user", User);
       }
       if (isIgnorableMallocWrapperUser(I)) {
         continue;
       }
       if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(I)) {
         if (getLocalSlot(Store->getPointerOperand()) != Slot) {
-          return false;
+          return Fail("slot seen as a store side target", Store);
         }
         SawStore = true;
         if (!isMallocResultValue(Store->getValueOperand())) {
-          return false;
+          return Fail("slot stores a non-alloc value", Store);
         }
         continue;
       }
@@ -3066,10 +3140,14 @@ struct MallocWrapperUseChecker {
         if (getLocalSlot(Load->getPointerOperand()) == Slot) {
           continue;
         }
+        return Fail("slot used as a load address of another slot", Load);
       }
-      return false;
+      return Fail("unhandled slot user", I);
     }
-    return SawStore;
+    if (!SawStore) {
+      return Fail("slot never stores the alloc result", Slot);
+    }
+    return true;
   }
 
   bool isMallocNullCompare(llvm::ICmpInst &ICmp) {
@@ -3080,8 +3158,9 @@ struct MallocWrapperUseChecker {
 
     auto *LHS = ICmp.getOperand(0);
     auto *RHS = ICmp.getOperand(1);
-    return (isNullPointerValue(LHS) && isMallocResultValue(RHS)) ||
-           (isNullPointerValue(RHS) && isMallocResultValue(LHS));
+    auto *M = ICmp.getModule();
+    return (isNullPointerValue(LHS, M) && isMallocResultValue(RHS)) ||
+           (isNullPointerValue(RHS, M) && isMallocResultValue(LHS));
   }
 
   bool valueUsesOnlyWrapperFlow(llvm::Value *V) {
@@ -3092,7 +3171,7 @@ struct MallocWrapperUseChecker {
     for (auto *User : V->users()) {
       auto *I = llvm::dyn_cast<llvm::Instruction>(User);
       if (I == nullptr) {
-        return false;
+        return Fail("non-instruction user", User);
       }
       if (isIgnorableMallocWrapperUser(I)) {
         continue;
@@ -3100,33 +3179,33 @@ struct MallocWrapperUseChecker {
       if (llvm::isa<llvm::BitCastInst, llvm::AddrSpaceCastInst,
                     llvm::FreezeInst, llvm::PHINode, llvm::SelectInst>(I)) {
         if (!valueUsesOnlyWrapperFlow(I)) {
-          return false;
+          return Fail("cast/phi/select chain", I);
         }
         continue;
       }
       if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(I)) {
         if (!isMallocResultValue(RI->getReturnValue())) {
-          return false;
+          return Fail("return value is not the alloc result", RI);
         }
         continue;
       }
       if (auto *ICmp = llvm::dyn_cast<llvm::ICmpInst>(I)) {
         if (!isMallocNullCompare(*ICmp)) {
-          return false;
+          return Fail("compare is not alloc-vs-null", ICmp);
         }
         continue;
       }
       if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(I)) {
         if (Store->getValueOperand() != V) {
-          return false;
+          return Fail("value stored as a side operand", Store);
         }
         auto *Slot = getLocalSlot(Store->getPointerOperand());
         if (Slot == nullptr || !slotUsesOnlyWrapperFlow(Slot)) {
-          return false;
+          return Fail("store target is not a wrapper-only slot", Store);
         }
         continue;
       }
-      return false;
+      return Fail("unhandled user kind", I);
     }
     return true;
   }
@@ -3177,8 +3256,32 @@ struct MallocWrapperUseChecker {
       auto Pred = ICmp->getPredicate();
       auto *NullSucc =
           BI->getSuccessor(Pred == llvm::CmpInst::ICMP_EQ ? 0 : 1);
-      if (blockCanReachReturn(NullSucc)) {
-        return false;
+      if (!blockCanReachReturn(NullSucc)) {
+        continue;
+      }
+      // The microsub2 lifter does not know that the allocator's failure path is
+      // noreturn: it returns the (null) pointer instead.  Accept the branch when
+      // every reachable return still hands back the allocator result.
+      llvm::SmallVector<llvm::BasicBlock *, 16> Worklist{NullSucc};
+      llvm::SmallPtrSet<llvm::BasicBlock *, 16> Visited;
+      bool NullBranchOk = true;
+      while (!Worklist.empty() && NullBranchOk) {
+        auto *BB = Worklist.pop_back_val();
+        if (!Visited.insert(BB).second) {
+          continue;
+        }
+        if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(BB->getTerminator())) {
+          if (!isMallocResultValue(RI->getReturnValue())) {
+            NullBranchOk = false;
+          }
+          continue;
+        }
+        for (auto *Succ : llvm::successors(BB)) {
+          Worklist.push_back(Succ);
+        }
+      }
+      if (!NullBranchOk) {
+        return Fail("null error branch returns a non-alloc value", BI);
       }
     }
     return true;
@@ -3186,9 +3289,17 @@ struct MallocWrapperUseChecker {
 };
 
 llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
-  if (F.isDeclaration() || F.isIntrinsic() || !F.getReturnType()->isPointerTy() ||
-      isMallocWrapperAllocator(&F)) {
+  static const bool DebugWrapper = std::getenv("NOTDEC_MALLOC_WRAPPER_DEBUG") != nullptr;
+  auto Reject = [&](const char *Why) -> llvm::CallBase * {
+    if (DebugWrapper && F.getName().starts_with("ida_sub_")) {
+      llvm::errs() << "[malloc-wrapper] reject " << F.getName() << ": " << Why
+                   << "\n";
+    }
     return nullptr;
+  };
+  if (F.isDeclaration() || F.isIntrinsic() || !isPointerShapedValue(&F) ||
+      isMallocWrapperAllocator(&F)) {
+    return Reject("decl/intrinsic/not-pointer-shaped/is-allocator");
   }
 
   llvm::CallBase *Alloc = nullptr;
@@ -3199,13 +3310,13 @@ llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
         continue;
       }
       if (Alloc != nullptr) {
-        return nullptr;
+        return Reject("more than one allocator call");
       }
       Alloc = CB;
     }
   }
-  if (Alloc == nullptr || !Alloc->getType()->isPointerTy()) {
-    return nullptr;
+  if (Alloc == nullptr || !isPointerShapedValue(Alloc)) {
+    return Reject("no allocator call / alloc not pointer-shaped");
   }
 
   llvm::DominatorTree DT(F);
@@ -3222,9 +3333,14 @@ llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
       return nullptr;
     }
   }
-  if (!SawReturn || !Checker.nullErrorBranchesDoNotReturn(F) ||
-      !Checker.valueUsesOnlyWrapperFlow(Alloc)) {
-    return nullptr;
+  if (!SawReturn) {
+    return Reject("no return");
+  }
+  if (!Checker.nullErrorBranchesDoNotReturn(F)) {
+    return Reject("null error branch reaches a return");
+  }
+  if (!Checker.valueUsesOnlyWrapperFlow(Alloc)) {
+    return Reject("alloc value used outside wrapper flow");
   }
 
   return Alloc;
