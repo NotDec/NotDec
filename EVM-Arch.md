@@ -169,6 +169,24 @@ post-TR pass 回答**，判断依据是字段偏移/类型是否符合 ABI、eve
 **当前目标收窄**：不追求"一步到位输出 ABI 参数签名"，先把
 (a) pre-TR 的函数分类/契约 和 (b) post-TR 的结构识别补上，参数形式最后再定。
 
+**`calldata.index` 的定位（过渡态，冻结扩展）**：
+
+- 现状：`EvmCalldataAccessPass`（常量 `4+32*i` 偏移）和 `AbiDecodeResultPass`（解码 helper
+  调用点）在 **public entry 内**打 `notdec.solidity.calldata.index` 标注，Solidity 后端用
+  `BodyBuilder::annotatedAbiArgumentExpr` 把它换成 `argN`。两个产生点都有
+  `IsPublicEntry` / `isPublicEntryFunction` 守卫：当前 103 个 case 的 dump 里 1782 处标注
+  **全部在 public entry，helper 内 0 处**（helper 的 ABI 词是通过形参传进来的）。
+- 定位：它是"参数识别搬到 post-TR 之前"的过渡手段，只用于 debug/统计/oracle 与后端临时消费。
+- 约定：**不再扩大它的覆盖范围**（只修 bug）。后续只做一件事——按下面顺序退役：
+  1. post-TR 参数识别（用 `%calldata` 的 `HTypeBufferView`）在同一批 case 上给出等价或更好的
+     参数命名，并用 pattern suite 的 metadata oracle 交叉验证；
+  2. 后端 `argN` 的来源从 metadata 切到 post-TR 结果；
+  3. `AbiDecodeResultPass` 的标注与 `annotatedAbiArgumentExpr` 的消费路径一起删除
+     （或降级为纯 debug），避免同一语义两套表达。
+- 注意：本次的 linkage/分类改动没有触碰上面任何产生或消费逻辑，只改了
+  `EvmCalldataAccessPass` 选择"在哪些函数里做 calldata 重写"的判据（名字 → linkage），
+  标注本身仍然只在 public entry 产生。
+
 ## 4. 函数分类与 linkage
 
 **规则（已实现，2026-09-18）**：evm2llvm 在**生成阶段**直接给出 linkage
