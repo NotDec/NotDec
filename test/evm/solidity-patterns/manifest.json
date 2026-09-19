@@ -1011,6 +1011,18 @@
       },
       "expected_memory_copy_write_kinds": {
         "scratch_returndata": 0
+      },
+      "expected_metadata_string_values": {
+        "notdec.solidity.abi_param.record": {
+          "1": 7
+        },
+        "notdec.solidity.abi_param.annotated": {
+          "0": 5,
+          "1": 2
+        },
+        "notdec.solidity.abi_param.mismatch": {
+          "record=1 annotated=0": 5
+        }
       }
     },
     {
@@ -3253,6 +3265,22 @@
         "50": 2,
         "65": 0,
         "81": 0
+      },
+      "expected_metadata_string_values": {
+        "notdec.solidity.abi_param.record": {
+          "3": 28
+        },
+        "notdec.solidity.abi_param.annotated": {
+          "0": 15,
+          "1": 6,
+          "2": 6,
+          "3": 1
+        },
+        "notdec.solidity.abi_param.mismatch": {
+          "record=3 annotated=0": 15,
+          "record=3 annotated=1": 6,
+          "record=3 annotated=2": 6
+        }
       }
     },
     {
@@ -3376,6 +3404,18 @@
         "50": 2,
         "65": 2,
         "81": 0
+      },
+      "expected_metadata_string_values": {
+        "notdec.solidity.abi_param.record": {
+          "1": 11
+        },
+        "notdec.solidity.abi_param.annotated": {
+          "0": 7,
+          "1": 4
+        },
+        "notdec.solidity.abi_param.mismatch": {
+          "record=1 annotated=0": 7
+        }
       }
     },
     {

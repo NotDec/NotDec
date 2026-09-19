@@ -29,6 +29,11 @@ CPP_CHECKED_BOUNDS_MARKER_PAIR_RE = re.compile(
 METADATA_ONLY_KINDS = {
     "notdec.solidity.checked_bounds",
     "notdec.solidity.calldata.index",
+    # Post-TR ABI parameter identification: measurement annotations without a
+    # rewrite/marker counterpart.
+    "notdec.solidity.abi_param.record",
+    "notdec.solidity.abi_param.annotated",
+    "notdec.solidity.abi_param.mismatch",
 }
 CHECKED_BOUNDS_KIND_TO_MARKER = {
     "checked_add": "notdec_solidity_rewrite_checked_add",

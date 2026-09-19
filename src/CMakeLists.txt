@@ -86,6 +86,7 @@ add_library(notdec-core STATIC
 	Passes/MemOpMatcher.cpp
 	Passes/ReorderBasicblock.cpp
 	Passes/AllocAnnotator.cpp
+	Passes/evm/solidity-patterns/AbiParamRecoveryPass.cpp
 	Passes/evm/solidity-patterns/AbiReturnPass.cpp
 	Passes/evm/solidity-patterns/AbiDecodeResultPass.cpp
 	Passes/evm/solidity-patterns/AbiDecoderHelperRenamePass.cpp

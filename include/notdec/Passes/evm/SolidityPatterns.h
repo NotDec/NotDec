@@ -99,6 +99,21 @@ struct AbiReturnPass : llvm::PassInfoMixin<AbiReturnPass> {
   static bool isRequired() { return true; }
 };
 
+// Post-type-recovery ABI parameter identification.  Records the ABI head field
+// count of the recovered calldata record and the per-function count derived from
+// the calldata.index annotations, and flags entries where they disagree.  The
+// recovered record is currently module-wide, so this is measurement plus oracle
+// until a per-function refinement lands.
+struct AbiParamRecoveryPass : llvm::PassInfoMixin<AbiParamRecoveryPass> {
+  mlsub::MLsubRecovery &TR;
+
+  explicit AbiParamRecoveryPass(mlsub::MLsubRecovery &TR) : TR(TR) {}
+
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Marks empty reverts, Panic(uint256) reverts, and returndata bubbling.
 struct SolidityRevertPass : llvm::PassInfoMixin<SolidityRevertPass> {
   mlsub::MLsubRecovery &TR;

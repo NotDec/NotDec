@@ -220,3 +220,47 @@ NotDec 各处的 `private__`（双下划线）判断会漏掉后者。实测例�
 - `notdec.type_recovery.evm.tr_level_2` 依旧失败：差异只有 `.htypes` 里的 `bytes: 1` 标注
   （HType width 相关，来自工作区里另一个会话未提交的 mlsub/layout-policy 改动），与 linkage/名字无关。
 
+
+### 实现记录（三）：post-TR ABI 参数识别 + oracle（2026-09-18）
+
+按"先只做识别 + 标注/oracle、不改签名"的要求，新增 post-TR pass：
+
+- `src/Passes/evm/solidity-patterns/AbiParamRecoveryPass.cpp`（类声明在
+  `include/notdec/Passes/evm/SolidityPatterns.h`，注册在 `PassManager.cpp` 的 EVM post-TR
+  段、`AbiReturnPass` 之前；`src/CMakeLists.txt` 加源文件）：
+  - 对每个 public entry 取 `%calldata` 形参 → `getHTypeValueBufferView` 拿类型恢复出的
+    calldata 记录 → 统计位于 `4 + 32*i` 的字段数 → 函数 metadata
+    `notdec.solidity.abi_param.record`；
+  - 同一函数内扫描 pre-TR 的 `notdec.solidity.calldata.index` 标注 → 逐函数参数个数 →
+    `notdec.solidity.abi_param.annotated`；
+  - 两者不同时打 `notdec.solidity.abi_param.mismatch`（值 `record=N annotated=M`）。
+  - 直接 `setMetadata`，**不**走 `addStringMetadata`（否则会顺带插入
+    `notdec_solidity_rewrite_*` marker 调用，属于"只测量不改写"的 pass 不该有的副作用）。
+- oracle：`test/run_evm_solidity_patterns_suite.py` 的 `METADATA_ONLY_KINDS` 加入三个新 kind；
+  manifest 为 `0011_multi_public`、`0031_...`、`0009_...` 三个 case 增加
+  `expected_metadata_string_values` 期望（例如 0011：record=1 ×7、annotated 0×5/1×2、
+  mismatch "record=1 annotated=0" ×5；0009：record=3 ×28、annotated 0/1/2/3 = 15/6/6/1、
+  mismatch 27）。
+
+**实测结论（重要，规划需要调整）**：类型恢复目前把各入口的 `%calldata` 指针统一成
+**同一个模块级记录**（87 个 case 里 86 个只有一种 calldata 记录类型），所以记录里的
+ABI head 字段数是模块级上界而不是逐函数参数个数。103 个 case、2316 个 public 入口：
+
+| 对比 | 入口数 |
+| --- | --- |
+| record == annotated（一致） | 177 |
+| record > annotated（记录偏多） | 2106 |
+| record < annotated（记录偏少） | 33 |
+| record > 0 且 annotated == 0 | 1179 |
+
+也就是说：**post-TR 参数识别要能替代 pre-TR 标注，前提是类型恢复先给出逐函数的 calldata
+记录**（根因：共享解码 helper 把所有调用点的常量偏移并进了同一个记录类型）。
+在 TR 侧解决之前，本 pass 作为"测量 + oracle"保留：pattern suite 会锁住这三项计数，
+TR 改善时逐函数 record 应当向 annotated 收敛。
+
+验证：
+
+- `ninja -C build-notdec-nothreads notdec`；
+- 四套 EVM suite 全绿（pattern / compile / rewrite / source）；pattern suite 新增 oracle 通过；
+- 后端输出不变（compile suite 指标与预算一致）。
+

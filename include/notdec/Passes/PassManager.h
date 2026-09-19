@@ -52,6 +52,8 @@ struct PassEnv {
                            "pointer-type-recovery");
     PIC.addClassToPassName("notdec::passes::evm::PayabilityGuardPass",
                            "evm-payability-guard");
+    PIC.addClassToPassName("notdec::passes::evm::AbiParamRecoveryPass",
+                           "evm-abi-param-recovery");
     PIC.addClassToPassName("notdec::passes::evm::AbiReturnPass",
                            "evm-abi-return");
     PIC.addClassToPassName("notdec::passes::evm::SolidityRevertPass",

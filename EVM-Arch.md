@@ -165,6 +165,15 @@ post-TR pass 回答**，判断依据是字段偏移/类型是否符合 ABI、eve
   "第几个参数"，再做参数恢复；pre-TR 只保留"calldata 是无类型字节 buffer"的读取形状。
 - 为什么：参数识别和 ABI return/event 是同一类问题（结构 → Solidity 语义），应该在同一层、
   用同一套 `HTypeBufferView` 工具做。
+- **实测发现（2026-09-18，`AbiParamRecoveryPass`）**：MLsub 目前把各入口的 `%calldata`
+  指针统一成**同一个模块级记录**（87 个 case 里 86 个只有一种 calldata 记录类型），所以
+  "记录里的 ABI head 字段数"是**模块级上界**，不是逐函数参数个数。103 个 case、2316 个
+  public 入口上的对比（`notdec.solidity.abi_param.record` vs `.annotated`）：
+  **177 个一致、2106 个记录偏多、33 个偏少、1179 个只有记录没有逐函数标注**。
+  因此 post-TR 识别必须做成**逐函数**：用记录提供字段布局/类型，用函数内实际访问的偏移
+  （常量偏移 calldata 读取、常量 base 的解码 helper 调用）确定该函数真正用了哪些参数。
+  在此之前，pre-TR 的 `calldata.index` 标注继续作为逐函数判据；而逐函数 calldata 记录
+  本身要回到类型恢复/约束层解决（不要在共享解码 helper 上把各调用点的偏移并成一个记录）。
 
 **当前目标收窄**：不追求"一步到位输出 ABI 参数签名"，先把
 (a) pre-TR 的函数分类/契约 和 (b) post-TR 的结构识别补上，参数形式最后再定。
