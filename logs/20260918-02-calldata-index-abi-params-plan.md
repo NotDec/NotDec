@@ -325,3 +325,63 @@ build-notdec-nothreads/bin/notdec /tmp/rb/calldata_unify_repro3.ll -o /tmp/out.s
 grep -E "::arg1 =>" /tmp/out.htypes
 ```
 
+
+### 多态标记：并集根因的既有机制（2026-09-18，按用户提示复查）
+
+用户提示：并集可能来自"某些 core data 获取的特殊函数没有标记为多态"；标记多态后不同调用点
+就不会混合。复查结果：**方向正确，而且这是仓库里已有的机制**。
+
+- MLsub 侧：`MLsubRecovery::markBuiltinPolymorphicBufferFunctions`
+  给 `KIND_MLSUB_POLYMORPHIC_FUNCTION`（`notdec.mlsub.polymorphic_function`）打标；
+  SCC 划分里 `hasPolymorphic()` 命中后，"the SCC boundary instantiates each callsite
+  independently instead of merging all of them through one function type"。
+- EVM 侧：`EvmCalldataAccessPass::markPolymorphicHelpers` 已经会给 calldata helper 打这个标，
+  但**加了额外条件**：只有某个 offset 形参在不同调用点取值冲突
+  （`hasPolymorphicCallsiteOffset`：同时见到常量与动态）才标记。
+  解码 helper 最常见的形态是"所有调用点传同一个常量 base"，因此**不被标记** → 所有调用点
+  经同一形参合并 → 模块级并集。
+
+按用户建议做的两组实验（都只用既有 metadata 机制，没有改约束推理框架）：
+
+| 变体 | record==annotated | 偏多 | 偏少 | record>0 & annotated==0 | 单值 case |
+| --- | --- | --- | --- | --- | --- |
+| 原始（现状） | 177 | 2106 | 33 | 1179 | 102/103 |
+| 仅 private helper 无条件标记多态 | 288 | 1911 | 117 | 1079 | 92/103 |
+| helper + public entry 都标记 | **1527**（60 case 部分数据） | **104** | 282 | 104 | 10/60 |
+
+关键点：**entry 也必须标记**。ABI entry 是被 dispatcher（`public___function_selector___0x0`）
+用它自己的 `%calldata` 调用的，entry 之间通过 dispatcher 的实参节点继续混合；
+把 entry 也标成多态后，`0009` 的 record 分布与 annotated **完全一致**
+（`{0:15, 1:6, 2:6, 3:1}`）。最小复现 `repro3` 也验证了逐调用点隔离。
+
+但"helper + entry 都标记"会让 `24259_19755445_aefeec2314_4f43187f4106` **确定性不收敛**
+（连续两次 `timeout 150` 都是 exit 124），所以该变体没有保留。
+
+当前代码状态（未提交，待后续决定）：
+
+- `EvmCalldataAccessPass::markPolymorphicHelpers` 已去掉 `hasPolymorphicCallsiteOffset` 门控：
+  **所有读取 calldata 的 internal helper 都标记多态**（metadata 值按 offset 是否变化区分
+  `calldata_offset` / `calldata_buffer`，仅供诊断）；`shouldMarkPolymorphicFunction` 仍限
+  internal helper，**不包含 entry**；
+- 该变体下 `24259` 连续两次正常结束（exit 0），四套 suite 正在复核；
+- "entry 也标记"的实现与实测数字只留在本节，重新实现时注意 24259 的收敛问题
+  （优先查它的 SCC 形状：很可能是递归/自环导致逐调用点实例化无界）。
+
+后续建议：单独排查 24259 在 entry 多态下的不收敛原因（是否可对"只被 dispatcher 调用一次、
+无递归"的 entry 安全标记），再决定是否放开 entry。
+
+
+### 多态标记实验的验证结果与当前状态（2026-09-18 收尾）
+
+- "仅 internal helper 无条件标记多态"：四套 suite 里 compile / rewrite / source 通过，
+  pattern suite **98/103**（5 个失败；其中 3 个是本次新增的 `abi_param.*` oracle 数值变化，
+  另有 2 个未逐个定位）。`24259` 在该变体下正常结束（连续两次 exit 0）。
+- "helper + entry 都标记"：效果最好（见上表），但 `24259` 确定性不收敛（两次 timeout 124），
+  且未跑 suite。
+- 鉴于两个变体分别"收益小/有未解释的 pattern 失败"和"不收敛"，**代码已全部还原到 HEAD**
+  （`EvmCalldataAccessPass.cpp` 无 diff），本节只保留实验数据与结论。
+- 下次继续时的起点：
+  1. 先查 `24259` 在 entry 多态下不收敛的原因（SCC/递归形状、是否可只对无递归的 entry 标记）；
+  2. 决定 entry 的标记范围后，同步更新 `0011/0009/0031` 三个 `abi_param.*` oracle；
+  3. 若采纳 helper 变体，需要解释 pattern suite 的 2 个非 oracle 失败。
+
