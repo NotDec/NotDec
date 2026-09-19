@@ -8,7 +8,7 @@ declare i256 @evm_calldatasize(ptr)
 declare void @evm_revert(ptr, i256, i256)
 declare void @evm_sstore(i256, i256)
 
-define void @private__0x100_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
+define internal void @private__0x100_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) {
 entry:
   %size = call i256 @evm_calldatasize(ptr %calldata)
   %too.short = icmp ult i256 %size, 36

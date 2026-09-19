@@ -221,7 +221,7 @@ bb._0x181:                                        ; preds = %bb._0x179
   ret void, !notdec.evm !27
 }
 
-define { i256, i256 } @private__0x183_0x183(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x183arg0x0) #0 {
+define internal { i256, i256 } @private__0x183_0x183(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x183arg0x0) #0 {
 bb._0x183:
   %evm.sload = call i256 @evm_sload(i256 0), !notdec.evm !28
   %evm.and = and i256 1, %evm.sload, !notdec.evm !29
@@ -313,7 +313,7 @@ bb._0x2f2b7:                                      ; preds = %bb._0x1db
   ret { i256, i256 } %ret.insert36, !notdec.evm !79
 }
 
-define { i256, i256 } @private__0x221_0x221(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x221arg0x0) #0 {
+define internal { i256, i256 } @private__0x221_0x221(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x221arg0x0) #0 {
 bb._0x221:
   %evm.sload = call i256 @evm_sload(i256 1), !notdec.evm !80
   %evm.and = and i256 1, %evm.sload, !notdec.evm !81
@@ -405,7 +405,7 @@ bb._0x2f305:                                      ; preds = %bb._0x279
   ret { i256, i256 } %ret.insert36, !notdec.evm !131
 }
 
-define void @private__0x2bf_0x2bf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2bfarg0x0) #0 {
+define internal void @private__0x2bf_0x2bf(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x2bfarg0x0) #0 {
 bb._0x2bf:
   %notdec.evm.mem.ptr.13 = inttoptr i256 64 to ptr
   %evm.mload = load i256, ptr %notdec.evm.mem.ptr.13, align 1, !notdec.evm !132
@@ -504,7 +504,7 @@ bb._0x35b:                                        ; preds = %bb._0x31f
   unreachable, !notdec.evm !181
 }
 
-define void @private__0x3bb_0x3bb(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3bbarg0x0) #0 {
+define internal void @private__0x3bb_0x3bb(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x3bbarg0x0) #0 {
 bb._0x3bb:
   %notdec.evm.mem.ptr.21 = inttoptr i256 64 to ptr
   %evm.mload = load i256, ptr %notdec.evm.mem.ptr.21, align 1, !notdec.evm !182
@@ -603,7 +603,7 @@ bb._0x457:                                        ; preds = %bb._0x41b
   unreachable, !notdec.evm !231
 }
 
-define i256 @private__0x4b7_0x4b7(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x4b7arg0x0) #0 {
+define internal i256 @private__0x4b7_0x4b7(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x4b7arg0x0) #0 {
 bb._0x4b7:
   %evm.sload = call i256 @evm_sload(i256 3), !notdec.evm !232
   %evm.selfbalance = call i256 @evm_selfbalance(ptr %env), !notdec.evm !233
@@ -627,7 +627,7 @@ bb._0x2f36e:                                      ; preds = %bb._0x4c4
   ret i256 1, !notdec.evm !240
 }
 
-define i256 @private__0x4d4_0x4d4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x4d4arg0x0) #0 {
+define internal i256 @private__0x4d4_0x4d4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x4d4arg0x0) #0 {
 bb._0x4d4:
   %private.call = call i256 @private__0x502_0x502(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 1249), !notdec.evm !241
   br label %bb._0x4e1
@@ -640,7 +640,7 @@ bb._0x4e6:                                        ; preds = %bb._0x4e1
   ret i256 %private.call1, !notdec.evm !243
 }
 
-define i256 @private__0x4eb_0x4eb(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x4ebarg0x0) #0 {
+define internal i256 @private__0x4eb_0x4eb(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x4ebarg0x0) #0 {
 bb._0x4eb:
   %private.call = call i256 @private__0x502_0x502(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 1272), !notdec.evm !244
   br label %bb._0x4f8
@@ -740,7 +740,7 @@ bb._0x57:                                         ; preds = %bb._0x4f
   unreachable, !notdec.evm !291
 }
 
-define i256 @private__0x502_0x502(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x502arg0x0) #0 {
+define internal i256 @private__0x502_0x502(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x502arg0x0) #0 {
 bb._0x502:
   %notdec.evm.mem.ptr.39 = inttoptr i256 64 to ptr
   %evm.mload = load i256, ptr %notdec.evm.mem.ptr.39, align 1, !notdec.evm !292
@@ -862,7 +862,7 @@ bb._0x6129c:
   ret void, !notdec.evm !330
 }
 
-define i256 @private__0x680_0x680(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x680arg0x0, i256 %_0x680arg0x1) #0 {
+define internal i256 @private__0x680_0x680(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x680arg0x0, i256 %_0x680arg0x1) #0 {
 bb._0x680:
   br label %bb._0x696, !notdec.evm !331
 
@@ -1189,7 +1189,7 @@ bb._0x6b1:                                        ; preds = %bb._0x6a0
   unreachable, !notdec.evm !524
 }
 
-define i256 @private__0x8e4_0x8e4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x8e4arg0x0, i256 %_0x8e4arg0x1) #0 {
+define internal i256 @private__0x8e4_0x8e4(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x8e4arg0x0, i256 %_0x8e4arg0x1) #0 {
 bb._0x8e4:
   br label %bb._0x8f1, !notdec.evm !525
 
@@ -1522,7 +1522,7 @@ bb._0x90a:                                        ; preds = %bb._0x8fa
   unreachable, !notdec.evm !728
 }
 
-define i256 @private__0xb56_0xb56(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xb56arg0x0, i256 %_0xb56arg0x1, i256 %_0xb56arg0x2) #0 {
+define internal i256 @private__0xb56_0xb56(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xb56arg0x0, i256 %_0xb56arg0x1, i256 %_0xb56arg0x2) #0 {
 bb._0xb56:
   %notdec.evm.mem.ptr.74 = inttoptr i256 %_0xb56arg0x0 to ptr
   %evm.mload = load i256, ptr %notdec.evm.mem.ptr.74, align 1, !notdec.evm !729
@@ -1707,7 +1707,7 @@ bb._0xb7a:                                        ; preds = %bb._0xb56
   unreachable, !notdec.evm !836
 }
 
-define i256 @private__0xcd1_0xcd1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xcd1arg0x0, i256 %_0xcd1arg0x1) #0 {
+define internal i256 @private__0xcd1_0xcd1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0xcd1arg0x0, i256 %_0xcd1arg0x1) #0 {
 bb._0xcd1:
   %evm.and = and i256 255, %_0xcd1arg0x0, !notdec.evm !837
   %evm.gt = icmp ugt i256 0, %evm.and, !notdec.evm !838

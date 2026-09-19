@@ -195,27 +195,27 @@ linkage 只回答"是否 ABI 表面"，**不回答内联与否**：函数体渲�
 Route A（在 IR 里内联 private helper）实测会破坏 structurer：pattern suite 103→32、
 `// goto` 423→4755，已回滚，结论保留在 `logs/20260917-04-evm-solidity-next-steps.md`。
 
-**消费端分类（已切换，2026-09-18）**：
+**消费端分类（2026-09-18 起只认 linkage）**：
 
 - 统一判据 `notdec::passes::evm::detail::isEvmPrivateHelperFunction`
-  （`include/notdec/Passes/evm/SolidityPatternUtils.h`）：非声明、非 `public_` 前缀，
-  且 **internal linkage 或 `private_` 前缀** 二者之一成立。旧语料（external linkage +
-  `private__` 名字）与新 IR（internal linkage + `private_<name>_` 名字）都能命中。
-- 使用位置：`EvmCalldataAccessPass`（是否重写 calldata 访问、是否标记 polymorphic）、
+  （`include/notdec/Passes/evm/SolidityPatternUtils.h`）：非声明、非 `public_` 前缀、
+  **internal linkage**。名字（`private__<id>_<id>` / `private_<name>_<id>`）不再参与分类。
+- 使用位置：`EvmCalldataAccessPass`（calldata 访问重写、polymorphic 标记）、
   `AbiDecoderHelperRenamePass`（`isSmallPrivateHelper`、改名后的地址后缀提取）、
   `isPrivateHelperCall`（调用点判定）、Solidity 后端 `Reader::isHelperRenderCandidate`。
-- 改名后的 helper 通过 `notdec.evm.original_private_helper` metadata 记住原名：地址后缀取
-  最后一个 `0x...` 分量，`private__0x265_0x265` 和 `private_add_internal_0x10` 都能取对，
-  重复运行也不会二次改名。
-- 不能写成"internal 即 helper"：`SelectorEntryOutliningPass` 创建的
-  `public__notdec_solidity_selector_inline.body` 也是 internal linkage，要靠 `public_`
-  前缀排除。
-- 新增 source golden `named_internal_helper_call_public_entry_01` 同时覆盖
-  `private_<name>_<id>` 名字与内建 internal linkage 两种形式（source suite 89/89 含 solc）。
+- `public_` 前缀仍然要排除：`SelectorEntryOutliningPass` 创建的
+  `public__notdec_solidity_selector_inline.body` 也是 internal linkage。
+- 改名后的 helper 仍通过 `notdec.evm.original_private_helper` metadata 记住原名，地址后缀取
+  最后一个以 `0x` 开头的分量，`private__0x265_0x265` 与 `private_add_internal_0x10` 都能取对，
+  重复运行不会二次改名。
+- source golden `named_internal_helper_call_public_entry_01` 覆盖
+  `private_<name>_<id>` 名字（internal linkage）与无前缀 internal helper 两种形式。
 
-**仍待办**：现有语料（`test/evm/**/*.ll`）是旧版 evm2llvm 生成的，仍全是 external linkage；
-要让 linkage 判据在 batch 路径上真正生效，需要按 `docs/evm/apehex-batch-loop.md`
-重新生成语料。
+**测试语料已迁移**：`test/**/*.ll` 里 86 个文件、3438 个 `define ... @private_*` 全部补上
+`internal`（一次性脚本迁移；不是重跑 Gigahorse）。迁移后四套 EVM suite 的八项指标与迁移前
+**完全一致**（unresolved 264 / condition TODO 729 / goto 424 / real 343 / dangling 69，
+helper 1339 / 调用点 1301），说明分类集合没变，只是判据换成了 linkage。新生成的 IR 由
+evm2llvm 直接产出 internal linkage，不再需要迁移。
 
 ## 5. 现状与路线图
 
@@ -223,6 +223,8 @@ Route A（在 IR 里内联 private helper）实测会破坏 structurer：pattern
 
 - 前端（evm2llvm）：verifier-clean IR、每个 selector 一个入口、共享代码 outline、
   **按函数类别生成 linkage**（2026-09-18）；
+- 函数分类：消费端只按 internal linkage 判定 helper（`isEvmPrivateHelperFunction`），
+  测试语料 86 个文件 / 3438 个 helper 已迁移为 internal；
 - pre-TR：selector outline、payability guard、memory buffer 归一化、calldata 访问归一化 +
   `calldata.index` 标注（88 case / 1782 处）、解码 helper 改名、ABI 解码结果追踪；
 - post-TR：ABI return、revert 分类、checked bounds、event、storage 高层访问；
@@ -231,15 +233,13 @@ Route A（在 IR 里内联 private helper）实测会破坏 structurer：pattern
 
 下一步（按"先窄后宽"排序）：
 
-1. **重新生成语料**（本文第 4 节）：消费端分类已切到 `internal || private_`，
-   但现有语料仍是旧版 evm2llvm 生成、全部 external linkage；按
-   `docs/evm/apehex-batch-loop.md` 重新生成后再验证 linkage 判据的 batch 效果；
-2. **post-TR 的 ABI 参数识别**：用 `%calldata` 的 `HTypeBufferView` 判断 ABI 布局字段，
+1. **post-TR 的 ABI 参数识别**：用 `%calldata` 的 `HTypeBufferView` 判断 ABI 布局字段，
    先只做"识别 + 标注/oracle"，不直接改函数签名；
-3. **calldata 解码 helper 的本体输出**：helper 体内
+2. **calldata 解码 helper 的本体输出**：`abi_decode_*` 现在已经是 internal helper，
+   判据上已就绪；helper 体内
    `evm_calldataload(%calldata, off)` → `abi.decode(msg.data[off:off + 32], (uint256))`
    （已用 solc 0.8.25 验证运行期切片可编译）；解锁 250 个纯 calldata helper；
-4. 其余：memory helper（需要 memory 对象模型）、`signextend/sdiv/smod/sar` 的正确有符号渲染、
+3. 其余：memory helper（需要 memory 对象模型）、`signextend/sdiv/smod/sar` 的正确有符号渲染、
    struct 返回。
 
 ## 6. 维护约定

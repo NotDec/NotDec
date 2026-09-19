@@ -197,3 +197,26 @@ NotDec 各处的 `private__`（双下划线）判断会漏掉后者。实测例�
 
 暂不处理：语料重新生成（现有 `test/evm/**/*.ll` 仍是旧 evm2llvm 输出，全部 external linkage）。
 
+
+### 实现记录（二）：彻底去掉旧语料的名字判据，迁移测试用例（2026-09-18）
+
+按用户要求不再保留"external linkage + `private__` 名字"的兼容路径：
+
+- `isEvmPrivateHelperFunction` 收紧为 **只认 internal linkage**（仍然排除声明和 `public_` 前缀，
+  因为 `SelectorEntryOutliningPass` 的 `public__notdec_solidity_selector_inline.body` 也是 internal）；
+- `isPrivateHelperCall` 改为直接调用该判据（去掉 `private_` 名字分支和
+  `original_private_helper` metadata 分支——改名后的 helper 因为仍是 internal 会被自然命中）；
+- Solidity 后端 `Reader::isHelperRenderCandidate` 同样改成"非声明 + 非 `public_` + internal linkage"；
+- 测试语料迁移：`test/**/*.ll` 共 **86 个文件、3438 个** `define ... @private_*` 补上 `internal`
+  （一次性脚本；迁移范围：solidity-patterns/cases 79 个、solidity-rewrite/cases 2 个、
+  solidity-source/ir 4 个、type-recovery/evm/cases 1 个）。`helperAddressSuffix` 仍按名字解析
+  fact id，因此命名形式（`private_add_internal_0x10`）继续支持，只是不再用于分类。
+
+验证：
+
+- 四套 EVM suite 全绿；compile suite 八项指标与迁移前**完全一致**
+  （264 / 729 / 424 / 343 / 69，helper 1339 / 调用点 1301）→ 分类集合不变、判据换成 linkage；
+- source suite 89/89（含 solc），`named_internal_helper_call_public_entry_01` 通过；
+- `notdec.type_recovery.evm.tr_level_2` 依旧失败：差异只有 `.htypes` 里的 `bytes: 1` 标注
+  （HType width 相关，来自工作区里另一个会话未提交的 mlsub/layout-policy 改动），与 linkage/名字无关。
+

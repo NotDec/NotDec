@@ -615,7 +615,7 @@ bb._0x1d9:                                        ; preds = %bb._0x1d1
   unreachable, !notdec.evm !202
 }
 
-define void @private__0x1e5_0x1e5(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1e5arg0x0, i256 %_0x1e5arg0x1) #0 {
+define internal void @private__0x1e5_0x1e5(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x1e5arg0x0, i256 %_0x1e5arg0x1) #0 {
 bb._0x1e5:
   %evm.sload = call i256 @evm_sload(i256 0), !notdec.evm !203
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !204
@@ -652,7 +652,7 @@ bb._0x9795:                                       ; preds = %bb._0x1f7
   unreachable, !notdec.evm !219
 }
 
-define void @private__0x223_0x223(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x223arg0x0, i256 %_0x223arg0x1) #0 {
+define internal void @private__0x223_0x223(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x223arg0x0, i256 %_0x223arg0x1) #0 {
 bb._0x223:
   %evm.sload = call i256 @evm_sload(i256 0), !notdec.evm !220
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !221
@@ -742,7 +742,7 @@ bb._0x97df:                                       ; preds = %bb._0x235
   unreachable, !notdec.evm !274
 }
 
-define void @private__0x348_0x348(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x348arg0x0, i256 %_0x348arg0x1) #0 {
+define internal void @private__0x348_0x348(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x348arg0x0, i256 %_0x348arg0x1) #0 {
 bb._0x348:
   %evm.sload = call i256 @evm_sload(i256 0), !notdec.evm !275
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !276
@@ -883,7 +883,7 @@ bb._0x982f:                                       ; preds = %bb._0x35a
   unreachable, !notdec.evm !361
 }
 
-define void @private__0x46e_0x46e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x46earg0x0) #0 {
+define internal void @private__0x46e_0x46e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x46earg0x0) #0 {
 bb._0x46e:
   %evm.sload = call i256 @evm_sload(i256 2), !notdec.evm !362
   %notdec.evm.mem.ptr.50 = inttoptr i256 64 to ptr
@@ -939,7 +939,7 @@ bb._0x4ad:                                        ; preds = %bb._0x46e
   unreachable, !notdec.evm !393
 }
 
-define void @private__0x4e3_0x4e3(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x4e3arg0x0, i256 %_0x4e3arg0x1, i256 %_0x4e3arg0x2) #0 {
+define internal void @private__0x4e3_0x4e3(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x4e3arg0x0, i256 %_0x4e3arg0x1, i256 %_0x4e3arg0x2) #0 {
 bb._0x4e3:
   %evm.sload = call i256 @evm_sload(i256 0), !notdec.evm !394
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !395
@@ -1039,7 +1039,7 @@ bb._0x989d:                                       ; preds = %bb._0x4f5
   unreachable, !notdec.evm !449
 }
 
-define void @private__0x64d_0x64d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x64darg0x0) #0 {
+define internal void @private__0x64d_0x64d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x64darg0x0) #0 {
 bb._0x64d:
   %evm.sload = call i256 @evm_sload(i256 0), !notdec.evm !450
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !451
@@ -1095,7 +1095,7 @@ bb._0x9939:                                       ; preds = %bb._0x65f
   unreachable, !notdec.evm !478
 }
 
-define void @private__0x69f_0x69f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x69farg0x0, i256 %_0x69farg0x1) #0 {
+define internal void @private__0x69f_0x69f(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x69farg0x0, i256 %_0x69farg0x1) #0 {
 bb._0x69f:
   %notdec.evm.mem.ptr.70 = inttoptr i256 64 to ptr
   %evm.mload = load i256, ptr %notdec.evm.mem.ptr.70, align 1, !notdec.evm !479
@@ -1354,7 +1354,7 @@ bb._0x15c7:                                       ; preds = %bb._0x6d7
   unreachable, !notdec.evm !632
 }
 
-define void @private__0x83a_0x83a(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x83aarg0x0, i256 %_0x83aarg0x1) #0 {
+define internal void @private__0x83a_0x83a(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x83aarg0x0, i256 %_0x83aarg0x1) #0 {
 bb._0x83a:
   %evm.shl = call i256 @evm_shl(i256 160, i256 1), !notdec.evm !633
   %evm.sub = sub i256 %evm.shl, 1, !notdec.evm !634
@@ -1372,7 +1372,7 @@ bb._0x84b:                                        ; preds = %bb._0x83a
   unreachable, !notdec.evm !639
 }
 
-define i256 @private__0x84e_0x84e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x84earg0x0, i256 %_0x84earg0x1) #0 {
+define internal i256 @private__0x84e_0x84e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x84earg0x0, i256 %_0x84earg0x1) #0 {
 bb._0x84e:
   %evm.calldataload = call i256 @evm_calldataload(ptr %calldata, i256 %_0x84earg0x0), !notdec.evm !640
   call void @private__0x83a_0x83a(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.calldataload, i256 39369), !notdec.evm !641
@@ -1382,7 +1382,7 @@ bb._0x99c9:                                       ; preds = %bb._0x84e
   ret i256 %evm.calldataload, !notdec.evm !642
 }
 
-define i256 @private__0x85e_0x85e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x85earg0x0, i256 %_0x85earg0x1, i256 %_0x85earg0x2) #0 {
+define internal i256 @private__0x85e_0x85e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x85earg0x0, i256 %_0x85earg0x1, i256 %_0x85earg0x2) #0 {
 bb._0x85e:
   %evm.sub = sub i256 %_0x85earg0x1, %_0x85earg0x0, !notdec.evm !643
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !644
@@ -1405,7 +1405,7 @@ bb._0x86b:                                        ; preds = %bb._0x85e
   unreachable, !notdec.evm !650
 }
 
-define void @private__0x894_0x894(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x894arg0x0, i256 %_0x894arg0x1) #0 {
+define internal void @private__0x894_0x894(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x894arg0x0, i256 %_0x894arg0x1) #0 {
 bb._0x894:
   %evm.iszero = icmp eq i256 %_0x894arg0x0, 0, !notdec.evm !651
   %evm.bool = zext i1 %evm.iszero to i256, !notdec.evm !651
@@ -1424,7 +1424,7 @@ bb._0x89e:                                        ; preds = %bb._0x894
   unreachable, !notdec.evm !656
 }
 
-define i256 @private__0x8a1_0x8a1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x8a1arg0x0, i256 %_0x8a1arg0x1) #0 {
+define internal i256 @private__0x8a1_0x8a1(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x8a1arg0x0, i256 %_0x8a1arg0x1) #0 {
 bb._0x8a1:
   %evm.calldataload = call i256 @evm_calldataload(ptr %calldata, i256 %_0x8a1arg0x0), !notdec.evm !657
   call void @private__0x894_0x894(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %evm.calldataload, i256 39477), !notdec.evm !658
@@ -1434,7 +1434,7 @@ bb._0x9a35:                                       ; preds = %bb._0x8a1
   ret i256 %evm.calldataload, !notdec.evm !659
 }
 
-define { i256, i256 } @private__0x8ac_0x8ac(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x8acarg0x0, i256 %_0x8acarg0x1, i256 %_0x8acarg0x2) #0 {
+define internal { i256, i256 } @private__0x8ac_0x8ac(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x8acarg0x0, i256 %_0x8acarg0x1, i256 %_0x8acarg0x2) #0 {
 bb._0x8ac:
   %evm.sub = sub i256 %_0x8acarg0x1, %_0x8acarg0x0, !notdec.evm !660
   %evm.slt = icmp slt i256 %evm.sub, 64, !notdec.evm !661
@@ -1586,7 +1586,7 @@ bb._0x8ba:                                        ; preds = %bb._0x8ac
   unreachable, !notdec.evm !730
 }
 
-define i256 @private__0x97e_0x97e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x97earg0x0, i256 %_0x97earg0x1) #0 {
+define internal i256 @private__0x97e_0x97e(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x97earg0x0, i256 %_0x97earg0x1) #0 {
 bb._0x97e:
   %notdec.evm.mem.ptr.107 = inttoptr i256 %_0x97earg0x0 to ptr
   store i256 32, ptr %notdec.evm.mem.ptr.107, align 1, !notdec.evm !731
@@ -1600,7 +1600,7 @@ bb._0x97e:
   ret i256 %evm.add2, !notdec.evm !737
 }
 
-define i256 @private__0x9b3_0x9b3(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x9b3arg0x0, i256 %_0x9b3arg0x1, i256 %_0x9b3arg0x2) #0 {
+define internal i256 @private__0x9b3_0x9b3(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x9b3arg0x0, i256 %_0x9b3arg0x1, i256 %_0x9b3arg0x2) #0 {
 bb._0x9b3:
   %evm.sub = sub i256 %_0x9b3arg0x1, %_0x9b3arg0x0, !notdec.evm !738
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !739
@@ -1624,7 +1624,7 @@ bb._0x9c0:                                        ; preds = %bb._0x9b3
   unreachable, !notdec.evm !745
 }
 
-define i256 @private__0x9ce_0x9ce(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x9cearg0x0, i256 %_0x9cearg0x1, i256 %_0x9cearg0x2) #0 {
+define internal i256 @private__0x9ce_0x9ce(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x9cearg0x0, i256 %_0x9cearg0x1, i256 %_0x9cearg0x2) #0 {
 bb._0x9ce:
   %evm.sub = sub i256 %_0x9cearg0x1, %_0x9cearg0x0, !notdec.evm !746
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !747
@@ -1644,7 +1644,7 @@ bb._0x9db:                                        ; preds = %bb._0x9ce
   unreachable, !notdec.evm !752
 }
 
-define i256 @private__0x9f9_0x9f9(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x9f9arg0x0, i256 %_0x9f9arg0x1, i256 %_0x9f9arg0x2) #0 {
+define internal i256 @private__0x9f9_0x9f9(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x9f9arg0x0, i256 %_0x9f9arg0x1, i256 %_0x9f9arg0x2) #0 {
 bb._0x9f9:
   %evm.sub = sub i256 %_0x9f9arg0x1, %_0x9f9arg0x0, !notdec.evm !753
   %evm.slt = icmp slt i256 %evm.sub, 32, !notdec.evm !754

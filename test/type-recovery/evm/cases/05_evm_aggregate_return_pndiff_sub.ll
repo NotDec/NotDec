@@ -3,7 +3,7 @@ source_filename = "notdec.evm.type-recovery.aggregate-return-pndiff-sub"
 target datalayout = "E-p:256:256-i256:256:256-S256-a:256:256"
 target triple = "evm-unknown-unknown"
 
-define { i256, i256 } @private_pair(i256 %base, i256 %delta) #0 {
+define internal { i256, i256 } @private_pair(i256 %base, i256 %delta) #0 {
 entry:
   %addr = sub i256 %base, %delta
   %ptr = inttoptr i256 %addr to ptr

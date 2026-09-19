@@ -50,7 +50,7 @@ bool isEvmPrivateHelperFunction(const Function &F) {
   if (F.isDeclaration() || F.getName().starts_with("public_")) {
     return false;
   }
-  return F.hasInternalLinkage() || F.getName().starts_with("private_");
+  return F.hasInternalLinkage();
 }
 
 Value *getIntToPtrAddress(Value *Ptr) {
@@ -110,9 +110,7 @@ bool isPrivateHelperCall(const CallBase *Call) {
     return false;
   }
   const Function *Callee = Call->getCalledFunction();
-  return Callee != nullptr &&
-         (Callee->getName().starts_with("private_") ||
-          Callee->getMetadata(KIND_EVM_ORIGINAL_PRIVATE_HELPER) != nullptr);
+  return Callee != nullptr && isEvmPrivateHelperFunction(*Callee);
 }
 
 bool isZero(const Value *V) {

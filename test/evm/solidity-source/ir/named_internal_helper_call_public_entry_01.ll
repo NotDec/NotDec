@@ -12,7 +12,7 @@ declare void @evm_sstore(i256, i256)
 ; "private_" + sanitize(<name> + "_" + <fact id>), so it is private_<name>_<id>
 ; and NOT private__<id>_<id>.  It is still an internal helper and must be
 ; classified as one.
-define i256 @private_sum_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x100arg0x0, i256 %_0x100arg0x1) {
+define internal i256 @private_sum_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x100arg0x0, i256 %_0x100arg0x1) {
 bb._0x100:
   %evm.add = add i256 %_0x100arg0x0, %_0x100arg0x1
   ret i256 %evm.add

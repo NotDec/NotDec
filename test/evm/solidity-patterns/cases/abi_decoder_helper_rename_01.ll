@@ -20,13 +20,13 @@ entry:
   ret void
 }
 
-define i256 @private__0x100_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %offset) {
+define internal i256 @private__0x100_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %offset) {
 entry:
   %word = call i256 @evm_calldataload(ptr %calldata, i256 %offset)
   ret i256 %word
 }
 
-define { i256, i256 } @private__0x200_0x200(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %offset) {
+define internal { i256, i256 } @private__0x200_0x200(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %offset) {
 entry:
   %len = call i256 @evm_calldataload(ptr %calldata, i256 %offset)
   %data = add i256 %offset, 32
@@ -46,7 +46,7 @@ revert:
   unreachable
 }
 
-define i256 @private__0x300_0x300(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %base, i256 %len, i256 %index) {
+define internal i256 @private__0x300_0x300(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %base, i256 %len, i256 %index) {
 entry:
   %out.of.bounds = icmp uge i256 %index, %len
   br i1 %out.of.bounds, label %revert, label %ok

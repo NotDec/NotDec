@@ -8,7 +8,7 @@ declare i256 @evm_calldatasize(ptr)
 declare void @evm_revert(ptr, i256, i256)
 declare void @evm_sstore(i256, i256)
 
-define { i256, i256 } @private__0x100_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %base, i256 %size, i256 %cont) {
+define internal { i256, i256 } @private__0x100_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %base, i256 %size, i256 %cont) {
 entry:
   %available = sub i256 %size, %base
   %too.short = icmp sgt i256 %available, 63

@@ -11,14 +11,14 @@ declare void @evm_sstore(i256, i256)
 ; evm2llvm outlines shared code into private__* helpers.  %sum has two uses in
 ; the same block, so the backend caches it in a local (the llvm2c C backend
 ; rule: fold only a single same-block use); %word is used once and is folded.
-define i256 @private__sum_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x100arg0x0, i256 %_0x100arg0x1) {
+define internal i256 @private__sum_0x100(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x100arg0x0, i256 %_0x100arg0x1) {
 bb._0x100:
   %evm.add = add i256 %_0x100arg0x0, %_0x100arg0x1
   ret i256 %evm.add
 }
 
 ; A void helper keeps its side effect as a call statement.
-define void @private__record_0x200(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x200arg0x0) {
+define internal void @private__record_0x200(ptr %mem, ptr %calldata, ptr %returndata, ptr %env, i256 %_0x200arg0x0) {
 bb._0x200:
   call void @evm_sstore(i256 2, i256 %_0x200arg0x0)
   ret void
