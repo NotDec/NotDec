@@ -48,7 +48,8 @@ struct CalldataMinSizeGuard {
 };
 
 bool shouldRewriteFunction(Function &F) {
-  return detail::isPublicEntryFunction(F) || F.getName().starts_with("private__");
+  return detail::isPublicEntryFunction(F) ||
+         detail::isEvmPrivateHelperFunction(F);
 }
 
 bool shouldRewriteCalldataMinSizeGuards(Function &F) {
@@ -56,7 +57,7 @@ bool shouldRewriteCalldataMinSizeGuards(Function &F) {
 }
 
 bool shouldMarkPolymorphicFunction(Function &F) {
-  return F.getName().starts_with("private__") && !F.isDeclaration();
+  return detail::isEvmPrivateHelperFunction(F);
 }
 
 Value *getCalldataArg(Function &F) {

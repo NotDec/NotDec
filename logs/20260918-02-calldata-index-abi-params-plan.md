@@ -160,3 +160,40 @@ public 入口的 ABI 形参**。它比 calldata helper 本体渲染更靠前（�
 
 阶段边界、IR 质量契约和 post-TR 职责见新文档 `EVM-Arch.md`（本日志不再重复）。
 
+
+### 实现记录：消费端分类切到 linkage / 名字修复（2026-09-18）
+
+起因：evm2llvm 的 helper 名字是 `private_` + sanitize(Name + "_" + Id)，`Name` 为空时得到
+`private__0x1b7_0x1b7`，Gigahorse 恢复出高层名字时得到 `private_add_internal_0x10`；
+NotDec 各处的 `private__`（双下划线）判断会漏掉后者。实测例：`private_call` fixture 的
+`private_add_internal_0x10` 在 Solidity 输出里被整条丢弃。
+
+改动（NotDec 侧，配合 evm2llvm `5d11e87` 的 internal linkage）：
+
+- 新增共享判据 `detail::isEvmPrivateHelperFunction(F)`
+  （`include/notdec/Passes/evm/SolidityPatternUtils.h`，实现放 `src/Passes/evm/SolidityPatterns.cpp`）：
+  非声明、非 `public_` 前缀，且 `hasInternalLinkage() || 名字以 private_ 开头`；
+- `EvmCalldataAccessPass` 的 `shouldRewriteFunction` / `shouldMarkPolymorphicFunction` 改用它；
+- `AbiDecoderHelperRenamePass` 的 `isSmallPrivateHelper` 改用它，并跳过已带
+  `notdec.evm.original_private_helper` metadata 的函数；
+- `firstAddressSuffix` 改成 `helperAddressSuffix(Function&)`：从 metadata（若有）或当前名字里
+  取最后一个以 `0x` 开头的分量，`private__0x265_0x265` 与 `private_add_internal_0x10` 都取对；
+- `isPrivateHelperCall` 的名字判断从 `private__` 放宽到 `private_`（metadata 分支不变）；
+- Solidity 后端 `Reader::isHelperRenderCandidate`：`private_` 前缀 **或** internal linkage
+  （`public_` 前缀排除，避免把 `public__notdec_solidity_selector_inline.body` 当成 helper）。
+
+验证：
+
+- `ninja -C build-notdec-nothreads notdec`；四套 suite 全绿，compile suite 指标与改动前一致
+  （corpus 仍是 external linkage + `private__` 名字，行为不变）；
+- 端到端：新 evm2llvm 生成的 `private_call.ll`（internal linkage + `private_add_internal_0x10`）
+  现在输出
+  `function private_add_internal_0x10(uint256 arg0, uint256 arg1) internal returns (uint256 ret0) { return arg0 + arg1; }`
+  和调用语句 `private_add_internal_0x10(2, 3);`；
+- 新增 source golden `named_internal_helper_call_public_entry_01`：同一个 case 覆盖
+  `private_sum_0x100`（命名 helper）与 `define internal @internal_helper_0x200`（linkage 信号），
+  期望输出 `slot_0 = internal_helper_0x200(private_sum_0x100(5, arg0));` + 两个 internal 函数；
+  source suite 89/89（含 solc）通过。
+
+暂不处理：语料重新生成（现有 `test/evm/**/*.ll` 仍是旧 evm2llvm 输出，全部 external linkage）。
+

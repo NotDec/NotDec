@@ -150,6 +150,14 @@ struct EvmMemoryStore {
 };
 
 bool isCallTo(const llvm::Value *V, llvm::StringRef Name);
+
+// An internal helper function outlined by evm2llvm; it is not part of the
+// contract ABI surface.  evm2llvm names them private__<id>_<id> when it
+// recovered no high-level name and private_<name>_<id> otherwise, and since
+// 2026-09-18 it also emits them with internal linkage.  Accept either signal so
+// IR generated before that change (the checked-in corpus) keeps working.
+bool isEvmPrivateHelperFunction(const llvm::Function &F);
+
 llvm::Value *getIntToPtrAddress(llvm::Value *Ptr);
 bool isPrivateHelperCall(const llvm::CallBase *Call);
 bool isZero(const llvm::Value *V);

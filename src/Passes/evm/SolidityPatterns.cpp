@@ -46,6 +46,13 @@ bool isCallTo(const Value *V, StringRef Name) {
   return Callee != nullptr && Callee->getName() == Name;
 }
 
+bool isEvmPrivateHelperFunction(const Function &F) {
+  if (F.isDeclaration() || F.getName().starts_with("public_")) {
+    return false;
+  }
+  return F.hasInternalLinkage() || F.getName().starts_with("private_");
+}
+
 Value *getIntToPtrAddress(Value *Ptr) {
   if (isa_and_nonnull<ConstantPointerNull>(Ptr)) {
     return ConstantInt::get(Type::getIntNTy(Ptr->getContext(), 256), 0);
@@ -104,7 +111,7 @@ bool isPrivateHelperCall(const CallBase *Call) {
   }
   const Function *Callee = Call->getCalledFunction();
   return Callee != nullptr &&
-         (Callee->getName().starts_with("private__") ||
+         (Callee->getName().starts_with("private_") ||
           Callee->getMetadata(KIND_EVM_ORIGINAL_PRIVATE_HELPER) != nullptr);
 }
 

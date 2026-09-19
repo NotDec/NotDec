@@ -33,8 +33,11 @@ enum class HelperKind {
 };
 
 bool isSmallPrivateHelper(Function &F) {
-  if (!F.getName().starts_with("private__") || F.isDeclaration()) {
+  if (!detail::isEvmPrivateHelperFunction(F)) {
     return false;
+  }
+  if (F.getMetadata(detail::KIND_EVM_ORIGINAL_PRIVATE_HELPER) != nullptr) {
+    return false; // already classified by this pass
   }
   unsigned Blocks = 0;
   unsigned Insts = 0;
@@ -345,11 +348,26 @@ StringRef helperKindName(HelperKind Kind) {
   return "";
 }
 
-std::string firstAddressSuffix(StringRef Name) {
-  if (!Name.consume_front("private__")) {
+// The trailing fact id of an outlined helper.  evm2llvm names them
+// private__<id>_<id> when no high-level name was recovered and
+// private_<name>_<id> otherwise, so the id is the last '_'-separated component
+// that starts with 0x.  After a rename the original name is recovered from the
+// marker metadata.
+std::string helperAddressSuffix(Function &F) {
+  StringRef Name = F.getName();
+  if (const MDNode *MD =
+          F.getMetadata(detail::KIND_EVM_ORIGINAL_PRIVATE_HELPER)) {
+    if (MD->getNumOperands() == 1) {
+      if (const auto *Original = dyn_cast<MDString>(MD->getOperand(0))) {
+        Name = Original->getString();
+      }
+    }
+  }
+  if (!Name.consume_front("private_")) {
     return "unknown";
   }
-  return Name.split('_').first.str();
+  StringRef Last = Name.rsplit('_').second;
+  return Last.starts_with("0x") ? Last.str() : "unknown";
 }
 
 void markOriginalPrivateHelper(Function &F) {
@@ -368,7 +386,7 @@ bool renameHelper(Function &F, HelperKind Kind) {
   }
   SmallString<96> NewName(Base);
   NewName += "__";
-  NewName += firstAddressSuffix(F.getName());
+  NewName += helperAddressSuffix(F);
   markOriginalPrivateHelper(F);
   F.setName(NewName);
   ++NumAbiDecoderHelpersRenamed;
