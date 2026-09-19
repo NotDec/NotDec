@@ -59,3 +59,32 @@ vector::_M_range_check: __n (which is 1) >= this->size() (which is 1)
   没有产生可见输出（需要再确认该开关的输出通道）；句柄级优化（emit 后释放
   MBA）实测只把 tmux 1.92→1.82 GB、libavcodec 25.0→24.2 GB，说明常驻内存
   主要在类型恢复的约束图/类型图上。
+
+## 2026-09-17 新增：SPEC 2017 `628.pop2_s` 的可复现复现器（无需 IDA）
+
+起因：给 htype-layout 数据集补跑 11 个没有 microsub2 运行记录的 SPEC case。
+`628.pop2_s`（参考二进制 171 MB）用 `--allow-fresh` 从零分析，在 1581.60 s、
+峰值 10,955,908 KiB（约 10.4 GiB）时失败，stderr 结尾：
+
+```
+Error: unable to handle meet: i128 with vector   （大量重复）
+[microsub2] type recovery failed: NotDec type recovery stopped:
+  vector::_M_range_check: __n (which is 1) >= this->size() (which is 1)
+```
+
+与 libavcodec 是同一条越界异常，`47e82935` 的防御性 guard 同样没有覆盖到
+（warning 未出现），与当时的结论一致。
+
+**可复现复现器**（不需要重跑 IDA；frozen IR 由失败运行留在 work 目录）：
+
+```bash
+cd /sn640/NotDec-Exp/Bench2/datasets/htype-layout/runs/binary_datasets_spec2017_cases_628.pop2_s
+timeout 1800 /sn640/NotDec/build-notdec-nothreads2/bin/notdec \
+  work/02-mlsub-input.ll --frozen-tr-input-ir --tr-level=2 \
+  --merge-struct-ptr-load-store -o /tmp/pop2-frozen-out.ll
+```
+
+结果：exit 134（SIGABRT，core dumped），同一行
+`Exception: vector::_M_range_check: __n (which is 1) >= this->size() (which is 1)`，
+约 13 分钟、峰值约 9.7 GB RSS 到达抛出点（frozen IR 259 MB，已在磁盘上）。
+这条路径比 libavcodec 更适合做回溯定位：不需要 IDA、输入固定、崩溃点稳定。
