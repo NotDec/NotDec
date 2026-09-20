@@ -151,6 +151,22 @@ struct EvmMemoryStore {
 
 bool isCallTo(const llvm::Value *V, llvm::StringRef Name);
 
+// Name of the opaque per-entry calldata view helper inserted by
+// EvmCalldataAccessPass.  Every public entry calls it once to obtain its own
+// buffer view; the declaration is marked polymorphic so MLsub instantiates the
+// (trivial) summary per call site and each entry recovers its own layout
+// instead of the module-wide join of all entries.
+inline constexpr llvm::StringLiteral kEvmCalldataViewName =
+    "notdec_evm_calldata_view";
+
+// The second formal of an EVM function: (mem, calldata, returndata, env, ...).
+llvm::Argument *getEvmCalldataArgument(llvm::Function &F);
+// The entry's calldata view call, or nullptr when there is none.
+llvm::CallInst *getEvmCalldataViewCall(llvm::Function &F);
+// This function's calldata root: the view call result when present, otherwise
+// the %calldata argument (nullptr when the function has no such argument).
+llvm::Value *getEvmCalldataRoot(llvm::Function &F);
+
 // An internal helper function outlined by evm2llvm; it is not part of the
 // contract ABI surface.  Since 2026-09-18 evm2llvm emits these helpers with
 // internal linkage, which is the only classification signal used here: their

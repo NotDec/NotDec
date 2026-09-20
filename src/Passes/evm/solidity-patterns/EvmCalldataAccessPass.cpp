@@ -17,6 +17,7 @@
 #include <llvm/Support/Alignment.h>
 #include <llvm/Transforms/Utils/Local.h>
 
+#include <cstdlib>
 #include <limits>
 
 #define DEBUG_TYPE "evm-calldata-access"
@@ -61,22 +62,94 @@ bool shouldMarkPolymorphicFunction(Function &F) {
   // them too (they are called from the dispatcher with its own %calldata), but
   // profiling shows that variant drives the binarysub constraint worklist into
   // a >25 minute / 3 GB run on case 24259, so it stays disabled until the
-  // propagation cost is understood.
-  return detail::isEvmPrivateHelperFunction(F);
+  // propagation cost is understood.  NOTDEC_EVM_POLY_ENTRIES=1 re-enables the
+  // entry variant for that investigation without a rebuild.
+  // NOTDEC_EVM_POLY_ENTRIES: unset/0 = helpers only (production), 1/all = every
+  // calldata function, "entries" = public entries only (diagnostic mode).
+  // NOTDEC_EVM_POLY_STRICT=1 uses the positive matcher only: an internal helper
+  // is polymorphic iff it dereferences calldata through an offset that is one
+  // of its own formal arguments and that argument varies across call sites.
+  static const std::string Mode = [] {
+    const char *Env = std::getenv("NOTDEC_EVM_POLY_ENTRIES");
+    return std::string(Env == nullptr ? "0" : Env);
+  }();
+  const bool MarkEntries = Mode == "1" || Mode == "all";
+  const bool MarkHelpers = Mode != "entries";
+  const bool WantsEntry = MarkEntries || Mode == "entries";
+  auto HasCalldataArg = [](Function &F) {
+    if (F.isDeclaration() || F.arg_size() < 2) {
+      return false;
+    }
+    auto It = F.arg_begin();
+    ++It;
+    return It->getType()->isPointerTy() && It->getName() == "calldata";
+  };
+  if (MarkEntries && HasCalldataArg(F)) {
+    return true;
+  }
+  if (MarkHelpers && detail::isEvmPrivateHelperFunction(F)) {
+    return true;
+  }
+  if (WantsEntry && !MarkEntries && detail::isPublicEntryFunction(F)) {
+    return HasCalldataArg(F);
+  }
+  return false;
 }
 
 Value *getCalldataArg(Function &F) {
-  if (!shouldRewriteFunction(F) || F.arg_size() < 2) {
+  if (!shouldRewriteFunction(F)) {
     return nullptr;
   }
+  // Public entries read calldata through their own view value (see
+  // insertCalldataViews below); helpers keep using the formal their callers
+  // pass, which may itself be a caller's view.
+  return detail::getEvmCalldataRoot(F);
+}
 
-  auto It = F.arg_begin();
-  ++It;
-  Argument &Arg = *It;
-  if (!Arg.getType()->isPointerTy() || Arg.getName() != "calldata") {
-    return nullptr;
+// Give every public entry its own opaque calldata view.
+//
+// The dispatcher passes one shared %calldata value to all entries, so before
+// this the recovered record of an entry is the join over every entry's reads
+// (module-wide ABI head union).  Each entry now calls the declared view once and
+// uses the result for its calldata accesses; the declaration is marked
+// polymorphic, so the SCC boundary instantiates its trivial summary per call
+// site and each entry recovers its own layout.  The calls are removed again by
+// EvmCalldataViewCleanupPass right after AbiParamRecoveryPass has read the
+// records, so no later pass or backend sees them.
+bool insertCalldataViews(Module &M) {
+  bool Changed = false;
+  Function *ViewDecl = nullptr;
+  for (Function &F : M) {
+    if (F.isDeclaration() || !detail::isPublicEntryFunction(F)) {
+      continue;
+    }
+    Argument *Calldata = detail::getEvmCalldataArgument(F);
+    if (Calldata == nullptr || Calldata->use_empty() ||
+        detail::getEvmCalldataViewCall(F) != nullptr) {
+      continue;
+    }
+    if (ViewDecl == nullptr) {
+      LLVMContext &Ctx = M.getContext();
+      auto *PtrTy = PointerType::get(Ctx, 0);
+      ViewDecl = cast<Function>(
+          M.getOrInsertFunction(detail::kEvmCalldataViewName,
+                                FunctionType::get(PtrTy, {PtrTy}, false))
+              .getCallee());
+      if (ViewDecl->getMetadata(mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION) ==
+          nullptr) {
+        ViewDecl->setMetadata(
+            mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION,
+            MDNode::get(Ctx, {MDString::get(Ctx, "calldata_view")}));
+      }
+    }
+    IRBuilder<> Builder(&*F.getEntryBlock().getFirstInsertionPt());
+    CallInst *View =
+        Builder.CreateCall(ViewDecl, {Calldata}, "notdec.calldata.view");
+    Calldata->replaceUsesWithIf(View,
+                                [&](Use &U) { return U.getUser() != View; });
+    Changed = true;
   }
-  return &Arg;
+  return Changed;
 }
 
 bool usesCurrentCalldata(CallBase &Call, unsigned ArgIndex, Value *Calldata) {
@@ -483,7 +556,12 @@ bool hasPolymorphicCallsiteOffset(Function &F, unsigned ArgNo) {
     SawConstant = true;
   }
 
-  return SawConstant && SawDynamic;
+  // Differing constants already returned true above.  A single dynamic call
+  // site is enough to make the formal genuinely call-site-dependent; the old
+  // "constant AND dynamic" test missed helpers whose offsets are always
+  // computed (e.g. calldata base + a formal), which are the *most* generic.
+  (void)SawConstant;
+  return SawDynamic;
 }
 
 bool markPolymorphicHelpers(Module &M) {
@@ -513,6 +591,18 @@ bool markPolymorphicHelpers(Module &M) {
         VaryingOffsets = true;
         break;
       }
+    }
+
+    // Positive matcher (experiment): only a helper that dereferences calldata
+    // through one of its own formal offsets, with that offset actually varying
+    // across call sites, is generic in the let-polymorphism sense.  Everything
+    // else stays monomorphic.
+    static const bool StrictPoly = [] {
+      const char *Env = std::getenv("NOTDEC_EVM_POLY_STRICT");
+      return Env != nullptr && Env[0] != '0';
+    }();
+    if (StrictPoly && !VaryingOffsets) {
+      continue;
     }
 
     F.setMetadata(mlsub::KIND_MLSUB_POLYMORPHIC_FUNCTION,
@@ -654,7 +744,8 @@ bool rewriteFunction(Function &F) {
 
 PreservedAnalyses EvmCalldataAccessPass::run(Module &M,
                                              ModuleAnalysisManager &) {
-  bool Changed = markPolymorphicHelpers(M);
+  bool Changed = insertCalldataViews(M);
+  Changed |= markPolymorphicHelpers(M);
   SmallVector<Function *, 32> Functions;
   for (Function &F : M) {
     if (!F.isDeclaration()) {

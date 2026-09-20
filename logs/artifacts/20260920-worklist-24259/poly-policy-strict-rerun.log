@@ -1,0 +1,15 @@
+=== strict rerun (failure names) ===
+FAIL 1485_19504919_9deb0fc809_62afe2b29485 rc=124
+{
+ "cases": 103,
+ "failed": 1,
+ "entries": 2266,
+ "exact": 175,
+ "too_many": 2059,
+ "too_few": 32,
+ "record_only": 0,
+ "single_value_cases": 100,
+ "cases_with_entries": 101,
+ "wall_s": 201.0,
+ "variant": "strict"
+}

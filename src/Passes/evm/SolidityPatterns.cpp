@@ -32,6 +32,35 @@ const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
 const char *KIND_SOLIDITY_CALLDATA_ARG_INDEX =
     "notdec.solidity.calldata.index";
 
+PreservedAnalyses EvmCalldataViewCleanupPass::run(Module &M,
+                                                   ModuleAnalysisManager &) {
+  bool Changed = false;
+  for (Function &F : M) {
+    if (F.isDeclaration()) {
+      continue;
+    }
+    SmallVector<CallInst *, 4> Views;
+    for (Instruction &I : instructions(F)) {
+      auto *Call = dyn_cast<CallInst>(&I);
+      if (Call != nullptr && detail::isCallTo(Call, detail::kEvmCalldataViewName)) {
+        Views.push_back(Call);
+      }
+    }
+    for (CallInst *Call : Views) {
+      Call->replaceAllUsesWith(Call->getArgOperand(0));
+      Call->eraseFromParent();
+      Changed = true;
+    }
+  }
+  if (Function *Decl = M.getFunction(detail::kEvmCalldataViewName)) {
+    if (Decl->isDeclaration() && Decl->use_empty()) {
+      Decl->eraseFromParent();
+      Changed = true;
+    }
+  }
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
+
 namespace detail {
 
 bool isCallTo(const Value *V, StringRef Name) {
@@ -44,6 +73,43 @@ bool isCallTo(const Value *V, StringRef Name) {
   }
   const Function *Callee = Call->getCalledFunction();
   return Callee != nullptr && Callee->getName() == Name;
+}
+
+Argument *getEvmCalldataArgument(Function &F) {
+  if (F.arg_size() < 2) {
+    return nullptr;
+  }
+  auto It = F.arg_begin();
+  ++It;
+  Argument &Arg = *It;
+  if (!Arg.getType()->isPointerTy() || Arg.getName() != "calldata") {
+    return nullptr;
+  }
+  return &Arg;
+}
+
+CallInst *getEvmCalldataViewCall(Function &F) {
+  if (F.isDeclaration()) {
+    return nullptr;
+  }
+  for (Instruction &I : instructions(F)) {
+    auto *Call = dyn_cast<CallInst>(&I);
+    if (Call != nullptr && isCallTo(Call, kEvmCalldataViewName)) {
+      return Call;
+    }
+  }
+  return nullptr;
+}
+
+Value *getEvmCalldataRoot(Function &F) {
+  Argument *Arg = getEvmCalldataArgument(F);
+  if (Arg == nullptr) {
+    return nullptr;
+  }
+  if (CallInst *View = getEvmCalldataViewCall(F)) {
+    return View;
+  }
+  return Arg;
 }
 
 bool isEvmPrivateHelperFunction(const Function &F) {

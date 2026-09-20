@@ -1,0 +1,42 @@
+######## variant=nopoly ########
+{
+ "cases": 103,
+ "failed": 0,
+ "entries": 2316,
+ "exact": 177,
+ "too_many": 2106,
+ "too_few": 33,
+ "record_only": 0,
+ "single_value_cases": 101,
+ "cases_with_entries": 102,
+ "wall_s": 17.7,
+ "variant": "nopoly"
+}
+######## variant=strict ########
+{
+ "cases": 103,
+ "failed": 1,
+ "entries": 2266,
+ "exact": 175,
+ "too_many": 2059,
+ "too_few": 32,
+ "record_only": 0,
+ "single_value_cases": 100,
+ "cases_with_entries": 101,
+ "wall_s": 201.3,
+ "variant": "strict"
+}
+######## variant=default ########
+{
+ "cases": 103,
+ "failed": 0,
+ "entries": 2316,
+ "exact": 288,
+ "too_many": 1911,
+ "too_few": 117,
+ "record_only": 0,
+ "single_value_cases": 91,
+ "cases_with_entries": 102,
+ "wall_s": 101.8,
+ "variant": "default"
+}

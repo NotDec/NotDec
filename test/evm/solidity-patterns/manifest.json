@@ -3267,7 +3267,10 @@
       },
       "expected_metadata_string_values": {
         "notdec.solidity.abi_param.record": {
-          "3": 28
+          "0": 15,
+          "1": 6,
+          "2": 6,
+          "3": 1
         },
         "notdec.solidity.abi_param.annotated": {
           "0": 15,
@@ -3275,11 +3278,7 @@
           "2": 6,
           "3": 1
         },
-        "notdec.solidity.abi_param.mismatch": {
-          "record=3 annotated=0": 15,
-          "record=3 annotated=1": 6,
-          "record=3 annotated=2": 6
-        }
+        "notdec.solidity.abi_param.mismatch": {}
       }
     },
     {
@@ -3406,14 +3405,15 @@
       },
       "expected_metadata_string_values": {
         "notdec.solidity.abi_param.record": {
-          "1": 11
+          "0": 6,
+          "1": 5
         },
         "notdec.solidity.abi_param.annotated": {
           "0": 7,
           "1": 4
         },
         "notdec.solidity.abi_param.mismatch": {
-          "record=1 annotated=0": 7
+          "record=1 annotated=0": 1
         }
       }
     },

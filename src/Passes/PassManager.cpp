@@ -411,12 +411,18 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
         MPM.addPass(HTypeDumpPass(*TR, HTypeDumpPath));
       }
       MPM.addPass(evm::AbiParamRecoveryPass(*TR));
+      // The per-entry calldata view is a type-recovery device only; drop it
+      // before every later pass and the backend see it.
+      MPM.addPass(evm::EvmCalldataViewCleanupPass());
       MPM.addPass(evm::AbiReturnPass(*TR));
       MPM.addPass(evm::SolidityRevertPass(*TR));
       MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
       MPM.addPass(evm::EventLogPass(*TR));
       MPM.addPass(evm::EvmStorageHighLevelRewritePass(*TR));
     }
+    // Views must never reach the backend, including TR levels that skip the
+    // post-TR measurement passes.
+    MPM.addPass(evm::EvmCalldataViewCleanupPass());
     return;
   case TargetArch::X64:
     if (level >= 2) {

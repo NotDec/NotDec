@@ -72,17 +72,6 @@ std::optional<unsigned> parseUnsignedDecimal(llvm::StringRef Text) {
   return Value;
 }
 
-// The calldata runtime pointer is the second formal of an EVM entry.
-Argument *getCalldataArgument(Function &F) {
-  if (F.arg_size() < 2) {
-    return nullptr;
-  }
-  auto It = F.arg_begin();
-  ++It;
-  Argument &Arg = *It;
-  return Arg.getType()->isPointerTy() ? &Arg : nullptr;
-}
-
 // ABI head field count of the recovered calldata record: the fields at byte
 // offset 4 + 32*i.  MLsub currently unifies the calldata arguments of all
 // entries (they flow into the same decoder helpers), so this is a module-wide
@@ -145,12 +134,16 @@ PreservedAnalyses AbiParamRecoveryPass::run(Module &M, ModuleAnalysisManager &MA
     if (F.isDeclaration() || !isPublicEntryFunction(F)) {
       continue;
     }
-    Argument *Calldata = getCalldataArgument(F);
-    if (Calldata == nullptr) {
+    // Prefer the per-entry calldata view inserted by EvmCalldataAccessPass.
+    // The raw %calldata argument's record is the module-wide join of every
+    // entry's reads (the dispatcher passes one shared value to all of them).
+    Value *CalldataRoot = detail::getEvmCalldataRoot(F);
+    if (CalldataRoot == nullptr) {
       continue;
     }
 
-    const HTypeBufferView View = getHTypeValueBufferView(*HighTypes, Calldata);
+    const HTypeBufferView View =
+        getHTypeValueBufferView(*HighTypes, CalldataRoot);
     const unsigned RecordCount = abiHeadFieldCount(View);
     const unsigned AnnotatedCount = annotatedParamCount(F);
 

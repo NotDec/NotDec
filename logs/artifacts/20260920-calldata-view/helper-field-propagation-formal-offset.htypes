@@ -1,0 +1,46 @@
+# HTypeResult
+
+[decls]
+typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
+
+struct struct_0 {
+  ptr<load=void, store=void, psize=256> slot_0; /* storage path: slot:0 (slot 0), bytes: 1 */
+}; /* EVM storage root */
+
+
+[types]
+[+] <null-value> => lower=<null> ; upper=top:256
+[+] @abi_decode_word_from_calldata__unknown => lower=(bottom:256 (*)(top:256, top:256, top:256, top:256, top:256))* ; upper=top:256
+[+] @evm_sstore => lower=(void (*)(top:256, top:256))* ; upper=top:256
+[+] @notdec_evm_calldata_view => lower=(bottom:256 (*)(top:256))* ; upper=top:256
+[+] @public_a__0x10 => lower=(void (*)(top:256, top:256, top:256, top:256))* ; upper=top:256
+[+] abi_decode_word_from_calldata__unknown::%a => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] abi_decode_word_from_calldata__unknown::%b => lower=bottom:256 ; upper=top:256
+[+] abi_decode_word_from_calldata__unknown::%p => lower=bottom:256 ; upper=ptr<load=void, store=void, psize=256>
+[+] abi_decode_word_from_calldata__unknown::%v => lower=bottom:256 ; upper=top:256
+[+] abi_decode_word_from_calldata__unknown::<ret> => lower=bottom:256 ; upper=top:256
+[+] abi_decode_word_from_calldata__unknown::arg0 => lower=bottom:256 ; upper=top:256
+[+] abi_decode_word_from_calldata__unknown::arg1 => lower=bottom:256 ; upper=top:256
+[+] abi_decode_word_from_calldata__unknown::arg2 => lower=bottom:256 ; upper=top:256
+[+] abi_decode_word_from_calldata__unknown::arg3 => lower=bottom:256 ; upper=top:256
+[+] abi_decode_word_from_calldata__unknown::arg4 => lower=bottom:256 ; upper=top:256
+[+] const(i256 0)@public_a__0x10::%bb.entry.i2:0 => lower=typedef_0 ; upper=top:256
+[+] const(i256 36)@public_a__0x10::%r:4 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg0 => lower=bottom:256 ; upper=top:256
+[+] evm_sstore::arg1 => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_calldata_view::<ret> => lower=bottom:256 ; upper=top:256
+[+] notdec_evm_calldata_view::arg0 => lower=bottom:256 ; upper=top:256
+[+] public_a__0x10::%notdec.calldata.view => lower=bottom:256 ; upper=top:256
+[+] public_a__0x10::%r => lower=bottom:256 ; upper=top:256
+[-] public_a__0x10::arg0 => lower=bottom:256 ; upper=top:256
+[-] public_a__0x10::arg1 => lower=bottom:256 ; upper=top:256
+[-] public_a__0x10::arg2 => lower=bottom:256 ; upper=top:256
+[-] public_a__0x10::arg3 => lower=bottom:256 ; upper=top:256
+
+[memory]
+type => top:256
+
+[storage]
+decl => struct_0
+type => struct_0
+

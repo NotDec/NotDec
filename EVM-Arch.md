@@ -177,6 +177,11 @@ post-TR pass 回答**，判断依据是字段偏移/类型是否符合 ABI、eve
 - **交接文档**：`logs/20260920-01-evm-calldata-record-handoff.md` —— 现状快照（提交/指标/环境）、
   多态标记的两个变体与实测数字、24259 不收敛的 profiling 证据，以及下一步（给约束引擎加周期性
   状态快照 → 判断"图在增长"还是"重复传播" → 收窄多态范围 → 打开 entry 变体并更新 oracle）。
+- **24259 不收敛的根因（2026-09-20）**：`logs/20260920-02-evm-entry-poly-worklist-blowup-root-cause.md`
+  —— 不是死循环：entry 多态把同层变量从 3.2k 放大到 3w，binarysub 在做 V² 条边 / V³ 次枚举的
+  传递闭包物化（单次 `addSubtype` 调用跑了 >5 分钟、12M 次 pair）；最小触发缩到 3 个函数
+  （`logs/artifacts/20260920-worklist-24259/`）。结论：entry 变体在多调用点/共享实参的 case 上
+  不可用；逐函数记录要改成"只隔离 calldata 这一条边"。
 
 **当前目标收窄**：不追求"一步到位输出 ABI 参数签名"，先把
 (a) pre-TR 的函数分类/契约 和 (b) post-TR 的结构识别补上，参数形式最后再定。
@@ -192,6 +197,11 @@ post-TR pass 回答**，判断依据是字段偏移/类型是否符合 ABI、eve
 - 约定：**不再扩大它的覆盖范围**（只修 bug）。后续只做一件事——按下面顺序退役：
   1. post-TR 参数识别（用 `%calldata` 的 `HTypeBufferView`）在同一批 case 上给出等价或更好的
      参数命名，并用 pattern suite 的 metadata oracle 交叉验证；
+     **进展（2026-09-20）**：`EvmCalldataAccessPass` 已给每个 public entry 插入 per-entry
+     calldata view（`notdec_evm_calldata_view`，标多态、逐调用点实例化、post-TR 清理），
+     `AbiParamRecoveryPass` 改为读该 view 的记录：103 case 上 `record==annotated`
+     288 → **1858**、偏多 1911 → 150、单值 case 91 → 18（`0009` 完全一致）。
+     实现与数据见 `logs/20260920-02-evm-entry-poly-worklist-blowup-root-cause.md` §6.8/§6.9；
   2. 后端 `argN` 的来源从 metadata 切到 post-TR 结果；
   3. `AbiDecodeResultPass` 的标注与 `annotatedAbiArgumentExpr` 的消费路径一起删除
      （或降级为纯 debug），避免同一语义两套表达。

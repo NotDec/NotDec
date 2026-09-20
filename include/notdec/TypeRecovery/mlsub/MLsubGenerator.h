@@ -536,6 +536,50 @@ struct ConstraintsGenerator {
     return N;
   }
 
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+  // Bound-origin attribution (debug).  Every constraint that carries an origin
+  // gets one id here; the description table is what the dump prints next to
+  // the id, so a surviving bound can be traced back to the access that
+  // introduced it.
+  std::vector<std::string> BoundOriginDescriptions;
+  std::shared_ptr<const binarysub::SmallIdSet> CurrentBoundOrigins;
+#endif
+
+  // Attribute every constraint added inside this scope to Description.  The id
+  // travels to binarysub through ConstraintContext::boundOrigins.
+  class BoundOriginScope {
+  public:
+    BoundOriginScope(ConstraintsGenerator &CG, llvm::StringRef Description)
+        : CG(CG) {
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+      Previous = std::move(CG.CurrentBoundOrigins);
+      if (!Description.empty()) {
+        auto Id = static_cast<std::uint32_t>(CG.BoundOriginDescriptions.size());
+        CG.BoundOriginDescriptions.push_back(Description.str());
+        CG.CurrentBoundOrigins =
+            std::make_shared<const binarysub::SmallIdSet>(
+                binarysub::SmallIdSet{Id});
+      }
+#else
+      (void)CG;
+      (void)Description;
+#endif
+    }
+    ~BoundOriginScope() {
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+      CG.CurrentBoundOrigins = std::move(Previous);
+#endif
+    }
+    BoundOriginScope(const BoundOriginScope &) = delete;
+    BoundOriginScope &operator=(const BoundOriginScope &) = delete;
+
+  private:
+    ConstraintsGenerator &CG;
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+    std::shared_ptr<const binarysub::SmallIdSet> Previous;
+#endif
+  };
+
   void addSubtype(SimpleType lhs, SimpleType rhs) {
     assert(lhs != nullptr);
     assert(rhs != nullptr);
@@ -544,6 +588,9 @@ struct ConstraintsGenerator {
     }
     binarysub::Cache cache;
     binarysub::ConstraintContext Context;
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+    Context.boundOrigins = CurrentBoundOrigins;
+#endif
     binarysub::ConstraintContext *ContextPtr =
         configureConstraintContext(Context) ? &Context : nullptr;
     auto Result = binarysub::constrain(
@@ -605,7 +652,8 @@ struct ConstraintsGenerator {
                                      unsigned BitSize = 0);
 
   void onUpdatePNType(ExtValuePtr Val) {}
-  void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off) {
+  void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off,
+                   llvm::StringRef Origin = {}) {
     auto BaseNode = getOrInsertNode(basePtr);
     auto ResultNode = getOrInsertNode(result);
     unifyPNIValues(basePtr, result);
@@ -616,6 +664,9 @@ struct ConstraintsGenerator {
     }
     std::vector<std::pair<std::string, SimpleType>> fields;
     fields.emplace_back(Off.str(), ResultNode);
+    // The field cell below is this constraint's field evidence; name its
+    // origin so the layout can be traced back to the access that produced it.
+    BoundOriginScope OriginScope(*this, Origin);
     addSubtype(BaseNode, binarysub::make_record(std::move(fields)));
     addSubtype(ResultNode, binarysub::make_record({}));
   }

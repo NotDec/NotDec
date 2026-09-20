@@ -659,7 +659,9 @@ bool lowerGEPOperatorAsPtrAdd(ConstraintsGenerator &CG,
     return false;
   }
 
-  CG.setAsPtrAdd(Base, Result, std::move(*Offset));
+  CG.setAsPtrAdd(Base, Result, std::move(*Offset),
+                 "gep:" + toStableString(Base) + Offset->str() + "->" +
+                     toStableString(Result));
   return true;
 }
 
@@ -2300,7 +2302,8 @@ void appendDebugVarOrigins(
     const std::map<binarysub::PolarVar, binarysub::UTypePtr> &Res,
     const std::map<std::uint32_t, std::set<ExtValuePtr>> &OriginalVariableSources,
     bool SolveMemory, const binarysub::PolarVar &PolMem,
-    ExtValueLabelCache *DebugLabelCache) {
+    ExtValueLabelCache *DebugLabelCache,
+    const std::vector<std::string> *BoundOriginDescriptions) {
   std::error_code EC;
   llvm::raw_fd_ostream Out(join(DebugDir.str(), kVarOriginsFile.str()), EC,
                            llvm::sys::fs::OF_Append);
@@ -2356,6 +2359,68 @@ void appendDebugVarOrigins(
     }
     Out << "\n";
   }
+
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+  // Which host constraint introduced each surviving bound.  A field of the
+  // converted HType points at a UType variable whose origins are the vs# ids
+  // printed above; the entries below say which ptr-add / access put the bound
+  // there in the first place.
+  {
+    std::map<std::uint32_t, SimpleType> VarsById;
+    for (const auto &Ent : V2N) {
+      auto *State = Ent.second ? Ent.second->getAsVariableState() : nullptr;
+      if (State != nullptr && State->mergedInto == nullptr) {
+        VarsById[State->id] = Ent.second;
+      }
+    }
+    std::set<std::uint32_t> UsedOrigins;
+    std::ostringstream Body;
+    auto dumpSide = [&](const SimpleType &Var, llvm::StringRef Side,
+                        const std::vector<SimpleType> &Bounds,
+                        const std::vector<std::shared_ptr<const binarysub::SmallIdSet>>
+                            &Origins) {
+      for (std::size_t I = 0; I < Origins.size() && I < Bounds.size(); ++I) {
+        const auto &Set = Origins[I];
+        if (!Set || Set->empty()) {
+          continue;
+        }
+        std::string BoundText = binarysub::debug_string(Bounds[I]);
+        if (BoundText.size() > 160) {
+          BoundText.resize(160);
+          BoundText += "...";
+        }
+        Body << "vs#" << Var->getAsVariableState()->id << " " << Side.str()
+             << "[" << I << "] " << BoundText << "\n    origins=[";
+        for (auto OriginId : *Set) {
+          Body << "o#" << OriginId << " ";
+          UsedOrigins.insert(OriginId);
+        }
+        Body << "]\n";
+      }
+    };
+    for (const auto &[Id, Var] : VarsById) {
+      auto *State = Var->getAsVariableState();
+      dumpSide(Var, "lower", State->lowerBounds, State->lowerBoundOrigins);
+      dumpSide(Var, "upper", State->upperBounds, State->upperBoundOrigins);
+    }
+    if (!UsedOrigins.empty()) {
+      Out << "## Bound origins\n";
+      Out << Body.str();
+      Out << "## Bound origin legend\n";
+      for (auto OriginId : UsedOrigins) {
+        Out << "o#" << OriginId << " = ";
+        if (BoundOriginDescriptions != nullptr &&
+            OriginId < BoundOriginDescriptions->size()) {
+          Out << (*BoundOriginDescriptions)[OriginId];
+        } else {
+          Out << "<unknown>";
+        }
+        Out << "\n";
+      }
+      Out << "\n";
+    }
+  }
+#endif
 }
 
 void writeCallSlotMergeDecisions(llvm::StringRef Path, const AllGraphs &AG) {
@@ -5358,10 +5423,44 @@ void ConstraintsGenerator::applyDeferredCallConstraints() {
   } else {
     // Keep the production ordering exact: every call subtype is added before
     // any candidate is recorded, so the policy sees the completed call graph.
+    static const bool DeferredDiag =
+        std::getenv("NOTDEC_DEFERRED_DIAG") != nullptr;
     RunSubphase(BottomUpSubstage::DeferredCallSubtype,
                 DeferredCallConstraints.size(), [&] {
+                  std::size_t DeferredIndex = 0;
                   for (const auto &Deferred : DeferredCallConstraints) {
+                    if (DeferredDiag) {
+                      std::string LhsText =
+                          binarysub::debug_string(Deferred.SubtypeLHS);
+                      std::string RhsText =
+                          binarysub::debug_string(Deferred.ActualFunc);
+                      if (LhsText.size() > 240) {
+                        LhsText.resize(240);
+                        LhsText += "...";
+                      }
+                      if (RhsText.size() > 240) {
+                        RhsText.resize(240);
+                        RhsText += "...";
+                      }
+                      llvm::errs()
+                          << "[deferred-subtype] i=" << DeferredIndex << "/"
+                          << DeferredCallConstraints.size()
+                          << " target="
+                          << (Deferred.Target && Deferred.Target->hasName()
+                                  ? Deferred.Target->getName()
+                                  : StringRef("<anon>"))
+                          << " lhs=" << LhsText << " rhs=" << RhsText << "\n";
+                    }
+                    ++DeferredIndex;
                     addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
+                    if (DeferredDiag) {
+                      std::string Label =
+                          "deferred-after:" +
+                          (Deferred.Target && Deferred.Target->hasName()
+                               ? Deferred.Target->getName().str()
+                               : std::string("<anon>"));
+                      binarysub::emit_type_graph_summary(Label.c_str());
+                    }
                   }
                 });
     RunSubphase(BottomUpSubstage::DeferredCallCandidateCollect,
@@ -5880,7 +5979,11 @@ void ConstraintsGenerator::configurePNDiffCallbacks() {
     onUpdatePNType(getPNIExtValue(Val));
   };
   PG.OnPtrAdd = [this](PNIValue Base, PNIValue Result, OffsetRange Off) {
-    setAsPtrAdd(getPNIExtValue(Base), getPNIExtValue(Result), std::move(Off));
+    auto BaseValue = getPNIExtValue(Base);
+    auto ResultValue = getPNIExtValue(Result);
+    std::string Description = "ptradd:" + toStableString(BaseValue) + Off.str() +
+                              "->" + toStableString(ResultValue);
+    setAsPtrAdd(BaseValue, ResultValue, std::move(Off), Description);
   };
 }
 
@@ -6934,8 +7037,18 @@ void MLsubRecovery::bottomUpPhase() {
         // TData.level to instantiate_type_graph is the direct equivalent of
         // paper-level PolymorphicType(TData.level - 1, TargetFTy), without an
         // unsigned underflow or a misleading cutoff conversion.
+        static const bool InstantiationDiag =
+            std::getenv("NOTDEC_DEFERRED_DIAG") != nullptr;
+        if (InstantiationDiag) {
+          std::string Label = "instantiate-before:" + F->getName().str();
+          binarysub::emit_type_graph_summary(Label.c_str());
+        }
         auto InsFunc = binarysub::instantiate_type_graph(
             TargetFTy, TargetLevel, static_cast<int>(Data.level));
+        if (InstantiationDiag) {
+          std::string Label = "instantiate-after:" + F->getName().str();
+          binarysub::emit_type_graph_summary(Label.c_str());
+        }
         Data.Generator->deferCallConstraint(*Ent.first, *F, InsFunc,
                                             Ent.second, InsFunc);
       }
@@ -7227,9 +7340,14 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
     appendDebugValueTypes(*WorkDir, Name, V2N, ContraVariantValues, Res,
                           OriginalVariableSources, SolveGlobals, PolMem,
                           DebugLabelCache);
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+    const std::vector<std::string> *BoundOriginTable = &BoundOriginDescriptions;
+#else
+    const std::vector<std::string> *BoundOriginTable = nullptr;
+#endif
     appendDebugVarOrigins(*WorkDir, Name, V2N, ContraVariantValues, Res,
                           OriginalVariableSources, SolveGlobals, PolMem,
-                          DebugLabelCache);
+                          DebugLabelCache, BoundOriginTable);
   }
   Timing.DebugOutput = finishGenTypesPhase(PhaseWallStart, PhaseCpuStart);
   reportGenTypesStage("debug_output", Timing.DebugOutput);
@@ -7350,6 +7468,9 @@ void MLsubRecovery::solveAndLowerTypes() {
     ReportTotal("lower", TotalTiming->Lower);
     ReportTotal("upper", TotalTiming->Upper);
     ReportTotal("debug_output", TotalTiming->DebugOutput);
+  }
+  if (std::getenv("NOTDEC_WORKLIST_SNAPSHOT") != nullptr) {
+    binarysub::emit_type_graph_summary("solve-and-lower-types-end");
   }
   if (MergeEval) {
     MergeEval->finish(AG);
@@ -9941,6 +10062,13 @@ unsigned ConstraintsGenerator::getLLVMTypeSize(Type *ElemTy) {
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
+  // A lane split out of a wide access by the Scalarizer is not a source-level
+  // member access.  Keep the loaded value typeable for its users, but do not
+  // create pointer/pointee evidence for the lane.
+  if (I.getMetadata(notdec::mlsub::KIND_SCALARIZER_LANE) != nullptr) {
+    cg.getOrInsertNode(&I);
+    return;
+  }
   // if this is access to table, then we ignore the type, and return func ptr.
   auto Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 0));
   if (!Node) {
@@ -9972,6 +10100,12 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
+  // See visitLoadInst: a scalarizer lane must not define struct members.  The
+  // stored value keeps its own node so its producers stay typed.
+  if (I.getMetadata(notdec::mlsub::KIND_SCALARIZER_LANE) != nullptr) {
+    cg.getOrInsertNode(getExtValuePtr(I.getValueOperand(), &I, 0));
+    return;
+  }
   // if this is access to table, then we ignore the type, and return func ptr.
   auto Node = cg.getNodeOrNull(getExtValuePtr(I.getPointerOperand(), &I, 1));
   if (!Node) {
@@ -10012,6 +10146,13 @@ void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {
 
 void ConstraintsGenerator::MLsubVisitor::visitGetElementPtrInst(
     GetElementPtrInst &Gep) {
+  // A lane address (base + element) created by the Scalarizer must not become a
+  // field of the base pointer's pointee: the base is a byte pointer used by a
+  // copy, not a struct pointer.  Keep the address value itself typeable.
+  if (Gep.getMetadata(notdec::mlsub::KIND_SCALARIZER_LANE) != nullptr) {
+    cg.getOrInsertNode(&Gep);
+    return;
+  }
   // supress warnings for table gep
   if (Gep.getPointerOperand()->getName().starts_with("table_")) {
     return;

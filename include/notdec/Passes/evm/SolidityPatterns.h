@@ -114,6 +114,16 @@ struct AbiParamRecoveryPass : llvm::PassInfoMixin<AbiParamRecoveryPass> {
   static bool isRequired() { return true; }
 };
 
+// Removes the per-entry calldata view calls (notdec_evm_calldata_view) after
+// AbiParamRecoveryPass has read the recovered per-entry records.  Every later
+// pass and the Solidity backend sees the original %calldata pointer again.
+struct EvmCalldataViewCleanupPass
+    : llvm::PassInfoMixin<EvmCalldataViewCleanupPass> {
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Marks empty reverts, Panic(uint256) reverts, and returndata bubbling.
 struct SolidityRevertPass : llvm::PassInfoMixin<SolidityRevertPass> {
   mlsub::MLsubRecovery &TR;
