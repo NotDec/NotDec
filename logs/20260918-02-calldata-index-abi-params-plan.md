@@ -420,3 +420,41 @@ metadata 值区分 `calldata_offset`/`calldata_buffer`）；`shouldMarkPolymorph
 
 验证：四套 EVM suite 全绿（pattern / compile / rewrite / source）。
 
+
+### 24259 不收敛的进一步定位：约束 worklist 反复传播（2026-09-20）
+
+对 entry 多态变体下的 24259 做 perf 采样（`perf record -F 199 -g` + `perf report`）：
+
+| 符号 | 占比（self） |
+| --- | --- |
+| `binarysub::skip_cached_or_materialized_variable_edge` | **62.4%** |
+| `binarysub::resolve_variable` | 12.3% |
+| `notdec::mlsub::ConstraintsGenerator::hasStructPointerEvidenceInBound` | 3.2% |
+| `constrain_worklist_only` / `merge_variable_into_impl` / `register_nested_bound_uses_impl` / `constrain_impl` | 其余 |
+
+关键判读：
+
+- `skip_cached_or_materialized_variable_edge` 本身很小：一个 pair 哈希查找 + 两次
+  `hasUpperBound`/`hasLowerBound`（`binarysub-core.h` 里是 **unordered_set::count**，O(1)）。
+  62% self 时间说明它被调用了**天文数字次**，即同一个变量边在 worklist 里被反复重算 ——
+  **不是**"某个线性扫描导致 O(n²)"，而是**重复传播次数爆炸**。
+- 内存：entry 变体下 RSS 从 519MB 快速涨到 844MB 后**平台化**（helper-only 同 case 约 65MB）；
+  跑满 25 分钟（timeout 1500s）仍未结束，峰值 RSS **3.0GB**。说明图规模被放大后，
+  传播在反复扫这张图，而不是无限创建新节点。
+- 调用图无环（25 个函数 / 18 个带 calldata / 0 cycle），排除"源级递归导致无限实例化"。
+
+**结论**：entry 多态把图放大（dispatcher × 18 个 entry 的逐调用点实例化 + helper 层），
+之后 binarysub 的 constraint worklist 在**多轮/重复扫描**这张图上不收敛。
+
+**下一步（未做）**：
+
+1. 在 `constrain_worklist_only` 加计数/上限诊断：`Context->stats` 里已有
+   `constraintTasksEnqueued`、`maxConstraintWorklistDepth`、
+   `directVariableEdgeFastPathHits`，把它们按阈值周期打印（或加 worklist 迭代上限 + 错误返回），
+   即可看出是"轮数多"还是"单轮边数多"；
+2. 若确认是逐调用点实例化导致的重复传播，考虑收窄多态范围（只实例化 calldata 实参这条边，
+   而不是整个函数摘要；或只对"单一调用点的 entry"标记）；
+3. 在解决之前，entry 变体继续禁用（当前代码即如此，帮助里已注释原因）。
+
+（本轮 perf 采样后代码已还原为 helper-only 的已提交状态。）
+

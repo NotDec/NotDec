@@ -59,8 +59,9 @@ bool shouldRewriteCalldataMinSizeGuards(Function &F) {
 bool shouldMarkPolymorphicFunction(Function &F) {
   // Outlined shared helpers only.  Marking the ABI entries as well isolates
   // them too (they are called from the dispatcher with its own %calldata), but
-  // that variant does not converge on case 24259, so it stays disabled until
-  // the divergence is understood.
+  // profiling shows that variant drives the binarysub constraint worklist into
+  // a >25 minute / 3 GB run on case 24259, so it stays disabled until the
+  // propagation cost is understood.
   return detail::isEvmPrivateHelperFunction(F);
 }
 
