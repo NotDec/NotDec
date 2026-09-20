@@ -3103,7 +3103,11 @@ bool blockCanReachReturn(llvm::BasicBlock *Start) {
 // use of that pointer, such as GEP, store-through, or passing it to another
 // function, means the function is a factory/initializer, not a generic wrapper.
 struct MallocWrapperUseChecker {
-  const llvm::CallBase *Alloc = nullptr;
+  // A generic wrapper may allocate on more than one path (gnulib's xpalloc
+  // reallocates in two branches); every such call must feed the same forwarded
+  // value.
+  llvm::SmallPtrSet<const llvm::CallBase *, 4> Allocs;
+  const llvm::Function *AllocFn = nullptr;
   const bool Debug = std::getenv("NOTDEC_MALLOC_WRAPPER_DEBUG") != nullptr;
 
   bool Fail(const char *Why, const llvm::Value *V) {
@@ -3124,7 +3128,7 @@ struct MallocWrapperUseChecker {
   llvm::AllocaInst *getLocalSlot(llvm::Value *Ptr) const {
     auto *Slot = llvm::dyn_cast_or_null<llvm::AllocaInst>(
         Ptr->stripPointerCasts());
-    if (Slot == nullptr || Slot->getFunction() != Alloc->getFunction()) {
+    if (Slot == nullptr || Slot->getFunction() != AllocFn) {
       return nullptr;
     }
     return Slot;
@@ -3134,7 +3138,14 @@ struct MallocWrapperUseChecker {
     if (V == nullptr) {
       return Fail("isMallocResultValue: null value", V);
     }
-    if (V == Alloc) {
+    if (auto *CB = llvm::dyn_cast<llvm::CallBase>(V);
+        CB != nullptr && Allocs.contains(CB)) {
+      return true;
+    }
+    // A wrapper with a "nothing to allocate" path hands back the null pointer
+    // there (xpalloc returns null when the caller asks for no growth).
+    if (isNullPointerValue(V, AllocFn != nullptr ? AllocFn->getParent()
+                                                 : nullptr)) {
       return true;
     }
     if (!ValueSeen.insert(V).second) {
@@ -3367,25 +3378,37 @@ llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
     return Reject("decl/intrinsic/not-pointer-shaped/is-allocator");
   }
 
-  llvm::CallBase *Alloc = nullptr;
+  llvm::SmallVector<llvm::CallBase *, 4> Allocs;
   for (auto &BB : F) {
     for (auto &I : BB) {
       auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
       if (CB == nullptr || !isMallocWrapperAllocator(CB->getCalledFunction())) {
         continue;
       }
-      if (Alloc != nullptr) {
-        return Reject("more than one allocator call");
+      if (!isPointerShapedValue(CB)) {
+        return Reject("allocator result is not pointer-shaped");
       }
-      Alloc = CB;
+      Allocs.push_back(CB);
     }
   }
-  if (Alloc == nullptr || !isPointerShapedValue(Alloc)) {
-    return Reject("no allocator call / alloc not pointer-shaped");
+  if (Allocs.empty()) {
+    return Reject("no allocator call");
+  }
+  // More than one call is allowed as long as they all call the same allocator:
+  // the wrapper reallocates on several paths and forwards whichever result its
+  // path produced.
+  for (llvm::CallBase *CB : Allocs) {
+    if (CB->getCalledFunction() != Allocs.front()->getCalledFunction()) {
+      return Reject("allocator calls have different callees");
+    }
   }
 
   llvm::DominatorTree DT(F);
-  MallocWrapperUseChecker Checker{.Alloc = Alloc};
+  MallocWrapperUseChecker Checker;
+  Checker.AllocFn = &F;
+  for (llvm::CallBase *CB : Allocs) {
+    Checker.Allocs.insert(CB);
+  }
   bool SawReturn = false;
   for (auto &BB : F) {
     auto *RI = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator());
@@ -3393,9 +3416,15 @@ llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
       continue;
     }
     SawReturn = true;
-    if (!DT.dominates(Alloc, RI) ||
-        !Checker.isMallocResultValue(RI->getReturnValue())) {
-      return nullptr;
+    // A single allocator call must dominate every return, as before.  With
+    // several calls the returned value comes from whichever branch ran (xpalloc
+    // returns either realloc result), so no single call dominates the join; the
+    // value-flow check right below is what ties the return to an allocation.
+    if (Allocs.size() == 1 && !DT.dominates(Allocs.front(), RI)) {
+      return Reject("allocator does not dominate a return");
+    }
+    if (!Checker.isMallocResultValue(RI->getReturnValue())) {
+      return Reject("return value is not the alloc result");
     }
   }
   if (!SawReturn) {
@@ -3404,11 +3433,13 @@ llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
   if (!Checker.nullErrorBranchesDoNotReturn(F)) {
     return Reject("null error branch reaches a return");
   }
-  if (!Checker.valueUsesOnlyWrapperFlow(Alloc)) {
-    return Reject("alloc value used outside wrapper flow");
+  for (llvm::CallBase *CB : Allocs) {
+    if (!Checker.valueUsesOnlyWrapperFlow(CB)) {
+      return Reject("alloc value used outside wrapper flow");
+    }
   }
 
-  return Alloc;
+  return Allocs.front();
 }
 
 } // namespace
