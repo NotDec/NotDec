@@ -705,6 +705,37 @@ ABI 词号——既不需要内联 helper（避免 structurer 退化），也不
 
 非匹配形状（31/1618 的尾部参数被用、无 calldata 的 helper）回退到现有通用路径。
 
+### 6.14 Phase 0 已落地：EvmYulFunctionSummaryPass（识别 + calldata summary）
+
+实现：`EvmYulFunctionSummaryPass`（`include/notdec/Passes/evm/SolidityPatterns.h` +
+`src/Passes/evm/SolidityPatterns.cpp`），注册在 EVM pre-TR 段的**最前面**（在
+`buildFunctionOptimizations` 之前，保留 lifted 形状）。只识别、只写 metadata，不改 IR。
+
+识别判据：internal + `(ptr, ptr calldata, ptr, ptr, ...)` ctx 前缀 + 从后往前第一个
+**体内未被使用**的整型形参 = 返回标签。calldata 效应用仿射偏移表示（`pI ± C` / `C`），
+返回元素通过 `insertvalue`/`ret` 链映射（`...:rK`）。metadata 形如：
+
+```
+v1;params=2;ret=2;label=6;loads=2;unresolved=0;yulcalls=2;labelconst=4/4;calldata=p0+32:r1
+```
+
+**103 case 实测**：
+
+| 指标 | 数值 |
+| --- | --- |
+| 识别出的 Yul 函数 | 3423 |
+| 检测到返回标签 | 3368 (98.4%)；无标签 55 |
+| 有标签函数的调用点在该位置传常量 | **9538 / 9538 = 100%** |
+| 带 calldata 读取的函数 | 496；其中偏移可解析 488 |
+| calldata 效应总数 | 735（710 相对形参 + 25 常量） |
+| helper 体内 `evm_calldataload` 总数（输入） | 799 → **覆盖率 92%** |
+| 未解析偏移 | 63（非仿射：shl/mul/and 等，Phase 1 再扩） |
+
+结论：识别判据非常干净（标签 98.4%、调用点常量 100%），calldata summary 覆盖率 92%，
+而且全程无 IR 改动、四套 suite 行为不变。Phase 1 的入口已经具备：在调用点上把 summary 的
+`pI+C` 代入常量实参，写到 caller 的 calldata view 上，然后量 `abi_param.*` 与退役
+`calldata.index` 的可行性。
+
 ## 7. 排除的假设
 
 | 假设 | 判据 | 结论 |

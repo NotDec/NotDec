@@ -383,6 +383,11 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
     break;
   case TargetArch::Evm:
     if (!frozenTRInputIR) {
+      // Reconstruct the Yul-function boundary first: the decompiled helpers
+      // with the (mem, calldata, returndata, env, ...) convention are the
+      // functions the forward compiler kept instead of inlining.  Recording
+      // their summaries before any canonicalization keeps the lifted shape.
+      MPM.addPass(evm::EvmYulFunctionSummaryPass());
       // EVM inputs still benefit from LLVM's local canonicalization before
       // Solidity/EVM-specific matchers inspect the IR. Keep this target-local
       // pipeline separate from the Wasm pre-TR passes because those still

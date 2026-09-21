@@ -18,6 +18,23 @@ extern const char *KIND_SOLIDITY_EVENT;
 // Decimal ABI argument index (as a string) attached to a rewritten calldata
 // word load whose constant byte offset is 4 + 32*i.
 extern const char *KIND_SOLIDITY_CALLDATA_ARG_INDEX;
+// Per-function summary of a reconstructed Yul function (an EVM subroutine the
+// forward compiler kept instead of inlining).  Phase 0 only records the
+// calling-convention shape and the parameter-relative calldata reads.
+extern const char *KIND_EVM_YUL_SUMMARY;
+
+// Rebuilds the Yul-function boundary of the forward chain: the decompiled
+// internal helpers with the (mem, calldata, returndata, env, ...) convention
+// plus a trailing unused return-label argument are the functions solc's Yul
+// optimizer kept and EVMCodeTransform compiled to subroutines.  The pass
+// recognizes them and attaches a compact summary (parameter-relative calldata
+// reads and their returned elements) for later stages.  It never rewrites IR.
+struct EvmYulFunctionSummaryPass
+    : llvm::PassInfoMixin<EvmYulFunctionSummaryPass> {
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
 
 // Splits selector-entry inline fallback/receive bodies into standalone helper
 // functions when the CFG boundary is clear.  The pass keeps dispatcher-only

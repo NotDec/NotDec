@@ -16,7 +16,10 @@
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include <functional>
+#include <map>
 #include <optional>
+#include <sstream>
 #include <string>
 
 using namespace llvm;
@@ -31,7 +34,255 @@ const char *KIND_SOLIDITY_CHECKED_BOUNDS = "notdec.solidity.checked_bounds";
 const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
 const char *KIND_SOLIDITY_CALLDATA_ARG_INDEX =
     "notdec.solidity.calldata.index";
+const char *KIND_EVM_YUL_SUMMARY = "notdec.evm.yul_function_summary";
 
+namespace {
+
+// Affine byte offset relative to a function parameter: Param == -1 means a
+// plain constant, otherwise Param is the argument index and Constant a delta.
+struct YulAffineOffset {
+  int Param = -1;
+  int64_t Constant = 0;
+};
+
+std::optional<YulAffineOffset> resolveYulAffineOffset(Value *V,
+                                                      const Function &F,
+                                                      unsigned Depth = 0) {
+  if (V == nullptr || Depth > 6) {
+    return std::nullopt;
+  }
+  V = V->stripPointerCasts();
+  if (auto *C = dyn_cast<ConstantInt>(V)) {
+    const APInt &A = C->getValue();
+    if (A.getActiveBits() > 62) {
+      return std::nullopt;
+    }
+    return YulAffineOffset{-1, static_cast<int64_t>(A.getSExtValue())};
+  }
+  if (auto *Arg = dyn_cast<Argument>(V)) {
+    if (Arg->getParent() != &F || !Arg->getType()->isIntegerTy()) {
+      return std::nullopt;
+    }
+    return YulAffineOffset{static_cast<int>(Arg->getArgNo()), 0};
+  }
+  auto *BO = dyn_cast<BinaryOperator>(V);
+  if (BO == nullptr) {
+    return std::nullopt;
+  }
+  auto L = resolveYulAffineOffset(BO->getOperand(0), F, Depth + 1);
+  auto R = resolveYulAffineOffset(BO->getOperand(1), F, Depth + 1);
+  if (!L.has_value() || !R.has_value()) {
+    return std::nullopt;
+  }
+  if (BO->getOpcode() == Instruction::Add) {
+    if (L->Param >= 0 && R->Param >= 0) {
+      return std::nullopt;
+    }
+    YulAffineOffset Out = L->Param >= 0 ? *L : *R;
+    Out.Constant += (L->Param >= 0 ? R->Constant : L->Constant);
+    return Out;
+  }
+  if (BO->getOpcode() == Instruction::Sub && L->Param >= 0 && R->Param < 0) {
+    return YulAffineOffset{L->Param, L->Constant - R->Constant};
+  }
+  return std::nullopt;
+}
+
+std::string formatYulOffset(const YulAffineOffset &Off) {
+  std::string Text = Off.Param >= 0 ? ("p" + std::to_string(Off.Param)) : "";
+  if (Off.Constant != 0 || Off.Param < 0) {
+    if (Off.Constant < 0) {
+      Text += "-" + std::to_string(-Off.Constant);
+    } else {
+      if (!Text.empty()) {
+        Text += "+";
+      }
+      Text += std::to_string(Off.Constant);
+    }
+  }
+  return Text.empty() ? std::string("0") : Text;
+}
+
+struct YulFunctionShape {
+  bool Recognized = false;
+  int ReturnLabelArg = -1;
+  unsigned RealParams = 0;
+};
+
+YulFunctionShape classifyYulFunction(Function &F) {
+  YulFunctionShape Shape;
+  if (F.isDeclaration() || !F.hasInternalLinkage() || F.arg_size() < 5) {
+    return Shape;
+  }
+  for (unsigned I = 0; I < 4; ++I) {
+    if (!F.getArg(I)->getType()->isPointerTy()) {
+      return Shape;
+    }
+  }
+  if (F.getArg(1)->getName() != "calldata") {
+    return Shape;
+  }
+  // The EVM return label survives as a trailing argument with no dataflow use
+  // in the lifted body.  Find the last such integer argument.
+  for (int I = static_cast<int>(F.arg_size()) - 1; I >= 4; --I) {
+    Argument *A = F.getArg(static_cast<unsigned>(I));
+    if (A->getType()->isIntegerTy() && A->use_empty()) {
+      Shape.ReturnLabelArg = I;
+      break;
+    }
+  }
+  Shape.Recognized = true;
+  Shape.RealParams = F.arg_size() - 4 - (Shape.ReturnLabelArg >= 0 ? 1 : 0);
+  return Shape;
+}
+
+std::map<unsigned, Value *> getYulReturnedElements(Function &F) {
+  std::map<unsigned, Value *> Elements;
+  if (F.getReturnType()->isVoidTy()) {
+    return Elements;
+  }
+  if (!F.getReturnType()->isAggregateType()) {
+    for (BasicBlock &BB : F) {
+      if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
+        if (Value *RV = RI->getReturnValue()) {
+          Elements[0] = RV;
+        }
+      }
+    }
+    return Elements;
+  }
+  Value *Agg = nullptr;
+  for (BasicBlock &BB : F) {
+    if (auto *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
+      if (RI->getReturnValue() != nullptr) {
+        Agg = RI->getReturnValue();
+        break;
+      }
+    }
+  }
+  if (Agg == nullptr) {
+    return Elements;
+  }
+  std::function<void(Value *)> Walk = [&](Value *V) {
+    auto *IV = dyn_cast<InsertValueInst>(V);
+    if (IV == nullptr) {
+      return;
+    }
+    Walk(IV->getAggregateOperand());
+    if (!IV->getIndices().empty()) {
+      Elements[IV->getIndices()[0]] = IV->getInsertedValueOperand();
+    }
+  };
+  Walk(Agg);
+  return Elements;
+}
+
+} // namespace
+
+PreservedAnalyses EvmYulFunctionSummaryPass::run(Module &M,
+                                                 ModuleAnalysisManager &) {
+  std::map<const Function *, YulFunctionShape> Shapes;
+  for (Function &F : M) {
+    YulFunctionShape Shape = classifyYulFunction(F);
+    if (Shape.Recognized) {
+      Shapes.emplace(&F, Shape);
+    }
+  }
+
+  bool Changed = false;
+  for (Function &F : M) {
+    auto ShapeIt = Shapes.find(&F);
+    if (ShapeIt == Shapes.end()) {
+      continue;
+    }
+    const YulFunctionShape &Shape = ShapeIt->second;
+    Argument *Calldata = F.getArg(1);
+
+    std::vector<std::pair<YulAffineOffset, const Value *>> Effects;
+    unsigned UnresolvedLoads = 0;
+    unsigned TotalLoads = 0;
+    for (Instruction &I : instructions(F)) {
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (Call == nullptr || !detail::isCallTo(Call, "evm_calldataload") ||
+          Call->arg_size() != 2) {
+        continue;
+      }
+      if (Call->getArgOperand(0)->stripPointerCasts() != Calldata) {
+        continue;
+      }
+      ++TotalLoads;
+      auto Off = resolveYulAffineOffset(Call->getArgOperand(1), F);
+      if (!Off.has_value()) {
+        ++UnresolvedLoads;
+        continue;
+      }
+      Effects.emplace_back(*Off, Call);
+    }
+
+    std::map<unsigned, Value *> ReturnedElements = getYulReturnedElements(F);
+    std::map<const Value *, unsigned> ElementOfValue;
+    for (const auto &Ent : ReturnedElements) {
+      ElementOfValue.emplace(Ent.second, Ent.first);
+    }
+
+    unsigned CallSites = 0;
+    unsigned ConstLabelCalls = 0;
+    if (Shape.ReturnLabelArg >= 0) {
+      for (User *U : F.users()) {
+        auto *CB = dyn_cast<CallBase>(U);
+        if (CB == nullptr || CB->getCalledFunction() != &F ||
+            static_cast<unsigned>(Shape.ReturnLabelArg) >= CB->arg_size()) {
+          continue;
+        }
+        ++CallSites;
+        if (isa<ConstantInt>(CB->getArgOperand(Shape.ReturnLabelArg))) {
+          ++ConstLabelCalls;
+        }
+      }
+    }
+
+    unsigned YulCalls = 0;
+    for (Instruction &I : instructions(F)) {
+      auto *CB = dyn_cast<CallBase>(&I);
+      if (CB == nullptr) {
+        continue;
+      }
+      Function *Callee = CB->getCalledFunction();
+      if (Callee != nullptr && Shapes.count(Callee) != 0) {
+        ++YulCalls;
+      }
+    }
+
+    std::ostringstream OS;
+    OS << "v1;params=" << Shape.RealParams
+       << ";ret=" << ReturnedElements.size()
+       << ";label=" << Shape.ReturnLabelArg
+       << ";loads=" << TotalLoads
+       << ";unresolved=" << UnresolvedLoads
+       << ";yulcalls=" << YulCalls
+       << ";labelconst=" << ConstLabelCalls << "/" << CallSites
+       << ";calldata=";
+    bool First = true;
+    for (const auto &[Off, Load] : Effects) {
+      if (!First) {
+        OS << ",";
+      }
+      First = false;
+      OS << formatYulOffset(Off);
+      auto It = ElementOfValue.find(Load);
+      if (It != ElementOfValue.end()) {
+        OS << ":r" << It->second;
+      }
+    }
+
+    F.setMetadata(KIND_EVM_YUL_SUMMARY,
+                  MDNode::get(M.getContext(),
+                              MDString::get(M.getContext(), OS.str())));
+    Changed = true;
+  }
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+}
 PreservedAnalyses EvmCalldataViewCleanupPass::run(Module &M,
                                                    ModuleAnalysisManager &) {
   bool Changed = false;
