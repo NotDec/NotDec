@@ -653,6 +653,58 @@ UsedOffsets，把"record 有但 annotation 没有"的索引报出来）。
 若愿意为 structurer/matcher 重调立项（Route A 日志里的"独立工作流"），才考虑方案 3：
 管道级内联 + 重建 pattern oracle。产物见 `logs/artifacts/20260920-helper-inlining/`。
 
+### 6.13 架构建议：在最前面重建 Yul 函数边界 + 语义 summary
+
+**链路对应**（正编译 vs 反编译）：
+
+```
+solc:     Yul 函数(FullInliner 保留) --EVMCodeTransform: returnLabel+jump--> 子程序 --assemble--> 字节码
+Gigahorse: 子程序 --lift--> "private 函数"(ctx 前缀 mem/calldata/returndata/env + 真实参数 + 尾部 return-label 形参)
+evm2llvm:  --> internal LLVM 函数（同一形状）
+NotDec:    --> 我们现在在这里（TR / 结构 / 后端）
+```
+
+因为 Yul 函数边界是**正编译链路的最后一步**，反编译链路就应该**最先**重建它：先识别出这些函数、
+定出调用约定（ctx 前缀 + 参数 + 返回标签），再让后面所有阶段（类型恢复、结构恢复、后端）都基于
+这个边界工作，而不是像现在这样在后面用形态匹配/整份实例化去补救。
+
+**识别特征（本轮实测，103 个 case）**：
+- `private_*` internal、≥5 个参数、参数 1 是 `%calldata`（ctx 前缀 `(mem, calldata, returndata, env)`）；
+- **最后一个 i256 形参在函数体里完全没有被使用**：1618 个 helper 里 1587 个（98.1%）满足；
+  调用点 13024 个里 9593 个（73.7%）在该位置传常量（返回标签地址），其余是动态值或该位置其实是真实参数；
+- 每个函数可以**逐个判定**哪个形参是返回标签（"体内未使用"即可），不需要依赖位置假设。
+
+**语义 summary 模式**（每个识别出的 Yul 函数一份）：
+
+```yaml
+signature: { ctx: [mem, calldata, returndata, env], params: [p0..], ret: [r0..], returnLabel: pN }
+effects:
+  calldata: [ {at: "p0 + 0", size: 32, into: r0}, {at: "p0 + 32", size: 32, into: r1} ]
+  memory:   [ {read|write, at: <expr>} ]
+  storage:  [ {slot: <expr>} ]
+  calls:    [ {callee: <summary ref>, actuals: [...]} ]
+```
+
+关键：calldata 效应写成**相对形参**（`p0 + Δ`）。调用点传入常量（`p0 := 4`）时代入即可得到绝对
+ABI 词号——既不需要内联 helper（避免 structurer 退化），也不需要整份函数体的多态实例化（避免
+24259 的闭包爆炸和 level 级联）。嵌套调用用 summary 组合（不动点）即可。
+
+**消费方**：
+1. 类型恢复：调用点上应用 summary，把 calldata 效应落到 caller 的 view（等价于"物化绝对偏移"，但
+   由 summary 驱动）；
+2. ABI 参数表：entry 自身直接读 + 被调 helper 的 summary → 参数词与类型，不再需要 `calldata.index`；
+3. 后端：可以按 summary 生成带类型的 Solidity helper（`decode_address_uint256(bytes calldata, uint256 base)`），
+   比 `private_0x...` 可读得多；
+4. helper 多态标记：有 summary 后不再需要"整份 body 实例化"，level 级联消失。
+
+**分阶段**：
+0. 识别 pass + summary 数据结构（只识别、只导出 metadata，不改行为）；
+1. 先做 calldata 效应（把 `AbiDecodeResultPass` 的元素↔偏移追踪一般化成 summary），在调用点喂给 view；
+2. 扩到 memory/storage/revert，替换 helper 多态标记；
+3. 退役 `calldata.index` / `AbiDecodeResultPass`，后端吃 summary/参数表。
+
+非匹配形状（31/1618 的尾部参数被用、无 calldata 的 helper）回退到现有通用路径。
+
 ## 7. 排除的假设
 
 | 假设 | 判据 | 结论 |
