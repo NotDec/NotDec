@@ -612,6 +612,47 @@ UsedOffsets，把"record 有但 annotation 没有"的索引报出来）。
 下一步（后端对接）：把这些 metadata 变成参数签名（`i:类型`），让 `BodyBuilder` 从 `calldata.index`
 切到 post-TR 结果；剩下 201 个 missing 词是类型缺口（多数是解码 helper 结果本身没有可判读类型）。
 
+### 6.12 逆向 solc 的 helper outline：实验结果（2026-09-20）
+
+**solc 里确实有"把可复用的小片段保留成函数"的逻辑**：
+- `libyul/optimiser/FullInliner.cpp::shallInline`：递归函数 / 实参有副作用的不内联；size ≤ 1 必内联；
+  单调用点必内联；其余只有 size < 6~8（带常量实参 < 12~16）才内联，**否则保留为 Yul 函数**；
+- `libyul/backends/evm/EVMCodeTransform.cpp:244`：保留的函数调用生成 `returnLabel`（压栈）+ jump，
+  这正是反编译出来 `(mem, calldata, returndata, env, base, size, target/pc)` helper 的来源；
+- 另有 `EquivalentFunctionCombiner`（合并等价函数）与 legacy 的 `libevmasm/BlockDeduplicator`（合并相同基本块）。
+
+实验做法：把 case 的 triple 临时改成 host triple，跑 `llvm-22 opt -passes=inline`，再改回 evm triple
+后走完整 notdec。两种口径：
+
+| 指标 | 基线（view，无内联） | 全量内联 | 定向内联（只内联 calldata 读取链） |
+| --- | --- | --- | --- |
+| entries | 2316 | 2325 | 2316 |
+| record==annotated | 1858 | 2245 | **2259** |
+| record>annotated | 150 | 75 | 37 |
+| record<annotated | 308 | 5 | **20** |
+| 参数词 | 1780 | 1999 | 2163 |
+| 有类型词 | 1579 (88.7%) | 1985 (99.3%) | **2120 (98.0%)** |
+| missing 词 | 201 | 14 | **43** |
+| extra 词/entry | 270/150 | 121/76 | 47/38 |
+| IR 行数 | 571203 | 562057 | 669225 (+17%) |
+| pattern suite | 103/103 | 19/103 | 38/103 |
+
+**结论**：内联方向本身是对的——它把 helper 解码的词变成直接常量访问，逐 entry record 和参数表几乎
+完整（`record<annotated` 308→20，missing 201→43）。但**全流程内联不可直接采用**：
+- pattern suite 掉到 19~38/103，失败集中在 `rewrite_marker` / `revert_kind` / `checked_bounds` /
+  `panic_code` 等计数与形状上（内联把共享的 revert/边界检查复制回各调用点，并把函数变大）；
+- compile budget 全面超限：goto 424→3105、real_jump 343→2683、condition TODO 729→3475、
+  dangling 69→407、3 个 case solc 失败——structurer 对扁平大函数退化，与 Route A 的结论一致。
+
+因此正确姿势不是"把内联直接打开"，而是二选一：
+1. **sidecar TR**：只为类型恢复构造一份内联副本，用它跑 TR 产出逐 entry 参数表，再挂回原模块；
+   结构/后端路径仍看 outline 模块（无下游损伤，也彻底不需要解码标注路径）；
+2. **把解码偏移物化进 view**（不内联 helper）：让 `AbiDecodeResultPass` 已算出的绝对偏移变成
+   entry view 上的 TR-only 证据（post-TR 清理），IR 结构不变；改动最小，但仍保留追踪器。
+
+若愿意为 structurer/matcher 重调立项（Route A 日志里的"独立工作流"），才考虑方案 3：
+管道级内联 + 重建 pattern oracle。产物见 `logs/artifacts/20260920-helper-inlining/`。
+
 ## 7. 排除的假设
 
 | 假设 | 判据 | 结论 |
