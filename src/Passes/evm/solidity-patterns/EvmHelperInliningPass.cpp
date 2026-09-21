@@ -37,13 +37,6 @@ using namespace llvm;
 namespace notdec::passes::evm {
 namespace {
 
-// The phase is behind an environment switch until the pattern oracles that
-// were calibrated on the outlined shape are re-baselined.
-bool helperInliningEnabled() {
-  const char *Value = std::getenv("NOTDEC_EVM_INLINE");
-  return Value != nullptr && Value[0] != '\0' && std::strcmp(Value, "0") != 0;
-}
-
 bool helperInliningDiagnosticsEnabled() {
   const char *Value = std::getenv("NOTDEC_EVM_INLINE_DIAG");
   return Value != nullptr && Value[0] != '\0' && std::strcmp(Value, "0") != 0;
@@ -83,9 +76,16 @@ bool isRemovableHelper(const Function &F) {
 
 } // namespace
 
+// The phase is behind an environment switch until the pattern oracles that
+// were calibrated on the outlined shape are re-baselined.
+bool isHelperInliningEnabled() {
+  const char *Value = std::getenv("NOTDEC_EVM_INLINE");
+  return Value != nullptr && Value[0] != '\0' && std::strcmp(Value, "0") != 0;
+}
+
 PreservedAnalyses EvmHelperInliningPass::run(Module &M,
                                              ModuleAnalysisManager &MAM) {
-  if (!helperInliningEnabled()) {
+  if (!isHelperInliningEnabled()) {
     return PreservedAnalyses::all();
   }
 

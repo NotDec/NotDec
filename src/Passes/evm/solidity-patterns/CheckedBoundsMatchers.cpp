@@ -271,6 +271,36 @@ BinaryOperator *matchCheckedMulSuccessCondition(Value *V) {
   return Product;
 }
 
+// The outlined checked-multiply helper guards with
+// or(divisor == 0, product / divisor == factor).  Once the helper is inlined
+// and the divisor is provably non-zero on that path the iszero disjunct folds
+// away, leaving the division identity alone: icmp eq X, evm_div(mul(X, Y), Y)
+// still holds exactly when the multiplication did not overflow.
+BinaryOperator *matchCheckedMulDivisionOnlySuccessCondition(Value *V) {
+  auto *Cmp = dyn_cast_or_null<ICmpInst>(V);
+  if (Cmp == nullptr || Cmp->getPredicate() != ICmpInst::ICMP_EQ) {
+    return nullptr;
+  }
+  for (unsigned I = 0; I < 2; ++I) {
+    auto *Div = dyn_cast<CallBase>(Cmp->getOperand(1 - I));
+    if (Div == nullptr || Div->arg_size() != 2 ||
+        getCalleeName(Div) != "evm_div") {
+      continue;
+    }
+    auto *Product = dyn_cast<BinaryOperator>(Div->getArgOperand(0));
+    if (Product == nullptr || Product->getOpcode() != Instruction::Mul) {
+      continue;
+    }
+    Value *X = Cmp->getOperand(I);
+    Value *Y = Div->getArgOperand(1);
+    if (!binaryOpHasOperand(Product, X) || !binaryOpHasOperand(Product, Y)) {
+      continue;
+    }
+    return Product;
+  }
+  return nullptr;
+}
+
 BinaryOperator *matchMulByMaxDivBound(ICmpInst *Cmp, ICmpInst::Predicate Pred,
                                       BasicBlock *SuccessBlock) {
   if (Cmp == nullptr) {
@@ -475,6 +505,11 @@ matchCheckedSubGuard(const NormalizedCondition &FailureCond,
   BinaryOperator *Sub =
       findBinaryOpInBlock(SuccessBlock, Instruction::Sub, LHS, RHS);
   if (Sub == nullptr) {
+    // Inlining puts the subtraction back next to the comparison it guards
+    // (the guard block), instead of in the outlined helper's success block.
+    Sub = findBinaryOpInBlock(Cmp->getParent(), Instruction::Sub, LHS, RHS);
+  }
+  if (Sub == nullptr) {
     return std::nullopt;
   }
   return CheckedBoundsMatch{"checked_sub",
@@ -500,6 +535,42 @@ matchCheckedConstSubLimitGuard(const NormalizedCondition &FailureCond,
     return std::nullopt;
   }
 
+  // Constant propagation rewrites the outlined sub x, K guard into the
+  // adjacent comparison icmp ugt x, K-1 with the panic on the false edge, and
+  // the subtraction itself becomes add x, -K (or stays a sub in the guard
+  // block).  Only the exact negation of the limit derived from the comparison
+  // is accepted, so arbitrary constant arithmetic cannot match.
+  if (FailureCond.Predicate == ICmpInst::ICMP_ULE &&
+      Cmp->getPredicate() == ICmpInst::ICMP_UGT) {
+    auto *Strict = dyn_cast<ConstantInt>(Cmp->getOperand(1));
+    Value *Checked = Cmp->getOperand(0);
+    if (Strict == nullptr || isa<ConstantInt>(Checked) ||
+        Strict->getValue().isMaxValue()) {
+      return std::nullopt;
+    }
+    APInt LimitValue = Strict->getValue() + 1;
+    APInt NegLimitValue = -LimitValue;
+    Value *Limit = ConstantInt::get(Strict->getType(), LimitValue);
+    Value *NegLimit = ConstantInt::get(Strict->getType(), NegLimitValue);
+    for (BasicBlock *BB : {SuccessBlock, Cmp->getParent()}) {
+      if (BinaryOperator *Sub =
+              findBinaryOpInBlock(BB, Instruction::Sub, Checked, Limit)) {
+        return CheckedBoundsMatch{"checked_sub", "", nullptr, nullptr, nullptr,
+                                  RevertMatch.Revert,
+                                  {Sub->getOperand(0), Sub->getOperand(1), Sub},
+                                  RevertMatch.PanicCode, true};
+      }
+      if (BinaryOperator *Add = findCommutativeBinaryOpInBlock(
+              BB, Instruction::Add, Checked, NegLimit)) {
+        return CheckedBoundsMatch{"checked_sub", "", nullptr, nullptr, nullptr,
+                                  RevertMatch.Revert,
+                                  {Checked, Limit, Add},
+                                  RevertMatch.PanicCode, true};
+      }
+    }
+    return std::nullopt;
+  }
+
   Value *RHS = nullptr;
   ConstantInt *Limit = nullptr;
   if (FailureCond.Predicate == ICmpInst::ICMP_UGE) {
@@ -519,6 +590,9 @@ matchCheckedConstSubLimitGuard(const NormalizedCondition &FailureCond,
   auto *LHS = ConstantInt::get(Limit->getType(), LHSValue);
   BinaryOperator *Sub =
       findBinaryOpInBlock(SuccessBlock, Instruction::Sub, LHS, RHS);
+  if (Sub == nullptr) {
+    Sub = findBinaryOpInBlock(Cmp->getParent(), Instruction::Sub, LHS, RHS);
+  }
   if (Sub == nullptr) {
     return std::nullopt;
   }
@@ -571,6 +645,19 @@ matchCheckedMulGuard(Value *BranchCondition, bool FailureWhenCondTrue,
     }
     if (BinaryOperator *Product =
             matchCheckedMulSuccessCondition(BranchCondition)) {
+      return CheckedBoundsMatch{
+          "checked_mul",
+          "",
+          nullptr,
+          nullptr,
+          nullptr,
+          RevertMatch.Revert,
+          {Product->getOperand(0), Product->getOperand(1), Product},
+          RevertMatch.PanicCode,
+          true};
+    }
+    if (BinaryOperator *Product =
+            matchCheckedMulDivisionOnlySuccessCondition(BranchCondition)) {
       return CheckedBoundsMatch{
           "checked_mul",
           "",
@@ -1717,21 +1804,61 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
     return std::nullopt;
   }
 
-  Value *Divisor = nullptr;
+  // Values that are zero exactly when the guard's failure condition holds.
+  SmallVector<Value *, 4> ZeroTested;
   if ((Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_ULE ||
        Pred == ICmpInst::ICMP_SLE) &&
       isZero(RHS)) {
-    Divisor = LHS;
+    ZeroTested.push_back(LHS);
   } else if ((Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_UGE ||
               Pred == ICmpInst::ICMP_SGE) &&
              isZero(LHS)) {
-    Divisor = RHS;
+    ZeroTested.push_back(RHS);
+  } else if (Pred == ICmpInst::ICMP_EQ && !isZero(LHS) && !isZero(RHS)) {
+    // InstCombine canonicalizes the divisor == 0 test onto an equivalent
+    // comparison of the divisor's own inputs: (A - B) == 0 and (A ^ B) == 0
+    // both hold exactly when that difference value is zero, and the difference
+    // is what is actually passed to evm_div.
+    for (User *U : LHS->users()) {
+      auto *BO = dyn_cast<BinaryOperator>(U);
+      if (BO == nullptr) {
+        continue;
+      }
+      if ((BO->getOpcode() == Instruction::Sub ||
+           BO->getOpcode() == Instruction::Xor) &&
+          binaryOpHasOperand(BO, RHS)) {
+        ZeroTested.push_back(BO);
+      }
+    }
   }
-  if (Divisor == nullptr) {
+  if (ZeroTested.empty()) {
     return std::nullopt;
   }
 
-  for (User *U : Divisor->users()) {
+  // (X << K) == 0 and (X * K) == 0 with a non-zero constant K hold exactly when
+  // X is zero, so the scaled value is an equivalent divisor for the guard.
+  SmallVector<Value *, 4> Divisors(ZeroTested.begin(), ZeroTested.end());
+  for (Value *ZeroValue : ZeroTested) {
+    for (User *U : ZeroValue->users()) {
+      auto *BO = dyn_cast<BinaryOperator>(U);
+      if (BO == nullptr ||
+          (BO->getOpcode() != Instruction::Shl &&
+           BO->getOpcode() != Instruction::Mul) ||
+          !binaryOpHasOperand(BO, ZeroValue)) {
+        continue;
+      }
+      const auto *Scale0 = dyn_cast<ConstantInt>(BO->getOperand(0));
+      const auto *Scale1 = dyn_cast<ConstantInt>(BO->getOperand(1));
+      const ConstantInt *Scale = Scale0 != nullptr ? Scale0 : Scale1;
+      if (Scale == nullptr || Scale->isZero()) {
+        continue;
+      }
+      Divisors.push_back(BO);
+    }
+  }
+
+  for (Value *Divisor : Divisors) {
+    for (User *U : Divisor->users()) {
     auto *Call = dyn_cast<CallBase>(U);
     if (Call == nullptr || Call->arg_size() != 2 ||
         !isSameValue(Call->getArgOperand(1), Divisor)) {
@@ -1761,6 +1888,7 @@ matchCheckedArithmetic(const NormalizedCondition &FailureCond,
           {Call->getArgOperand(1)},
           RevertMatch.PanicCode,
           true};
+      }
     }
   }
 
@@ -3027,6 +3155,32 @@ bool valueContainsShiftedStorageBytesLength(Value *V, Value *Length) {
   return valueContainsShiftedStorageBytesLength(V, Length, 8, Seen);
 }
 
+bool valueContainsValue(Value *V, Value *Needle, unsigned Depth,
+                        SmallPtrSetImpl<Value *> &Seen) {
+  if (V == nullptr || Needle == nullptr || Depth == 0 ||
+      !Seen.insert(V).second) {
+    return false;
+  }
+  if (isSameValue(V, Needle)) {
+    return true;
+  }
+  auto *Inst = dyn_cast<Instruction>(V);
+  if (Inst == nullptr) {
+    return false;
+  }
+  for (Value *Operand : Inst->operands()) {
+    if (valueContainsValue(Operand, Needle, Depth - 1, Seen)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool valueContainsValue(Value *V, Value *Needle) {
+  SmallPtrSet<Value *, 16> Seen;
+  return valueContainsValue(V, Needle, 8, Seen);
+}
+
 bool hasOldStorageBytesLengthBranch(BasicBlock *BB, CallBase *SLoad) {
   if (BB == nullptr || SLoad == nullptr) {
     return false;
@@ -3059,6 +3213,42 @@ void collectReachableBlocks(BasicBlock *BB, unsigned Depth,
   for (BasicBlock *Succ : successors(BB)) {
     collectReachableBlocks(Succ, Depth - 1, Seen, Blocks);
   }
+}
+
+// Inlining turns the old-length decode into plain dataflow (shr/and/select over
+// the slot load) and can move the Length > 31 test into a later block, so the
+// outlined helper-call shape above no longer exists.  The write half of the
+// matcher still has to hold independently.
+bool hasInlinedOldStorageBytesLengthBranch(BasicBlock *SuccessBlock,
+                                           CallBase *SLoad) {
+  if (SuccessBlock == nullptr || SLoad == nullptr) {
+    return false;
+  }
+  SmallPtrSet<BasicBlock *, 16> Seen;
+  SmallVector<BasicBlock *, 16> Blocks;
+  collectReachableBlocks(SuccessBlock, 16, Seen, Blocks);
+  for (BasicBlock *BB : Blocks) {
+    auto *Br = dyn_cast_or_null<BranchInst>(BB->getTerminator());
+    if (Br == nullptr || !Br->isConditional()) {
+      continue;
+    }
+    auto *Cmp = dyn_cast<ICmpInst>(Br->getCondition());
+    if (Cmp == nullptr) {
+      continue;
+    }
+    Value *Decoded = nullptr;
+    if (Cmp->getPredicate() == ICmpInst::ICMP_UGT &&
+        isConstantIntValue(Cmp->getOperand(1), 31)) {
+      Decoded = Cmp->getOperand(0);
+    } else if (Cmp->getPredicate() == ICmpInst::ICMP_ULT &&
+               isConstantIntValue(Cmp->getOperand(1), 32)) {
+      Decoded = Cmp->getOperand(0);
+    }
+    if (Decoded != nullptr && valueContainsValue(Decoded, SLoad)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool hasDirectStorageByteArrayWrite(BasicBlock *SuccessBlock, Value *Length,
@@ -3098,7 +3288,8 @@ bool hasDirectStorageByteArrayCopyToStorageSuccess(BasicBlock *SuccessBlock,
     auto *SLoad = dyn_cast<CallBase>(&I);
     if (SLoad == nullptr || !isCallTo(SLoad, "evm_sload") ||
         SLoad->arg_size() != 1 ||
-        !hasOldStorageBytesLengthBranch(SuccessBlock, SLoad)) {
+        (!hasOldStorageBytesLengthBranch(SuccessBlock, SLoad) &&
+         !hasInlinedOldStorageBytesLengthBranch(SuccessBlock, SLoad))) {
       continue;
     }
     if (hasDirectStorageByteArrayWrite(SuccessBlock, Length,

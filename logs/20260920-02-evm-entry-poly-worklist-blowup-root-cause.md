@@ -937,3 +937,50 @@ NOTDEC_EVM_INLINE=1 python3 test/run_evm_solidity_pattern_compile_suite.py --bin
   --budget test/evm/solidity-patterns/compile-budget.json --project-root . \
   --workdir /tmp/cb-fix --solc /sn640/EthIR/source/solcv8.25
 ```
+### 11.8 内联形状的 matcher 修复（本轮后半）
+
+对 §11.6 的 37 例少标做了逐家族调查，最重要的结论是：
+**div/checked/error-string 家族的多数「丢失」其实是常量传播后的真删除，不是漏匹配。** 内联把调用点的
+常量实参代进 helper 后（例：0009 的 5 个除零调用点全是非零常量），K!=0 的判断被常量折叠、重复的
+支配 guard 被 SimplifyCFG 删掉，panic-0x12/0x11 的 revert 块在 IR 里已经不存在（off.pre 有 1 个
+panic-18 块，on.pre 为 0）；error_string 同理（0340 off-pre 51 → on-pre 49 → on-final 49）。
+这些只能靠**重标定 oracle**，改 matcher 只会制造假匹配。
+
+真正的 matcher/pass 假设失效有 7 处，已修：
+
+| # | 位置 | 内联后的形状 | 修法 |
+| --- | --- | --- | --- |
+| 1 | matchCheckedSubGuard | sub 与 icmp 一起落在 guard block（原实现只搜 SuccessBlock） | 加 guard block fallback |
+| 2 | matchCheckedMulGuard | or(iszero(Y), icmp eq X, evm_div(mul(X,Y),Y)) 的 iszero 分支被折叠，只剩裸 eq | 新增 matchCheckedMulDivisionOnlySuccessCondition（只接受 evm_div+mul 的除法恒等式） |
+| 3 | matchCheckedArithmetic 的 panic-0x12 分支 | InstCombine 把 divisor==0 规范化到别的 SSA 值：(A-B)==0、(X<<K)==0 | divisor 候选列表：Sub/Xor 重建 + 非零常量 shl/mul 剥离 |
+| 4 | hasDirectStorageByteArrayCopyToStorageSuccess | 旧长度解码变成纯数据流，>31 分支移到后继块 | 新增 hasInlinedOldStorageBytesLengthBranch（16 块内找 31/32 比较，值需传递依赖 sload） |
+| 5 | matchCheckedConstSubLimitGuard | 常量代换把 sub x,K 变成 add x,-K、icmp ugt x,K-1，失败边换到另一个后继 | 只接受与比较常量严格互补的 sub(Value,Limit)/add(Value,-Limit)，并加 guard block fallback |
+| 6 | SolidityRevertPass::getRevertPayloadHType | 同一块里两个 mem[64] reload 被改写成不同分配，revert 基址无 record 也无块内 selector store | 放宽 trailing-base fallback 的入口条件（无 record、无透明字段、无块内 selector store 时也进入） |
+| 7 | AbiReturnPass 的内联 encoder 证据 | head/length store 记在 encoder 自己的分配基址（或 base+returndatasize）上，store evidence 无法解析 | 只在 NOTDEC_EVM_INLINE 模式下允许用「0/32 两字段记录」作为等价证据 |
+
+门控细节：第 7 条一开始无条件生效，默认口径的 0679 立刻多出 2 个 abi_return（66 变 68），
+说明 outlined 形状下确实存在同形状的静态返回；改为 AbiReturnPass(TR, isHelperInliningEnabled())
+后默认口径逐位不变。
+
+少标家族变化（内联口径，按受影响 case 数）：
+
+| 家族 | 修前 | 修后 |
+| --- | --- | --- |
+| storage_byte_array_length_bounds | 12 | **0** |
+| notdec.solidity.abi_return | 5 | **0** |
+| checked_bounds_kind:checked_mul | 5 | **0** |
+| checked_bounds_kind:checked_sub | 8 | **0** |
+| revert_kind:error_string | 8 | 8（均为真删除；1775 的 pass 级 miss 已补回一处，但 off/on 仍差 1） |
+| checked_bounds_cfg_rewrites | 8 | 4 |
+| checked_bounds_kind:checked_div | 10 | 9（真删除） |
+| panic_code:18 | 11 | 11（真删除） |
+| checked_bounds_kind:checked_exp | 4 | 4（真删除/常量折叠） |
+
+**验证**：默认 env 四套 suite 全绿（patterns 103/103、compile 0 失败、rewrite 75/75、
+source 89/89）；内联口径 pattern suite 仍 19/103，但失败结构已变成**47 例纯重复多标**
+（共享 revert/bounds 代码在每个调用点各标一次）——这是 oracle 口径问题，不是覆盖倒退；
+checked_bounds_audit 在两个口径下都 PASS。
+
+内联口径编译预算复测：compile_failures 0、unresolved 333、condition_todo 3269、goto 2709、
+dangling 428（helper floors 1339/1301 在内联形状下失效，需要随 oracle 一起重标定）。
+

@@ -451,7 +451,8 @@ getAggregateDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
 std::optional<AbiReturnHelperPayload>
 getInlineDynamicReturnPayloadHType(llvm2c::HTypeResult &HTypes,
                                    ArrayRef<mlsub::EVMStoreEvidence> Stores,
-                                   CallBase &Return) {
+                                   CallBase &Return,
+                                   bool InlineHelperEvidence) {
   if (!isFreeMemoryPointerLoad(Return.getArgOperand(1))) {
     return std::nullopt;
   }
@@ -471,9 +472,20 @@ getInlineDynamicReturnPayloadHType(llvm2c::HTypeResult &HTypes,
     }
 
     HTypeBufferView View = getHTypeValueBufferView(HTypes, &Inst);
-    if (hasHTypeBufferFieldAt(View, 0) && hasHTypeBufferFieldAt(View, 32) &&
+    const bool HasHeadLengthFields =
+        hasHTypeBufferFieldAt(View, 0) && hasHTypeBufferFieldAt(View, 32);
+    // Preferred evidence: the head and length stores resolve against this
+    // base.  An inlined encoder keeps those stores keyed to its own allocation
+    // base (or to an address derived from it), which the store-evidence offset
+    // walk cannot resolve against the free-memory reload that evm_return uses;
+    // in the flattened shape the recovered two-field ABI record on a base End
+    // depends on is the equivalent evidence.  A two-word static tuple has the
+    // same record layout, so this arm stays tied to the inlining mode.
+    const bool HasHeadLengthStores =
         hasConstantStoreEvidenceAt(Stores, &Inst, 0, 32) &&
-        hasStoreEvidenceAt(Stores, &Inst, 32)) {
+        hasStoreEvidenceAt(Stores, &Inst, 32);
+    if (HasHeadLengthStores ||
+        (InlineHelperEvidence && HasHeadLengthFields)) {
       return AbiReturnHelperPayload{true, true, false};
     }
     if (hasInlineTupleArrayTailHType(HTypes, Stores, &Inst)) {
@@ -608,7 +620,7 @@ getDynamicReturnHelperPayloadHType(llvm2c::HTypeResult &HTypes,
 std::optional<StringRef>
 classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
                            ArrayRef<mlsub::EVMStoreEvidence> Stores,
-                           CallBase &Return) {
+                           CallBase &Return, bool InlineHelperEvidence) {
   if (isConstantOrCallsiteArgIntValue(Return.getArgOperand(2), 0)) {
     return StringRef("empty");
   }
@@ -619,7 +631,8 @@ classifyAbiReturnFromHType(llvm2c::HTypeResult &HTypes,
   std::optional<AbiReturnHelperPayload> HelperPayload =
       getDynamicReturnHelperPayloadHType(HTypes, Stores, Return);
   if (!HelperPayload.has_value()) {
-    HelperPayload = getInlineDynamicReturnPayloadHType(HTypes, Stores, Return);
+    HelperPayload = getInlineDynamicReturnPayloadHType(HTypes, Stores, Return,
+                                                       InlineHelperEvidence);
   }
   if (!HelperPayload.has_value()) {
     HelperPayload =
@@ -685,7 +698,8 @@ PreservedAnalyses AbiReturnPass::run(Module &M, ModuleAnalysisManager &MAM) {
       }
 
       std::optional<StringRef> Kind =
-          classifyAbiReturnFromHType(*HighTypes, StoreEvidence, *Call);
+          classifyAbiReturnFromHType(*HighTypes, StoreEvidence, *Call,
+                                     InlineHelperEvidence);
       if (!Kind.has_value()) {
         continue;
       }

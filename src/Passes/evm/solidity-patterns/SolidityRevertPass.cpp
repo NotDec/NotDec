@@ -542,7 +542,17 @@ getRevertPayloadHType(llvm2c::HTypeResult &HTypes,
   Value *PayloadBase = Revert.getArgOperand(1);
   std::optional<HTypeBufferView> View =
       getRevertBufferHType(HTypes, PayloadBase, Revert, 1);
-  if (!View.has_value()) {
+  // Inlining can expose a second free-memory reload in the same block, so the
+  // revert base is rewritten to a different allocation than the one the
+  // payload was stored through.  That view has neither a record nor an
+  // in-block selector store; the trailing-base fallback still identifies the
+  // payload from the revert size.
+  const bool NeedsTrailingBaseFallback =
+      !View.has_value() ||
+      (View->Record == nullptr && !View->HasTransparentOffset0Field &&
+       getHTypeStoreValuesAtOffsetBefore(Stores, PayloadBase, 0, Revert)
+           .empty());
+  if (NeedsTrailingBaseFallback) {
     std::optional<Value *> TrailingPayloadBase =
         getTrailingPayloadBaseFromRevertSize(Revert);
     if (TrailingPayloadBase.has_value()) {

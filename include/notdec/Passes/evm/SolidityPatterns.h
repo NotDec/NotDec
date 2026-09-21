@@ -99,6 +99,11 @@ struct EvmHelperInliningPass
   static bool isRequired() { return true; }
 };
 
+// True when NOTDEC_EVM_INLINE selects the flattened shape.  Passes whose
+// evidence model is shape-specific read it so the outlined shape keeps its
+// exact behaviour while the flattened shape is brought up.
+bool isHelperInliningEnabled();
+
 // Rewrites low-level EVM storage reads/writes into composable storage helper
 // calls after MLsub has recovered the contract-global storage HType.  The pass
 // keeps the address expression rules local and does not create a separate
@@ -119,8 +124,16 @@ struct EvmStorageHighLevelRewritePass
 // object construction.
 struct AbiReturnPass : llvm::PassInfoMixin<AbiReturnPass> {
   mlsub::MLsubRecovery &TR;
+  // When the pre-TR inliner has expanded the encoder helpers, the ABI
+  // head/length stores are keyed to the encoder's own allocation base and the
+  // recovered two-field record on the return's free-memory base is the only
+  // remaining evidence.  Off by default so the outlined shape keeps its exact
+  // classification.
+  bool InlineHelperEvidence;
 
-  explicit AbiReturnPass(mlsub::MLsubRecovery &TR) : TR(TR) {}
+  explicit AbiReturnPass(mlsub::MLsubRecovery &TR,
+                         bool InlineHelperEvidence = false)
+      : TR(TR), InlineHelperEvidence(InlineHelperEvidence) {}
 
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 
