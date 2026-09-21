@@ -37,9 +37,100 @@ using namespace llvm;
 namespace notdec::passes::evm {
 namespace {
 
+// "0"/unset: keep the outlined shape.  "1"/"all": the whole module goes
+// through the inliner.  "calldata": only the helpers on an entry -> calldata
+// read path are expanded; the arithmetic and revert scaffolding stays outlined
+// so the checked-bounds/revert matchers keep the shape they were calibrated on.
+// The guard helpers in that scaffolding are shared by constant and
+// non-constant callers, and flattening them proves the constant guards dead.
+enum class InlineMode { Off, All, Calldata };
+
+InlineMode getInlineMode() {
+  const char *Value = std::getenv("NOTDEC_EVM_INLINE");
+  if (Value == nullptr || Value[0] == '\0' || std::strcmp(Value, "0") == 0) {
+    return InlineMode::Off;
+  }
+  if (std::strcmp(Value, "calldata") == 0) {
+    return InlineMode::Calldata;
+  }
+  return InlineMode::All;
+}
+
 bool helperInliningDiagnosticsEnabled() {
   const char *Value = std::getenv("NOTDEC_EVM_INLINE_DIAG");
   return Value != nullptr && Value[0] != '\0' && std::strcmp(Value, "0") != 0;
+}
+
+// Public entries read calldata by definition, so they cannot be the seed of
+// the scope: seeding from them would pull the whole module into the closure.
+bool isCalldataReader(const Function &F) {
+  if (detail::isPublicEntryFunction(F)) {
+    return false;
+  }
+  for (const Instruction &I : instructions(F)) {
+    const auto *Call = dyn_cast<CallBase>(&I);
+    if (Call == nullptr) {
+      continue;
+    }
+    StringRef Name = detail::getCalleeName(Call);
+    if (Name == "evm_calldataload" || Name == "evm_calldatacopy") {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The calldata chain is the readers plus everything they call (their internal
+// decode helpers) and everything that can reach them (the entry-side
+// wrappers).  Only those calls are forced open; every other helper is pinned
+// with noinline so the LLVM cost model cannot flatten the guard scaffolding.
+void restrictInliningToCalldataChains(Module &M) {
+  SmallPtrSet<const Function *, 32> Scoped;
+  for (Function &F : M) {
+    if (!F.isDeclaration() && isCalldataReader(F)) {
+      Scoped.insert(&F);
+    }
+  }
+  if (Scoped.empty()) {
+    return;
+  }
+
+  // Only the upward closure is scoped.  A reader's callees are business logic
+  // (balance math, storage updates) that does not need the entry's absolute
+  // offsets, and pulling them in would flatten the shared guard helpers whose
+  // checks the constant call sites prove dead.
+  bool Changed = true;
+  while (Changed) {
+    Changed = false;
+    for (Function &F : M) {
+      if (F.isDeclaration() || Scoped.count(&F) != 0) {
+        continue;
+      }
+      for (const Instruction &I : instructions(F)) {
+        const auto *Call = dyn_cast<CallBase>(&I);
+        const Function *Callee =
+            Call == nullptr ? nullptr : Call->getCalledFunction();
+        if (Callee != nullptr && Scoped.count(Callee) != 0) {
+          Scoped.insert(&F);
+          Changed = true;
+          break;
+        }
+      }
+    }
+  }
+
+  for (Function &F : M) {
+    if (F.isDeclaration() || detail::isPublicEntryFunction(F)) {
+      continue;
+    }
+    if (Scoped.count(&F) != 0) {
+      F.removeFnAttr(Attribute::NoInline);
+      F.addFnAttr(Attribute::AlwaysInline);
+    } else {
+      F.removeFnAttr(Attribute::AlwaysInline);
+      F.addFnAttr(Attribute::NoInline);
+    }
+  }
 }
 
 unsigned countCalls(const Module &M) {
@@ -78,15 +169,16 @@ bool isRemovableHelper(const Function &F) {
 
 // The phase is behind an environment switch until the pattern oracles that
 // were calibrated on the outlined shape are re-baselined.
-bool isHelperInliningEnabled() {
-  const char *Value = std::getenv("NOTDEC_EVM_INLINE");
-  return Value != nullptr && Value[0] != '\0' && std::strcmp(Value, "0") != 0;
-}
+bool isHelperInliningEnabled() { return getInlineMode() != InlineMode::Off; }
 
 PreservedAnalyses EvmHelperInliningPass::run(Module &M,
                                              ModuleAnalysisManager &MAM) {
-  if (!isHelperInliningEnabled()) {
+  const InlineMode Mode = getInlineMode();
+  if (Mode == InlineMode::Off) {
     return PreservedAnalyses::all();
+  }
+  if (Mode == InlineMode::Calldata) {
+    restrictInliningToCalldataChains(M);
   }
 
   const unsigned CallsBefore = countCalls(M);
@@ -108,7 +200,9 @@ PreservedAnalyses EvmHelperInliningPass::run(Module &M,
   }
 
   if (helperInliningDiagnosticsEnabled()) {
-    errs() << "[evm-inline-helpers] calls " << CallsBefore << " -> "
+    errs() << "[evm-inline-helpers] mode="
+           << (Mode == InlineMode::Calldata ? "calldata" : "all") << " calls "
+           << CallsBefore << " -> "
            << countCalls(M) << ", definitions " << DefinitionsBefore << " -> "
            << countDefinitions(M) << ", removed " << Dead.size() << "\n";
   }

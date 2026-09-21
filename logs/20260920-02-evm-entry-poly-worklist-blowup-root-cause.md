@@ -984,3 +984,40 @@ checked_bounds_audit 在两个口径下都 PASS。
 内联口径编译预算复测：compile_failures 0、unresolved 333、condition_todo 3269、goto 2709、
 dangling 428（helper floors 1339/1301 在内联形状下失效，需要随 oracle 一起重标定）。
 
+### 11.9 内联范围是一个可测量的策略选择：all vs calldata
+
+§11.6 的少标里有一类是「真删除」：guard helper 被多个调用点共享，其中所有调用点都传非零常量，
+内联后 `K != 0` 常量折叠、panic 块变成不可达并被删掉（0009：OFF pre-TR 有 1 个 panic-18 store，
+5 个调用点是 100/2/100/100/1000，ON pre-TR 为 0）。这不是错误优化，也不是「形状变了」，
+而是 outlined 形状里本来就有、扁平形状里被证明死的脚手架；注意 checked_bounds/revert 的 marker
+在后端零消费（`external/NotDec-llvm2c` 里没有 `notdec_solidity_rewrite` / `checked_bounds` 引用，
+生成的 .sol 里也没有 marker 或 unchecked），所以丢了 marker 不影响输出。
+
+于是把「内联哪些」做成一个显式策略（`NOTDEC_EVM_INLINE=1` 全量 / `=calldata` 只展平 calldata 链）：
+calldata 模式的 scope = 不读 calldata 的 private 函数里的 calldata reader + 它们的**调用者闭包**
+（不展开 reader 的 callee，否则会把业务逻辑和 guard helper 一起拉进来），reader 与其调用链强制
+alwaysinline，其余 noinline。三档实测（103 case）：
+
+| 指标 | 基线（不内联） | all（代价模型） | calldata（限定范围） |
+| --- | --- | --- | --- |
+| ABI record==annotated | 1858/2316 | 2245/2325 | **2273/2325** |
+| pattern suite 精确通过 | 103 | 19 | 14 |
+| 有少标的 case 数 | 0 | 30 | **5** |
+| 只有多标的 case 数 | 0 | 54 | 84 |
+| 下界口径（marker>=expected）通过 | 103 | 73 | **98** |
+| compile_failures | 0 | 0 | 0 |
+| unresolved / condition_todo / goto | 264 / 729 / 424 | 333 / 3269 / 2709 | 289 / 4648 / 5432 |
+| helper_functions | 1339 | 173 | 1271 |
+
+结论：calldata 范围把**覆盖全部找回来**（少标 case 从 30 降到 5，只剩 array_bounds_memory 2 例、
+memory_allocation_bounds / cfg_rewrites / abi_param 各 1 例），ABI 也更好；代价是强制展开调用链
+带来的重复代码更多，所以精确计数 oracle 失败更多（纯多标），structurer 的 goto/TODO 也更高。
+也就是说：**覆盖问题可以靠「选对内联范围 + 按 canonical 形状扩 matcher」解决，剩下的分歧是
+oracle 该不该按「下界 + kind 集合」而不是「精确计数」来判定**。
+
+复现：`NOTDEC_EVM_INLINE=calldata python3 .../agg_abi_params.py`、pattern/compile suite 同上。
+
+
+内联口径编译预算复测：compile_failures 0、unresolved 333、condition_todo 3269、goto 2709、
+dangling 428（helper floors 1339/1301 在内联形状下失效，需要随 oracle 一起重标定）。
+
