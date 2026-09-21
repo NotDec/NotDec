@@ -580,6 +580,38 @@ TR 侧的 record 逐 entry 化，是"让 TR 真正参与参数恢复"的前置�
 计数即可分辨）；以及 annotation 本身的可信度（对每个 entry 交叉比较 record 的 ABI 词集合与
 UsedOffsets，把"record 有但 annotation 没有"的索引报出来）。
 
+### 6.11 已落地：逐函数参数表（abi_param.params/typed/missing/extra）
+
+`AbiParamRecoveryPass` 现在除了 record/annotated/mismatch，还给每个 public entry 写：
+
+| metadata | 含义 |
+| --- | --- |
+| `abi_param.params` | 该 entry 消费的 ABI 头词集合大小（来自 `calldata.index` 的**索引集合**；比 annotated 的 max+1 更准） |
+| `abi_param.typed` | 其中已经拿到"可判读类型"的词数（两个来源：布局字段的 HType，或被消费值的 HType） |
+| `abi_param.missing` | 有索引但两个来源都没类型的索引列表（逗号分隔，仅非空时写） |
+| `abi_param.extra` | 布局里有、但该 entry 没有标注消费的 ABI 索引列表（交叉检查 annotation 完整性） |
+
+103 case 聚合（2316 entry）：
+
+| 指标 | 只用被消费值类型 | 被消费值 + 布局字段 |
+| --- | --- | --- |
+| params>0 的 entry | 1075 | 1075 |
+| 全部词有类型 | 372 | **879** |
+| 部分有类型 | 22 | 15 |
+| 完全没有类型 | 681 | **181** |
+| 有类型的词 / 总词 | 854 / 1780 (48%) | **1579 / 1780 (88.7%)** |
+| missing 词数 | 926 | **201** |
+| extra 词数（150 个 entry） | 270 | 270 |
+| params == annotated | 2315/2316 | 2315/2316 |
+
+三个 oracle case（已加进 manifest 断言）：
+- `0009`：params/typed 分布 `{0:15,1:6,2:6,3:1}`（与 annotated 完全一致），missing/extra 空；
+- `0031`：`{0:7,1:4}`，missing 空，extra `{0:1}`；
+- `0011_multi_public`：`{0:5,1:2}`，missing/extra 空。
+
+下一步（后端对接）：把这些 metadata 变成参数签名（`i:类型`），让 `BodyBuilder` 从 `calldata.index`
+切到 post-TR 结果；剩下 201 个 missing 词是类型缺口（多数是解码 helper 结果本身没有可判读类型）。
+
 ## 7. 排除的假设
 
 | 假设 | 判据 | 结论 |

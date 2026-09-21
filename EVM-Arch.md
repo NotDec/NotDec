@@ -202,6 +202,10 @@ post-TR pass 回答**，判断依据是字段偏移/类型是否符合 ABI、eve
      `AbiParamRecoveryPass` 改为读该 view 的记录：103 case 上 `record==annotated`
      288 → **1858**、偏多 1911 → 150、单值 case 91 → 18（`0009` 完全一致）。
      实现与数据见 `logs/20260920-02-evm-entry-poly-worklist-blowup-root-cause.md` §6.8/§6.9；
+     **进展 2（2026-09-20）**：`AbiParamRecoveryPass` 已产出逐函数参数表
+     `abi_param.params/typed/missing/extra`（索引集合来自 `calldata.index`，类型来自布局字段或
+     被消费值的 HType）：1780 个参数词里 **1579（88.7%）已有类型**，missing 201、extra 270
+     （见 §6.11）。下一步即第 2 步：后端从 metadata 切到该表；
   2. 后端 `argN` 的来源从 metadata 切到 post-TR 结果；
   3. `AbiDecodeResultPass` 的标注与 `annotatedAbiArgumentExpr` 的消费路径一起删除
      （或降级为纯 debug），避免同一语义两套表达。

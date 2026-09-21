@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 
 using namespace llvm;
@@ -36,6 +38,17 @@ constexpr llvm::StringLiteral KIND_ABI_PARAM_ANNOTATED(
     "notdec.solidity.abi_param.annotated");
 constexpr llvm::StringLiteral KIND_ABI_PARAM_MISMATCH(
     "notdec.solidity.abi_param.mismatch");
+// Per-function parameter table built from the post-TR results: the ABI head
+// words the entry consumes (from the calldata.index annotations) and how many
+// of them already carry an informative recovered type.
+constexpr llvm::StringLiteral KIND_ABI_PARAM_PARAMS(
+    "notdec.solidity.abi_param.params");
+constexpr llvm::StringLiteral KIND_ABI_PARAM_TYPED(
+    "notdec.solidity.abi_param.typed");
+constexpr llvm::StringLiteral KIND_ABI_PARAM_MISSING(
+    "notdec.solidity.abi_param.missing");
+constexpr llvm::StringLiteral KIND_ABI_PARAM_EXTRA(
+    "notdec.solidity.abi_param.extra");
 
 // Backend-interface annotations only: this pass measures and reports, it does
 // not rewrite, so it deliberately avoids addStringMetadata() and its rewrite
@@ -95,6 +108,35 @@ unsigned abiHeadFieldCount(const HTypeBufferView &View) {
   return Count;
 }
 
+// ABI head indices present in the recovered record (byte offset 4 + 32*i).
+void collectAbiHeadIndices(const HTypeBufferView &View,
+                           std::set<unsigned> &Out) {
+  if (View.Record == nullptr) {
+    return;
+  }
+  for (const ast::FieldDecl &Field : View.Record->getFields()) {
+    if (Field.isPadding) {
+      continue;
+    }
+    const OffsetTy Start = Field.R.Start;
+    if (Start < 4 || (Start - 4) % 32 != 0) {
+      continue;
+    }
+    Out.insert(static_cast<unsigned>((Start - 4) / 32));
+  }
+}
+
+std::string formatIndexList(const std::set<unsigned> &Indices) {
+  std::string Text;
+  for (unsigned Index : Indices) {
+    if (!Text.empty()) {
+      Text += ",";
+    }
+    Text += std::to_string(Index);
+  }
+  return Text;
+}
+
 // Per-function parameter count derived from the pre-TR backend-interface
 // annotations: constant-offset calldata loads and decoder helper call sites
 // both record the ABI argument index they feed.
@@ -152,6 +194,90 @@ PreservedAnalyses AbiParamRecoveryPass::run(Module &M, ModuleAnalysisManager &MA
                       std::to_string(RecordCount));
     setStringMetadata(Ctx, F, KIND_ABI_PARAM_ANNOTATED,
                       std::to_string(AnnotatedCount));
+
+    // Per-function parameter table from the TR results: every calldata.index
+    // annotation marks one ABI head word this entry consumes; look up its
+    // recovered type and report coverage.  params is the number of distinct
+    // words the entry consumes (the post-TR replacement for annotated),
+    // typed how many of them have an informative type, missing those that
+    // do not, and extra the recovered layout words the entry does not
+    // consume (a cross-check of the annotation completeness).
+    std::map<unsigned, bool> UsedIndices; // ABI index -> informative type?
+    for (Instruction &I : instructions(F)) {
+      std::optional<std::string> Text =
+          getStringMetadataValue(I, KIND_SOLIDITY_CALLDATA_ARG_INDEX);
+      if (!Text.has_value()) {
+        continue;
+      }
+      std::optional<unsigned> Index = parseUnsignedDecimal(*Text);
+      if (!Index.has_value()) {
+        continue;
+      }
+      ast::HType *Ty =
+          HighTypes->getDefaultValueType(getExtValuePtr(&I, nullptr));
+      const bool Informative =
+          Ty != nullptr && !Ty->isTopType() && !Ty->isBottomType();
+      auto [It, Inserted] = UsedIndices.emplace(*Index, Informative);
+      if (!Inserted && Informative) {
+        It->second = true;
+      }
+    }
+
+    // The recovered layout is the second type source: when the per-entry
+    // record has a field at 4+32*i, its field type also types the word (the
+    // consumed value itself can stay top/bottom, e.g. for a decoded word).
+    if (View.Record != nullptr) {
+      for (const ast::FieldDecl &Field : View.Record->getFields()) {
+        if (Field.isPadding || Field.Type == nullptr) {
+          continue;
+        }
+        const OffsetTy Start = Field.R.Start;
+        if (Start < 4 || (Start - 4) % 32 != 0) {
+          continue;
+        }
+        const auto Index = static_cast<unsigned>((Start - 4) / 32);
+        auto It = UsedIndices.find(Index);
+        if (It == UsedIndices.end()) {
+          continue;
+        }
+        const bool Informative =
+            !Field.Type->isTopType() && !Field.Type->isBottomType();
+        It->second = It->second || Informative;
+      }
+    }
+
+    std::set<unsigned> MissingIndices;
+    unsigned TypedCount = 0;
+    for (const auto &[Index, Informative] : UsedIndices) {
+      if (Informative) {
+        ++TypedCount;
+      } else {
+        MissingIndices.insert(Index);
+      }
+    }
+
+    std::set<unsigned> RecordIndices;
+    collectAbiHeadIndices(View, RecordIndices);
+    std::set<unsigned> ExtraIndices;
+    for (unsigned Index : RecordIndices) {
+      if (UsedIndices.count(Index) == 0) {
+        ExtraIndices.insert(Index);
+      }
+    }
+
+    setStringMetadata(Ctx, F, KIND_ABI_PARAM_PARAMS,
+                      std::to_string(UsedIndices.size()));
+    setStringMetadata(Ctx, F, KIND_ABI_PARAM_TYPED,
+                      std::to_string(TypedCount));
+    if (!MissingIndices.empty()) {
+      setStringMetadata(Ctx, F, KIND_ABI_PARAM_MISSING,
+                        formatIndexList(MissingIndices));
+    }
+    if (!ExtraIndices.empty()) {
+      setStringMetadata(Ctx, F, KIND_ABI_PARAM_EXTRA,
+                        formatIndexList(ExtraIndices));
+    }
+
     ++NumAbiParamEntries;
     if (RecordCount != AnnotatedCount) {
       const std::string Diagnostic = "record=" + std::to_string(RecordCount) +

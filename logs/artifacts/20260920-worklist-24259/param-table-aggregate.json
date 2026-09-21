@@ -1,0 +1,18 @@
+{
+ "cases": 103,
+ "failed": 0,
+ "entries": 2316,
+ "params_gt0": 1075,
+ "fully_typed": 879,
+ "partially_typed": 15,
+ "zero_typed": 181,
+ "total_params": 1780,
+ "total_typed": 1579,
+ "record_extra_entries": 150,
+ "extra_words": 270,
+ "missing_words": 201,
+ "params_eq_annotated": 2315,
+ "params_lt_annotated": 1,
+ "params_gt_annotated": 0,
+ "wall_s": 144.6
+}

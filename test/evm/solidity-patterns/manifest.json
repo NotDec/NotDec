@@ -1021,7 +1021,17 @@
           "0": 5,
           "1": 2
         },
-        "notdec.solidity.abi_param.mismatch": {}
+        "notdec.solidity.abi_param.mismatch": {},
+        "notdec.solidity.abi_param.params": {
+          "0": 5,
+          "1": 2
+        },
+        "notdec.solidity.abi_param.typed": {
+          "0": 5,
+          "1": 2
+        },
+        "notdec.solidity.abi_param.missing": {},
+        "notdec.solidity.abi_param.extra": {}
       }
     },
     {
@@ -3278,7 +3288,21 @@
           "2": 6,
           "3": 1
         },
-        "notdec.solidity.abi_param.mismatch": {}
+        "notdec.solidity.abi_param.mismatch": {},
+        "notdec.solidity.abi_param.params": {
+          "0": 15,
+          "1": 6,
+          "2": 6,
+          "3": 1
+        },
+        "notdec.solidity.abi_param.typed": {
+          "0": 15,
+          "1": 6,
+          "2": 6,
+          "3": 1
+        },
+        "notdec.solidity.abi_param.missing": {},
+        "notdec.solidity.abi_param.extra": {}
       }
     },
     {
@@ -3414,6 +3438,18 @@
         },
         "notdec.solidity.abi_param.mismatch": {
           "record=1 annotated=0": 1
+        },
+        "notdec.solidity.abi_param.params": {
+          "0": 7,
+          "1": 4
+        },
+        "notdec.solidity.abi_param.typed": {
+          "0": 7,
+          "1": 4
+        },
+        "notdec.solidity.abi_param.missing": {},
+        "notdec.solidity.abi_param.extra": {
+          "0": 1
         }
       }
     },
