@@ -63,6 +63,19 @@ bool helperInliningDiagnosticsEnabled() {
 
 // Public entries read calldata by definition, so they cannot be the seed of
 // the scope: seeding from them would pull the whole module into the closure.
+// A public entry is the contract's outward ABI boundary.  Inlining a small
+// entry into the dispatcher leaves its original definition dead and lets the
+// entry outlining clone the body (and its payability guard) a second time, so
+// the entries are pinned even though nothing else calls them.
+void pinPublicEntriesNoInline(Module &M) {
+  for (Function &F : M) {
+    if (!F.isDeclaration() && detail::isPublicEntryFunction(F)) {
+      F.removeFnAttr(Attribute::AlwaysInline);
+      F.addFnAttr(Attribute::NoInline);
+    }
+  }
+}
+
 bool isCalldataReader(const Function &F) {
   if (detail::isPublicEntryFunction(F)) {
     return false;
@@ -177,6 +190,7 @@ PreservedAnalyses EvmHelperInliningPass::run(Module &M,
   if (Mode == InlineMode::Off) {
     return PreservedAnalyses::all();
   }
+  pinPublicEntriesNoInline(M);
   if (Mode == InlineMode::Calldata) {
     restrictInliningToCalldataChains(M);
   }

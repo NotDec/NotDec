@@ -1017,6 +1017,53 @@ oracle 该不该按「下界 + kind 集合」而不是「精确计数」来判�
 
 复现：`NOTDEC_EVM_INLINE=calldata python3 .../agg_abi_params.py`、pattern/compile suite 同上。
 
+### 11.10 oracle 按内联形状重标定（本轮收尾）
+
+机制（三处改动）：
+
+1. runner 新增 `--inline`：把「会随文本站点数增长」的键集中到 `is_site_count_key()`，内联口径下这些键按下界比较
+   （减少=漏识别，增加=重复站点）；结构性键（abi_param 表、function_definition、nonpayable 等）仍然精确比较。
+2. manifest 支持每 case 的 `inline` 覆盖块，只列两种形状下**合法不同**的值，并带 comment 记录 IR 依据。
+3. 新增 ctest：`notdec.evm.solidity_patterns_inline`（`NOTDEC_EVM_INLINE=calldata` + `--inline`，109.8s 通过）。
+
+用两个只读 subagent 逐 case 验证（不是照抄 actual）：
+
+| case | 变化 | 验证结论 |
+| --- | --- | --- |
+| 0031 | 唯一变化的 entry `public__0xba49f371_0x193`：record/annotated/params/typed 由 1/0/0/0 变 2/2/2/2，extra 与 mismatch 消失 | 扁平形状里该 entry 出现 +4、+36 两个绝对头字读（outlined 时读在 helper 里、参数相对、0 注解），严格更优 → 基线化 |
+| abi_decoder_helper_rename_01 | 两个 decoder helper 定义 1→0，calldata.index 1→2 | 调用点 9→7、定义 4→2，两个 body 都在 entry 内；两条注解分别指向 +4/+36 → 正确 → 基线化 |
+| 24601 / 2001 | array_bounds_memory 7→4 / 4→3，同时 array_bounds_calldata 1→4 / 1→2 | 不是漏匹配：outlined 时 bound 是 formal，只能靠 helper 形状证据；内联后 bound 是真实 calldata load，`isCalldataLoad` 先命中，站点一一对应，新 kind 更准确 → 迁移期望 |
+| 1485 | memory_allocation_bounds 2→1、cfg_rewrites 7→6 | 真残余：`private__0x24f4` 常量长度 150 的 guard 折叠成同义反复的 uint64 比较（`icmp ult(add(shl(64,1),-151), -150)`），且 192↔150 的分配证据关联丢失 → 记为已知残余（候选扩展：反向折叠的 uint64 判定 + 常量可求值的 `roundUp(len)+32` 分配证据） |
+
+**验证过程中发现并修掉一个真 bug**（0441）：pre-TR inliner 会把小的 public entry 内联进 dispatcher，
+`SelectorEntryOutliningPass` 随后把该块克隆成 `public__notdec_solidity_selector_inline.body`；
+`isPublicEntryFunction()` 按 `public_` 名字前缀判定，于是这个克隆被当成 entry，`PayabilityGuardPass` 对同一段
+guard 再标一次：`nonpayable_functions` 6→7、abi_return 10→12、payability_guard 18→21。修法是在内联前把所有
+public entry pin 成 `noinline`（两种模式都生效）；修后 0441 的 nonpayable 恢复到 6。
+
+结果：
+
+| 口径 | pattern suite | ABI record==annotated |
+| --- | --- | --- |
+| 默认（outlined，精确比较） | **103/103** | 1858/2316 |
+| 内联（calldata + 下界 + inline 覆盖） | **103/103**（ctest `..._inline` 通过） | **2264/2316** (97.8%) |
+
+内联口径编译预算（记录，不纳入 ratchet）：compile_failures 0、unresolved 289、condition_todo 4647、
+goto 5432、dangling 501、helper_functions 1271、call_sites 2412。goto/TODO 的上升是扁平化重复共享 guard 的
+结构性代价（structurer 侧），`compile-budget.json` 保持 outlined 口径不变；内联口径的预算等 structurer 工作后再定。
+
+复现：
+
+```bash
+# 默认口径（精确比较）
+python3 test/run_evm_solidity_patterns_suite.py --binary build-notdec-nothreads/bin/notdec \\
+  --manifest test/evm/solidity-patterns/manifest.json --project-root . --workdir /tmp/suite-def
+# 内联口径（下界 + inline 覆盖）
+NOTDEC_EVM_INLINE=calldata python3 test/run_evm_solidity_patterns_suite.py --binary build-notdec-nothreads/bin/notdec \\
+  --manifest test/evm/solidity-patterns/manifest.json --project-root . --workdir /tmp/suite-inl --inline
+```
+
+
 
 内联口径编译预算复测：compile_failures 0、unresolved 333、condition_todo 3269、goto 2709、
 dangling 428（helper floors 1339/1301 在内联形状下失效，需要随 oracle 一起重标定）。

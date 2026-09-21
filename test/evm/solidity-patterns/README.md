@@ -22,3 +22,22 @@ ctest --test-dir build -R notdec.evm.solidity_pattern_compile --output-on-failur
 When a change improves a metric, lower the budget in the same commit so the
 improvement is locked in.  Raising a budget requires a concrete reason recorded
 in `logs/`.
+
+## Pattern suite shapes (outlined and flattened)
+
+`notdec.evm.solidity_patterns` runs the outlined IR (no pre-TR inlining) and
+compares every expected count exactly.  `notdec.evm.solidity_patterns_inline`
+runs the same corpus with `NOTDEC_EVM_INLINE=calldata`, where the source-level
+shape is restored, and compares with two adjustments:
+
+- Keys whose count grows with the number of textual sites (`rewrite_marker:*`,
+  `revert_kind:*`, `checked_bounds_kind:*`, `notdec.solidity.*`, ...) are lower
+  bounds: the inliner duplicates the shared bound/revert scaffolding at every
+  call site, so a decrease is a lost recognition and an increase is a duplicated
+  site.  `is_site_count_key()` in the runner is the single place that decides
+  this.
+- A case may carry an `"inline"` block with the expectations that legitimately
+  differ between the shapes (the ABI parameter table of an entry that gains its
+  absolute reads, decoder helpers that are inlined away, a checked-bounds kind
+  that becomes more precise once a formal length is a real calldata load).  Each
+  block carries a comment with the IR evidence for the change.

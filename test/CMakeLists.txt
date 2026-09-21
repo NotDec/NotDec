@@ -55,6 +55,28 @@ function(add_evm_solidity_patterns_suite test_name manifest_relpath)
 	)
 endfunction()
 
+# The flattened shape is the target shape: the pre-type-recovery inliner expands
+# the calldata chains, so site-count markers compare as lower bounds and the
+# per-case "inline" overrides carry the expectations that legitimately differ.
+function(add_evm_solidity_patterns_inline_suite test_name manifest_relpath)
+	add_test(
+		NAME ${test_name}
+		COMMAND
+			${CMAKE_COMMAND} -E env NOTDEC_EVM_INLINE=calldata
+			${Python3_EXECUTABLE}
+			${CMAKE_CURRENT_SOURCE_DIR}/run_evm_solidity_patterns_suite.py
+			--binary
+			$<TARGET_FILE:notdec>
+			--manifest
+			${CMAKE_CURRENT_SOURCE_DIR}/${manifest_relpath}
+			--project-root
+			${PROJECT_SOURCE_DIR}
+			--inline
+			--workdir
+			${CMAKE_CURRENT_BINARY_DIR}/artifacts/${test_name}
+	)
+endfunction()
+
 function(add_evm_solidity_rewrite_suite test_name manifest_relpath)
 	add_test(
 		NAME ${test_name}
@@ -128,6 +150,11 @@ add_lifting_suite(
 
 add_evm_solidity_patterns_suite(
 	notdec.evm.solidity_patterns
+	evm/solidity-patterns/manifest.json
+)
+
+add_evm_solidity_patterns_inline_suite(
+	notdec.evm.solidity_patterns_inline
 	evm/solidity-patterns/manifest.json
 )
 

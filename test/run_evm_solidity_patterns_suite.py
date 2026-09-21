@@ -384,16 +384,96 @@ def count_panic_codes(path: Path) -> dict[str, int]:
     return count_metadata_string_values(path, "notdec.solidity_revert.panic_code")
 
 
+# Keys whose count grows with the number of textually distinct sites.  The
+# pre-type-recovery inliner duplicates the shared bound/revert scaffolding at
+# every inlined call site, so in the flattened shape these counts are lower
+# bounds: a decrease is a lost recognition, an increase is a duplicated site.
+SITE_COUNT_KEY_PREFIXES = (
+    "rewrite_marker:",
+    "rewrite_hidden_",
+    "revert_kind:",
+    "panic_code:",
+    "checked_bounds_kind:",
+    "checked_bounds_semantic_marker:",
+    "checked_bounds_panic_code:",
+    "checked_bounds_marker_payload:",
+    "checked_bounds_skip_",
+    "checked_bounds_skipped_kind:",
+    "exact_marker:",
+    "memory_rewrite_marker:",
+    "memory_consumer_kind:",
+    "memory_copy_write_kind:",
+    "custom_error_arg_count:",
+    "error_string_length:",
+    "custom_error_marker_payload:",
+    "error_string_marker_payload:",
+    "payability_cfg_rewrites",
+    "checked_bounds_cfg_rewrites",
+    "checked_bounds_skip_total",
+    "notdec.solidity.revert",
+    "notdec.solidity.checked_bounds",
+    "notdec.solidity.event",
+    "notdec.solidity.abi_return",
+    "notdec.solidity.payability_guard",
+)
+
+
+def is_site_count_key(key: str) -> bool:
+    return key.startswith(SITE_COUNT_KEY_PREFIXES)
+
+
+def counts_match(
+    expected_counts: dict[str, int],
+    actual_counts: dict[str, int],
+    inline_mode: bool,
+) -> bool:
+    for key in set(expected_counts) | set(actual_counts):
+        expected = expected_counts.get(key, 0)
+        actual = actual_counts.get(key, 0)
+        if inline_mode and is_site_count_key(key):
+            if actual < expected:
+                return False
+            continue
+        if actual != expected:
+            return False
+    return True
+
+
+def apply_inline_overrides(case: dict, overrides: dict) -> None:
+    """Merge the flattened-shape expectations over the outlined baseline.
+
+    Only the fields whose value legitimately differs between the two shapes are
+    listed per case (abi_param metadata, helper definitions that are inlined
+    away, the nonpayable set).  Nested per-kind dicts replace the whole kind so
+    a value that no longer exists is not left behind.
+    """
+    for key, value in overrides.items():
+        if key == "expected_metadata_string_values" and isinstance(value, dict):
+            merged = dict(case.get(key, {}))
+            merged.update(value)
+            case[key] = merged
+        elif isinstance(value, dict) and isinstance(case.get(key), dict):
+            case[key] = {**case[key], **value}
+        else:
+            case[key] = value
+
+
 def write_compare_report(
     *,
     report_path: Path,
     expected_counts: dict[str, int],
     actual_counts: dict[str, int],
+    inline_mode: bool = False,
 ) -> bool:
-    passed = actual_counts == expected_counts
+    passed = counts_match(expected_counts, actual_counts, inline_mode)
     lines = ["PASS" if passed else "FAIL"]
     for key in sorted(set(expected_counts) | set(actual_counts)):
-        lines.append(f"  expected_{key}={expected_counts.get(key, 0)}")
+        suffix = (
+            " (>=)"
+            if inline_mode and is_site_count_key(key)
+            else ""
+        )
+        lines.append(f"  expected_{key}={expected_counts.get(key, 0)}{suffix}")
         lines.append(f"  actual_{key}={actual_counts.get(key, 0)}")
     report_path.write_text("\n".join(lines) + "\n")
     return passed
@@ -405,6 +485,15 @@ def main() -> int:
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--workdir", required=True)
+    parser.add_argument(
+        "--inline",
+        action="store_true",
+        help=(
+            "Expect the flattened (pre-type-recovery inlined) shape: site-count "
+            "keys compare as lower bounds and each case may carry an 'inline' "
+            "override block with the expectations that legitimately differ."
+        ),
+    )
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest).resolve()
@@ -437,6 +526,8 @@ def main() -> int:
         return 1
 
     for case in manifest["cases"]:
+        if args.inline:
+            apply_inline_overrides(case, case.get("inline", {}))
         name = case["name"]
         case_workdir = workdir / name
         case_workdir.mkdir(parents=True, exist_ok=True)
@@ -793,6 +884,7 @@ def main() -> int:
                 report_path=compare_txt,
                 expected_counts=expected_counts,
                 actual_counts=actual_counts,
+                inline_mode=args.inline,
             )
             log_sections.append(compare_txt.read_text())
             case_ok = compare_ok

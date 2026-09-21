@@ -95,6 +95,23 @@
         "abi_decode_word_from_calldata__0x100": 1,
         "abi_decode_calldata_array_head__0x200": 1,
         "calldata_array_index_access__0x300": 1
+      },
+      "inline": {
+        "comment": "flattened: the two decoder helpers are inlined into the entry, so their definitions are 0 and both absolute head reads (+4/+36) are annotated; validated on pre-TR IR",
+        "expected_metadata_counts": {
+          "notdec.solidity.calldata.index": 2
+        },
+        "expected_metadata_string_values": {
+          "notdec.solidity.calldata.index": {
+            "0": 1,
+            "1": 1
+          }
+        },
+        "expected_function_definitions": {
+          "abi_decode_word_from_calldata__0x100": 0,
+          "abi_decode_calldata_array_head__0x200": 0,
+          "calldata_array_index_access__0x300": 1
+        }
       }
     },
     {
@@ -1682,7 +1699,18 @@
         "notdec_solidity_rewrite_storage_bytes_encoding": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 36
+      "expected_checked_bounds_cfg_rewrites": 36,
+      "inline": {
+        "comment": "flattened: one guard's formal length becomes a real calldata load, reclassified array_bounds_memory -> array_bounds_calldata",
+        "expected_checked_bounds_kinds": {
+          "array_bounds_memory": 3,
+          "array_bounds_calldata": 2
+        },
+        "expected_checked_bounds_semantic_markers": {
+          "notdec_solidity_rewrite_array_bounds_memory": 3,
+          "notdec_solidity_rewrite_array_bounds_calldata": 2
+        }
+      }
     },
     {
       "name": "0189_19493609_3c0627c9e0_9d16fec0a1c2",
@@ -2748,7 +2776,17 @@
         "notdec_solidity_rewrite_checked_sub": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 7
+      "expected_checked_bounds_cfg_rewrites": 7,
+      "inline": {
+        "comment": "flattened residual: the private__0x24f4 guard with constant length 150 folds to a tautological uint64 check (icmp ult(add(shl(64,1),-151), -150)) and no longer matches memory_allocation_bounds; kind 1 and cfg rewrites 6 are recorded, candidate matcher extension noted in the log",
+        "expected_checked_bounds_kinds": {
+          "memory_allocation_bounds": 1
+        },
+        "expected_checked_bounds_semantic_markers": {
+          "notdec_solidity_rewrite_memory_allocation_bounds": 1
+        },
+        "expected_checked_bounds_cfg_rewrites": 6
+      }
     },
     {
       "name": "1847_19507643_148f68d102_07c7230a7676",
@@ -3450,6 +3488,34 @@
         "notdec.solidity.abi_param.missing": {},
         "notdec.solidity.abi_param.extra": {
           "0": 1
+        }
+      },
+      "inline": {
+        "comment": "flattened: public__0xba49f371_0x193 gains its two absolute head reads, so record/annotated/params/typed = 2 and extra/mismatch disappear (validated on pre-TR IR; strictly better than the outlined table)",
+        "expected_metadata_string_values": {
+          "notdec.solidity.abi_param.record": {
+            "0": 6,
+            "1": 4,
+            "2": 1
+          },
+          "notdec.solidity.abi_param.annotated": {
+            "0": 6,
+            "1": 4,
+            "2": 1
+          },
+          "notdec.solidity.abi_param.params": {
+            "0": 6,
+            "1": 4,
+            "2": 1
+          },
+          "notdec.solidity.abi_param.typed": {
+            "0": 6,
+            "1": 4,
+            "2": 1
+          },
+          "notdec.solidity.abi_param.missing": {},
+          "notdec.solidity.abi_param.extra": {},
+          "notdec.solidity.abi_param.mismatch": {}
         }
       }
     },
@@ -4486,7 +4552,18 @@
       "expected_checked_bounds_skip_reasons": {
         "unrecognized_operands": 0
       },
-      "expected_checked_bounds_cfg_rewrites": 17
+      "expected_checked_bounds_cfg_rewrites": 17,
+      "inline": {
+        "comment": "flattened: three guards bound a real calldata load after inlining, so they reclassify array_bounds_memory -> array_bounds_calldata site-for-site",
+        "expected_checked_bounds_kinds": {
+          "array_bounds_memory": 4,
+          "array_bounds_calldata": 4
+        },
+        "expected_checked_bounds_semantic_markers": {
+          "notdec_solidity_rewrite_array_bounds_memory": 4,
+          "notdec_solidity_rewrite_array_bounds_calldata": 4
+        }
+      }
     },
     {
       "name": "24590_19760322_8a0f96cd7a_ecc07eeb03e3",
