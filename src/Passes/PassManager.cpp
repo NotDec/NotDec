@@ -388,6 +388,13 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       // functions the forward compiler kept instead of inlining.  Recording
       // their summaries before any canonicalization keeps the lifted shape.
       MPM.addPass(evm::EvmYulFunctionSummaryPass());
+      // Restore the source-level shape before anything else matches on it: the
+      // decompiled subroutines exist only because the forward compiler's Yul
+      // inliner kept them.  Expanding them here means every later EVM pass --
+      // entry outlining, the per-entry calldata view, the calldata.index
+      // annotations -- sees the absolute offsets the original Solidity had,
+      // which is what the ABI parameter recovery needs.
+      MPM.addPass(evm::EvmHelperInliningPass());
       // EVM inputs still benefit from LLVM's local canonicalization before
       // Solidity/EVM-specific matchers inspect the IR. Keep this target-local
       // pipeline separate from the Wasm pre-TR passes because those still

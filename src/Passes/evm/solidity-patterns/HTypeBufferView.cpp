@@ -106,6 +106,14 @@ HTypeBufferView getHTypeBufferView(llvm2c::HTypeResult &HTypes, Value *Base,
 
 HTypeBufferView getHTypeValueBufferView(llvm2c::HTypeResult &HTypes,
                                         Value *Base) {
+  // The recovered-type map keys a constant by the user and operand index that
+  // reference it (UConstant), so an anonymous constant has no key here.  Code
+  // inlining folds address arithmetic into such constants (a folded inttoptr,
+  // for example); report the unknown view instead of asserting on the missing
+  // use site.
+  if (Base == nullptr || (isa<Constant>(Base) && !isa<GlobalValue>(Base))) {
+    return makeHTypeBufferView(nullptr);
+  }
   ast::HType *Ty =
       HTypes.getDefaultValueType(getExtValuePtr(Base, nullptr));
   return makeHTypeBufferView(Ty);

@@ -88,6 +88,17 @@ struct AbiDecodeResultPass : llvm::PassInfoMixin<AbiDecodeResultPass> {
   static bool isRequired() { return true; }
 };
 
+// Expands the decompiled Yul-function helpers at their call sites, so the
+// recovered calldata record sees the absolute per-entry offsets the forward
+// compiler's inliner would have produced.  Recursive cycles stay outlined.
+// Behind NOTDEC_EVM_INLINE until the calibrated pattern oracles follow.
+struct EvmHelperInliningPass
+    : llvm::PassInfoMixin<EvmHelperInliningPass> {
+  llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
+
+  static bool isRequired() { return true; }
+};
+
 // Rewrites low-level EVM storage reads/writes into composable storage helper
 // calls after MLsub has recovered the contract-global storage HType.  The pass
 // keeps the address expression rules local and does not create a separate

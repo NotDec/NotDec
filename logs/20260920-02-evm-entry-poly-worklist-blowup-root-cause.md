@@ -838,3 +838,102 @@ rewrite 6.5s / source 2.6s）。诊断代码在热路径上只有一次 `if (!En
 `notdec.evm.solidity_rewrite` **6.1s** 通过（对比默认 118.4s / 6.5s）；103 个 case 的
 abi_param 聚合从 101.8s 降到 17.7s。`notdec.evm.solidity_patterns` 未在该口径下跑：
 它的 `0011/0009/0031` oracle 是按"全标 helper"标定的，换策略需要同步更新 expected。
+
+## 11. 全量内联落地（本轮）：位置、策略、后端修复
+
+### 11.1 实现
+
+| 项 | 内容 |
+| --- | --- |
+| 新 pass | `src/Passes/evm/solidity-patterns/EvmHelperInliningPass.cpp`（`include/notdec/Passes/evm/SolidityPatterns.h` 声明） |
+| 开关 | `NOTDEC_EVM_INLINE=1` 打开；默认关（等 §11.6 的 oracle 重标定后再翻默认） |
+| 位置 | EVM 段最前：`EvmYulFunctionSummaryPass` 之后、`buildFunctionOptimizations` 之前 |
+| 机制 | 内部跑 LLVM `ModuleInlinerWrapperPass`（LLVM 默认 inline 代价模型），随后删掉不再被引用的 local 定义 |
+
+### 11.2 位置实验（决定性）
+
+| 口径 | entries | record==annotated | record> | record< |
+| --- | --- | --- | --- | --- |
+| 基线（无内联，view 口径） | 2316 | 1858 | 150 | 308 |
+| 晚内联（`AbiDecodeResultPass` 之后） | 2277 | 1634 | 641 | 2 |
+| **早内联（本轮）** | 2325 | **2245** | 75 | 5 |
+| 外部 `opt -passes=inline` 预内联输入 | 2325 | 2245 | 75 | 5 |
+
+结论：内联必须发生在 `SelectorEntryOutliningPass`、per-entry `notdec_evm_calldata_view`、
+`notdec.solidity.calldata.index` 注解之前。晚内联时 helper 的偏移已经以"形式参数相对"的形式
+被注解，展开后 ABI 记录反而比基线更差（annotated 全塌到 arg0，record 多出 641 个非头部字段）；
+早内联时每个 entry 直接看到绝对常量偏移，record/annotated 几乎一致（97.7% exact）。
+
+### 11.3 策略：不能"无条件展开"
+
+第一版 pass 无脑展开所有非递归调用（SCC 自底向上），结果把 structurer 打爆：
+`condition_todo 13953`、`goto 18226`（实验 A 是 3269 / 2709）。回看实验 A 的脚本
+（`logs/artifacts/20260920-helper-inlining/agg_inline.py`）才发现它用的是裸 `opt -passes=inline`，即 **LLVM 默认代价模型**，
+展开后仍留 173 个 helper 定义；而"展开所有调用"比它激进得多。改成
+`ModuleInlinerWrapperPass` 后，ABI 与 pattern/compile 数字与实验 A **逐项一致**。
+
+> 教训：§6.12/§6.13 里"全量内联"的参照物是 forward compiler 的 FullInliner 判断
+> （单次使用、体小、常量实参），不是"把所有调用都展开"。
+
+### 11.4 崩溃修复（case 0651）
+
+`HTypeBufferView.cpp::getHTypeValueBufferView` 用 `getExtValuePtr(Base, nullptr)` 查类型，
+而 `canonicalizeExtValue` 要求常量必须带 user/operand 键（UConstant）；内联会把地址算术
+折成匿名常量（如折掉的 inttoptr），于是断言触发。改为对匿名常量返回 unknown view
+（`makeHTypeBufferView(nullptr)`）。0651 从 rc=-6 变为正常输出。
+
+### 11.5 后端 4 类 solc 错误（24 例 → 0）
+
+| 症状（solc） | 例 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| `Undeclared identifier`（`private__0x1cab_0x1cab(...)` 等） | 0457/0459/0725/0740/24541/24574/24612/25524 | `Reader.cpp` 的 emittable 定点循环在 `Emittable` 变空退出时没有清 `Helpers`，entry 仍按"helper 存在"渲染调用点，而定义已被丢弃 | 退出前 `Helpers.clear()`，调用点回到 `0 /* TODO */` |
+| `return 0 ... bool` | 0189/0207/0334/0679/1485/... | `wordReturnExpr` 对 bool 返回类型直接返回占位符；`0 /* TODO */` 是 int_const，不是 bool | 未解析值加 `!= 0`，保持 bool 类型且保留调试名 |
+| event 参数 `bool -> uint256` | 0032/0637/1490/1915 | 泛型事件声明把每个参数都定为 `uint256`，而 bool 值以 `x != 0` 传入 | uint256 参数位置对 bool 值做 `cond ? 1 : 0` |
+| `Explicit type conversion not allowed from "uint256" to "int48"` | 24612 | `evm_signextend` 直接发 `int48(word)`；Solidity 只允许同宽或同符号的显式转换 | 改为 `intN(int256(wordCastAddressExpr(x)))` |
+
+修复后 `compile_failures = 0`（此前 24）。三条后端修复都在
+`external/NotDec-llvm2c`（`lib/Solidity/Reader.cpp`、`lib/Solidity/BodyBuilder.cpp`），
+按子模块先行惯例提交。
+
+### 11.6 内联口径下仍存在的差距（下一步）
+
+`NOTDEC_EVM_INLINE=1` 现状（103 case）：
+
+| 指标 | 基线 | 内联 | 预算 |
+| --- | --- | --- | --- |
+| compile_failures | 0 | **0** | 0 |
+| unresolved_value | 264 | 333 | 264 |
+| condition_todo | 729 | 3269 | 729 |
+| goto | 424 | 2709 | 424 |
+| real_jump | 343 | 2253 | 343 |
+| dangling_goto | 69 | 428 | 69 |
+| helper_functions / call_sites | 1339 / 1301 | 173 / 270 | floor 失效（helper 已被内联掉，floor 需重标定） |
+| pattern suite | 103/103 | **19/103** | — |
+
+pattern suite 的 84 个失败分两类：
+- 47 例是**纯多标**（重复）：共享的 revert/bounds 检查在每个调用点各标一次，
+  `notdec.solidity.revert` 等精确计数 oracle 必然失败（例：0029 的 revert 9 → 234）。
+- 37 例有少标，按家族：`storage_byte_array_length_bounds` 12、
+  `panic_code:18`/`checked_div` 11/10、`checked_sub` 8、`revert_kind:error_string` 8、
+  `checked_mul` 5、`abi_return` 5、`checked_bounds_cfg_rewrites` 8。
+  这些是 matcher 仍假设"outlined helper 调用形状"（`isPrivateHelperCall` 门、helper 实参证据、
+  SuccessBlock 关联）导致的，属于要修的真实覆盖损失。
+
+`checked_bounds_audit` 在内联口径下仍然 PASS（rewrite_expected == rewrite_markers == 4954），
+说明 rewrite 层自洽；失败集中在**每 case 精确计数**的 oracle 与上述少标家族。
+
+### 11.7 复现命令
+
+```bash
+# ABI 聚合（inline 口径）
+NOTDEC_EVM_INLINE=1 python3 logs/artifacts/20260920-worklist-24259/agg_abi_params.py
+# pattern suite
+NOTDEC_EVM_INLINE=1 python3 test/run_evm_solidity_patterns_suite.py --binary \
+  build-notdec-nothreads/bin/notdec --manifest test/evm/solidity-patterns/manifest.json \
+  --project-root . --workdir /tmp/suite-fix
+# 编译预算
+NOTDEC_EVM_INLINE=1 python3 test/run_evm_solidity_pattern_compile_suite.py --binary \
+  build-notdec-nothreads/bin/notdec --cases test/evm/solidity-patterns/cases \
+  --budget test/evm/solidity-patterns/compile-budget.json --project-root . \
+  --workdir /tmp/cb-fix --solc /sn640/EthIR/source/solcv8.25
+```
