@@ -1,11 +1,11 @@
 {
-  "comment": "Ratchet budgets for the whole-pattern-corpus Solidity compile suite. 'condition_todo_occurrences' counts every 'false /* TODO' occurrence (if/while/require contexts). Lower a budget when a change improves the metric; do not raise one without recording why in logs/. RAISED for the flattened default (NOTDEC_EVM_INLINE=calldata): the calldata chains are expanded before type recovery, so the shared bound/revert scaffolding is duplicated per call site and the structurer emits more gotos/TODOs. The raise and the outlined-shape numbers are recorded in logs/20260920-02-evm-entry-poly-worklist-blowup-root-cause.md section 11.11. The helper floors are re-anchored to the flattened counts; the outlined-shape floors were 1339/1301. LOWERED on 2026-09-22 after the Phoenix reduceSequenceOnce continuation fix (logs/20260922-02-structurer-terminal-arm-join-fix.md): goto 5437->3640, real jumps 4604->3175, dangling 501->55, condition TODO 4647->4303, and the helper_call_sites floor 2412->2408 because structured bodies no longer repeat helper call statements across goto copies.",
+  "comment": "Ratchet budgets for the whole-pattern-corpus Solidity compile suite. 'condition_todo_occurrences' counts every 'false /* TODO' occurrence (if/while/require contexts). Lower a budget when a change improves the metric; do not raise one without recording why in logs/. RAISED for the flattened default (NOTDEC_EVM_INLINE=calldata): the calldata chains are expanded before type recovery, so the shared bound/revert scaffolding is duplicated per call site and the structurer emits more gotos/TODOs. The raise and the outlined-shape numbers are recorded in logs/20260920-02-evm-entry-poly-worklist-blowup-root-cause.md section 11.11. The helper floors are re-anchored to the flattened counts; the outlined-shape floors were 1339/1301. LOWERED on 2026-09-22 after the Phoenix reduceSequenceOnce continuation fix (logs/20260922-02-structurer-terminal-arm-join-fix.md): goto 5437->3640, real jumps 4604->3175, dangling 501->55, condition TODO 4647->4303, and the helper_call_sites floor 2412->2408 because structured bodies no longer repeat helper call statements across goto copies. RE-ANCHORED on 2026-09-22 after the entry-continuation fix (logs/20260922-03-entry-continuation-and-block-order-fix.md): the wide continuation rule plus entry-first block order in collapseNodes removes the goto flood for good (goto 3640->1787, real jumps 3175->1695, condition TODO 4303->4078, helper_call_sites 2408->2442), so those budgets are lowered to the new actuals. The two raised budgets are direct consequences of no longer dropping the function entry node: dangling 55->58 because the additionally recovered blocks include guard-revert branches whose '// block_N:' label the renderer folds into require(), and unresolved 289->297 because the previously lost entry-block statements (which carry the bound checks) are rendered again.",
   "max_compile_failures": 0,
-  "max_unresolved_value_occurrences": 289,
-  "max_condition_todo_occurrences": 4303,
-  "max_goto_occurrences": 3640,
-  "max_real_jump_occurrences": 3175,
-  "max_dangling_goto_occurrences": 55,
+  "max_unresolved_value_occurrences": 297,
+  "max_condition_todo_occurrences": 4078,
+  "max_goto_occurrences": 1787,
+  "max_real_jump_occurrences": 1695,
+  "max_dangling_goto_occurrences": 58,
   "min_helper_functions": 1276,
   "min_helper_call_sites": 2408
 }
