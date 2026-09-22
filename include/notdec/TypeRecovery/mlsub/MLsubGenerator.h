@@ -55,6 +55,11 @@ using binarysub::SimpleType;
 // ExtValuePtr without giving the cache a lifetime beyond the LLVM module run.
 using ExtValueLabelCache = std::map<ExtValuePtr, std::string>;
 
+// Stack-protector canary helpers (FS/GS segment reads). A store of such a
+// value into a pointer is ABI frame padding, not a source-level object field.
+bool isOpaqueSegmentReadValue(const llvm::Value *V);
+bool isStackCanarySlotValue(const ExtValuePtr &Slot);
+
 // genTypes phases are sequential within one SCC. Keeping only microsecond
 // counters lets solveAndLowerTypes() aggregate every SCC without retaining any
 // type graph or debug-output state.
@@ -189,6 +194,18 @@ struct EVMStoreEvidence {
 struct EVMStoreRecords {
   std::map<ExtValuePtr, std::vector<RecordedStore>> StoresByAddr;
 };
+
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+// One origin id space per recovery.  instantiate_type_graph copies types (and
+// the origins carried on them) from one SCC into another, so a per-generator
+// table would let a foreign id be read against the wrong kind table.  The
+// description/kind tables are shared, so a type instantiated into another SCC
+// never carries an id that would be read against the wrong table.
+struct BoundOriginTable {
+  std::vector<std::string> Descriptions;
+  std::vector<std::uint8_t> Kinds;
+};
+#endif
 
 struct ConstraintsGenerator {
   long PointerSize = 0;
@@ -536,12 +553,31 @@ struct ConstraintsGenerator {
     return N;
   }
 
+  // Class of the IR operation that introduced a bound origin.  Filters match on
+  // this class, so extending the matcher set does not touch the layout side.
+  enum class BoundOriginKind : std::uint8_t {
+    Access = 0,
+    Gep = 1,
+    PtrAdd = 2,
+    ConstAddr = 3,
+    // Recognized bulk memory operation: memcpy family, or an inlined copy loop
+    // whose pointer-add run covers a contiguous span.
+    BulkCopy = 4,
+    OpaqueHelper = 5,
+  };
 #ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
-  // Bound-origin attribution (debug).  Every constraint that carries an origin
-  // gets one id here; the description table is what the dump prints next to
-  // the id, so a surviving bound can be traced back to the access that
-  // introduced it.
-  std::vector<std::string> BoundOriginDescriptions;
+  // Origin id space shared by every SCC generator of this recovery (see
+  // BoundOriginTable).  Lazy so a generator built outside an MLsubRecovery
+  // still has a usable table.
+  std::shared_ptr<BoundOriginTable> BoundOrigins;
+  BoundOriginTable &boundOriginTable() {
+    if (!BoundOrigins) {
+      BoundOrigins = std::make_shared<BoundOriginTable>();
+    }
+    return *BoundOrigins;
+  }
+  // Origin ids attached to the bounds this generator's current addSubtype()
+  // carries.  Descriptions/kinds are indexed by the shared id space.
   std::shared_ptr<const binarysub::SmallIdSet> CurrentBoundOrigins;
 #endif
 
@@ -549,13 +585,17 @@ struct ConstraintsGenerator {
   // travels to binarysub through ConstraintContext::boundOrigins.
   class BoundOriginScope {
   public:
-    BoundOriginScope(ConstraintsGenerator &CG, llvm::StringRef Description)
+    BoundOriginScope(ConstraintsGenerator &CG, llvm::StringRef Description,
+                     BoundOriginKind Kind = BoundOriginKind::Access)
         : CG(CG) {
 #ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
       Previous = std::move(CG.CurrentBoundOrigins);
       if (!Description.empty()) {
-        auto Id = static_cast<std::uint32_t>(CG.BoundOriginDescriptions.size());
-        CG.BoundOriginDescriptions.push_back(Description.str());
+        auto &Table = CG.boundOriginTable();
+        auto Id = static_cast<std::uint32_t>(Table.Descriptions.size());
+        Table.Descriptions.push_back(Description.str());
+        Table.Kinds.push_back(static_cast<std::uint8_t>(Kind));
+        CurrentId = Id;
         CG.CurrentBoundOrigins =
             std::make_shared<const binarysub::SmallIdSet>(
                 binarysub::SmallIdSet{Id});
@@ -563,6 +603,7 @@ struct ConstraintsGenerator {
 #else
       (void)CG;
       (void)Description;
+      (void)Kind;
 #endif
     }
     ~BoundOriginScope() {
@@ -573,10 +614,22 @@ struct ConstraintsGenerator {
     BoundOriginScope(const BoundOriginScope &) = delete;
     BoundOriginScope &operator=(const BoundOriginScope &) = delete;
 
+    // Origin id allocated by this scope (kNoOriginId when nothing was
+    // attributed); the caller records extra evidence for it.
+    std::uint32_t originId() const {
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+      return CurrentId;
+#else
+      return kNoOriginId;
+#endif
+    }
+    static constexpr std::uint32_t kNoOriginId = 0xFFFFFFFFu;
+
   private:
     ConstraintsGenerator &CG;
 #ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
     std::shared_ptr<const binarysub::SmallIdSet> Previous;
+    std::uint32_t CurrentId = kNoOriginId;
 #endif
   };
 
@@ -662,12 +715,30 @@ struct ConstraintsGenerator {
     if (PointerSize == 256 && Off.hasNegativeBaseOffset()) {
       return;
     }
+    // A stack-canary slot (the address that stores readfsqword(0x28)) is frame
+    // padding, not a member of whatever object the frame is later merged into.
+    // Keep the P/N relation above; do not emit an object field for it.
+    if (isStackCanarySlotValue(result)) {
+      return;
+    }
     std::vector<std::pair<std::string, SimpleType>> fields;
     fields.emplace_back(Off.str(), ResultNode);
     // The field cell below is this constraint's field evidence; name its
     // origin so the layout can be traced back to the access that produced it.
-    BoundOriginScope OriginScope(*this, Origin);
-    addSubtype(BaseNode, binarysub::make_record(std::move(fields)));
+    const auto Kind = Origin.starts_with("gep:") ? BoundOriginKind::Gep
+                                                   : BoundOriginKind::PtrAdd;
+    BoundOriginScope OriginScope(*this, Origin, Kind);
+    // Stamp the field entry itself (not only the bound edge) so the origin
+    // survives into CompactType/UType even when the variables behind the
+    // field are dissolved during solving.
+    std::vector<std::vector<std::uint32_t>> FieldOrigins;
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+    if (OriginScope.originId() != BoundOriginScope::kNoOriginId) {
+      FieldOrigins.push_back({OriginScope.originId()});
+    }
+#endif
+    addSubtype(BaseNode, binarysub::make_record(std::move(fields),
+                                                std::move(FieldOrigins)));
     addSubtype(ResultNode, binarysub::make_record({}));
   }
 
@@ -771,6 +842,12 @@ class MLsubRecovery {
   unsigned int PointerSize = Mod.getDataLayout().getPointerSizeInBits();
 
   AllGraphs AG;
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+  // One origin id space for every SCC generator of this recovery; the kinds
+  // and descriptions stay valid when a type is instantiated across SCCs.
+  std::shared_ptr<BoundOriginTable> RecoveryBoundOrigins =
+      std::make_shared<BoundOriginTable>();
+#endif
   std::unique_ptr<llvm::CallGraph> CallG;
   std::optional<llvm::raw_fd_ostream> SCCsCatalog;
   std::unique_ptr<std::ofstream> BinarysubTraceFile;

@@ -3444,6 +3444,69 @@ llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
 
 } // namespace
 
+bool isOpaqueSegmentReadValue(const llvm::Value *V) {
+  if (V == nullptr) {
+    return false;
+  }
+  const llvm::Value *Val = V;
+  while (true) {
+    if (const auto *CE = llvm::dyn_cast<llvm::CastInst>(Val)) {
+      Val = CE->getOperand(0);
+      continue;
+    }
+    if (const auto *CE = llvm::dyn_cast<llvm::FreezeInst>(Val)) {
+      Val = CE->getOperand(0);
+      continue;
+    }
+    if (const auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(Val);
+        CE != nullptr && CE->isCast()) {
+      Val = CE->getOperand(0);
+      continue;
+    }
+    break;
+  }
+  const auto *CB = llvm::dyn_cast<llvm::CallBase>(Val);
+  if (CB == nullptr) {
+    return false;
+  }
+  const llvm::Function *Callee = CB->getCalledFunction();
+  if (Callee == nullptr) {
+    Callee = llvm::dyn_cast<llvm::Function>(
+        CB->getCalledOperand()->stripPointerCasts());
+  }
+  if (Callee == nullptr) {
+    return false;
+  }
+  const auto Name = Callee->getName();
+  // microsub2 models FS/GS reads as opaque helpers; GCC stack canaries use
+  // readfsqword(0x28) on x86_64 (and the dword/qword siblings).
+  return Name.contains("readfsqword") || Name.contains("readfsdword") ||
+         Name.contains("readgsqword") || Name.contains("readgsdword");
+}
+
+bool isStackCanarySlotValue(const ExtValuePtr &Slot) {
+  const llvm::Value *V = nullptr;
+  if (const auto *SV = std::get_if<llvm::Value *>(&Slot)) {
+    V = *SV;
+  } else if (const auto *SO = std::get_if<StackObject>(&Slot)) {
+    V = SO->Allocator;
+  }
+  if (V == nullptr) {
+    return false;
+  }
+  const llvm::Value *SlotVal = V->stripPointerCasts();
+  for (const llvm::User *U : SlotVal->users()) {
+    const auto *SI = llvm::dyn_cast<llvm::StoreInst>(U);
+    if (SI == nullptr || SI->getPointerOperand() != SlotVal) {
+      continue;
+    }
+    if (isOpaqueSegmentReadValue(SI->getValueOperand())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void ConstraintsGenerator::emitMappingTrace(llvm::StringRef Event,
                                             ExtValuePtr Val,
                                             const SimpleType &Ty) {
@@ -5946,7 +6009,21 @@ void ConstraintsGenerator::addConstantMemoryField(ExtValuePtr Addr,
   }
   std::vector<std::pair<std::string, SimpleType>> Fields;
   Fields.emplace_back(OffsetRange{.offset = *Offset}.str(), ValueTy);
-  addSubtype(MemoryType, binarysub::make_record(std::move(Fields)));
+  std::vector<std::vector<std::uint32_t>> FieldOrigins;
+  {
+    ConstraintsGenerator::BoundOriginScope ConstOrigin(
+        *this, "constaddr:" + toStableString(Addr) + "@" +
+                   std::to_string(*Offset),
+        ConstraintsGenerator::BoundOriginKind::ConstAddr);
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+    if (ConstOrigin.originId() !=
+        ConstraintsGenerator::BoundOriginScope::kNoOriginId) {
+      FieldOrigins.push_back({ConstOrigin.originId()});
+    }
+#endif
+    addSubtype(MemoryType, binarysub::make_record(std::move(Fields),
+                                                  std::move(FieldOrigins)));
+  }
 }
 
 SimpleType ConstraintsGenerator::getOrCreateStorageField(
@@ -6953,6 +7030,9 @@ void MLsubRecovery::bottomUpPhase() {
         Data.SCCName, PointerSize, Data.SCCSet, MemoryType, StorageType,
         &StorageFields, Data.level, BinarysubTraceFile.get(), MergeEval,
         EnableStructPtrLoadStoreMerge, std::move(OpaqueBodies));
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+    Data.Generator->BoundOrigins = RecoveryBoundOrigins;
+#endif
     auto &G = Data.Generator;
     // insert ContraVariantValues
     if (Ind == 0) {
@@ -7282,6 +7362,161 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   // Create TypeBuilder context and builder.  Keep this SCC-local until cross-SCC
   // type sharing has a dedicated design.
   TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, notdec::getWorkDirOpt());
+#ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
+  // Field-level traceability: map each original variable id back to the bound
+  // origins the solver recorded on it, so TypeBuilder can explain a field.
+  // Two consumers share the lookup: the human-readable trace
+  // (NOTDEC_FIELD_ORIGINS) and the layout-side operation filter
+  // (BINARYSUB_FILTER_BULK_ORIGIN_FIELDS).  The origins are the per-edge sets
+  // the solver keeps on VariableState bounds; reading them on demand keeps
+  // this O(#variables).
+  const bool WantOriginTrace = std::getenv("NOTDEC_FIELD_ORIGINS") != nullptr;
+  const char *BulkPolicyEnv =
+      std::getenv("BINARYSUB_FILTER_BULK_ORIGIN_FIELDS");
+  const bool WantBulkPolicy =
+      BulkPolicyEnv != nullptr && BulkPolicyEnv[0] != '\0' &&
+      BulkPolicyEnv[0] != '0';
+  if (WantOriginTrace || WantBulkPolicy) {
+    using VarStatePtr = decltype(std::declval<SimpleType>()
+                                 ->getAsVariableState());
+    auto VarById =
+        std::make_shared<std::map<std::uint32_t, VarStatePtr>>();
+    for (const auto &[Val, Node] : V2N) {
+      auto *VS = Node ? Node->getAsVariableState() : nullptr;
+      if (VS != nullptr) {
+        (*VarById)[VS->id] = VS;
+      }
+    }
+    const std::vector<std::string> *Descriptions =
+        &boundOriginTable().Descriptions;
+    if (WantOriginTrace) {
+      TBCtx.BoundOriginLookup =
+          [VarById, Descriptions](
+              const std::string & /*FieldKey*/,
+              const std::vector<std::uint32_t> &VarIds,
+              std::vector<std::string> &Out) {
+            for (auto Id : VarIds) {
+              auto It = VarById->find(Id);
+              if (It == VarById->end()) {
+                continue;
+              }
+              for (const auto &Set : It->second->upperBoundOrigins) {
+                if (!Set) {
+                  continue;
+                }
+                for (auto OriginId : *Set) {
+                  if (OriginId < Descriptions->size()) {
+                    Out.push_back((*Descriptions)[OriginId]);
+                  }
+                }
+              }
+              for (const auto &Set : It->second->lowerBoundOrigins) {
+                if (!Set) {
+                  continue;
+                }
+                for (auto OriginId : *Set) {
+                  if (OriginId < Descriptions->size()) {
+                    Out.push_back((*Descriptions)[OriginId]);
+                  }
+                }
+              }
+            }
+            std::sort(Out.begin(), Out.end());
+            Out.erase(std::unique(Out.begin(), Out.end()), Out.end());
+          };
+      // The backend prints the field-level origins (not only the value-side
+      // ones), so hand it the id -> description table.
+      TBCtx.BoundOriginDescriptions =
+          std::make_shared<const std::vector<std::string>>(*Descriptions);
+    }
+    if (WantBulkPolicy) {
+      // Machine-readable origin ids + classes: the layout side matches on the
+      // class, so no description strings are built for the filter.
+      TBCtx.BoundOriginKinds =
+          std::make_shared<const std::vector<std::uint8_t>>(
+              boundOriginTable().Kinds);
+      TBCtx.BoundOriginIdLookup =
+          [VarById](const std::string & /*FieldKey*/,
+                    const std::vector<std::uint32_t> &VarIds,
+                    std::vector<std::uint32_t> &OutIds) {
+            auto Push = [&](const std::shared_ptr<const binarysub::SmallIdSet>
+                            &Set) {
+              if (!Set) {
+                return;
+              }
+              for (auto OriginId : *Set) {
+                OutIds.push_back(OriginId);
+              }
+            };
+            for (auto Id : VarIds) {
+              auto It = VarById->find(Id);
+              if (It == VarById->end()) {
+                continue;
+              }
+              for (const auto &Set : It->second->upperBoundOrigins) {
+                Push(Set);
+              }
+              for (const auto &Set : It->second->lowerBoundOrigins) {
+                Push(Set);
+              }
+            }
+          };
+    }
+  }
+#ifdef BINARYSUB_ENABLE_FIELD_ORIGINS
+  // Field-origin coverage: how many record fields still carry a stamped
+  // origin after solving/merging.  Gated so it costs nothing unless asked for.
+  if (std::getenv("NOTDEC_FIELD_ORIGIN_DIAG") != nullptr) {
+    std::set<const binarysub::TypeNode *> Seen;
+    std::size_t Records = 0;
+    std::size_t Fields = 0;
+    std::size_t FieldsWithOrigins = 0;
+    std::function<void(const SimpleType &)> Walk = [&](const SimpleType &Ty) {
+      if (!Ty || !Seen.insert(Ty.get()).second) {
+        return;
+      }
+      if (auto *Mem = Ty->getAsTMemObject()) {
+        ++Records;
+        for (std::size_t I = 0; I < Mem->fields.size(); ++I) {
+          ++Fields;
+          if (I < Mem->fieldOrigins.size() && !Mem->fieldOrigins[I].empty()) {
+            ++FieldsWithOrigins;
+          }
+        }
+        for (const auto &[FieldName, FieldTy] : Mem->fields) {
+          Walk(FieldTy);
+        }
+        if (Mem->directLoad) {
+          Walk(Mem->directLoad->to);
+        }
+        if (Mem->directStore) {
+          Walk(Mem->directStore->to);
+        }
+        return;
+      }
+      if (auto *F = Ty->getAsTFunction()) {
+        for (const auto &Arg : F->args) {
+          Walk(Arg);
+        }
+        Walk(F->result);
+      }
+    };
+    for (const auto &[Val, Node] : V2N) {
+      if (auto *VS = Node ? Node->getAsVariableState() : nullptr) {
+        for (const auto &Bound : VS->lowerBounds) {
+          Walk(Bound);
+        }
+        for (const auto &Bound : VS->upperBounds) {
+          Walk(Bound);
+        }
+      }
+    }
+    std::cerr << "[field-origin] scc=" << Name << " records=" << Records
+              << " fields=" << Fields << " with_origins=" << FieldsWithOrigins
+              << "\n";
+  }
+#endif
+#endif
   TypeBuilder TB(TBCtx);
 
   auto convertSolvedType = [&](SimpleType Ty, bool Pos,
@@ -7372,7 +7607,8 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                           OriginalVariableSources, SolveGlobals, PolMem,
                           DebugLabelCache);
 #ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
-    const std::vector<std::string> *BoundOriginTable = &BoundOriginDescriptions;
+    const std::vector<std::string> *BoundOriginTable =
+        &boundOriginTable().Descriptions;
 #else
     const std::vector<std::string> *BoundOriginTable = nullptr;
 #endif
@@ -10126,8 +10362,15 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
   auto BitSize = cg.getLLVMTypeSize(I.getType());
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 0);
 
-  cg.addConstantMemoryField(Addr, RetVal);
-  cg.addSubtype(PtrVal, binarysub::make_ptr_load(RetVal, BitSize));
+  // A canary slot is frame padding; do not turn its load/store into a field.
+  const bool CanaryAccess = isStackCanarySlotValue(Addr);
+  if (!CanaryAccess) {
+    cg.addConstantMemoryField(Addr, RetVal);
+    ConstraintsGenerator::BoundOriginScope LoadOrigin(
+        cg, "load:" + toStableString(Addr) + "[" + std::to_string(BitSize) +
+                "]");
+    cg.addSubtype(PtrVal, binarysub::make_ptr_load(RetVal, BitSize));
+  }
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
@@ -10163,9 +10406,19 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
   auto StoreVal = cg.getOrInsertNode(getExtValuePtr(I.getValueOperand(), &I, 0));
   auto Addr = getExtValuePtr(I.getPointerOperand(), &I, 1);
 
-  cg.recordStore(Addr, StoreVal, BitSize, &I);
-  cg.addConstantMemoryField(Addr, StoreVal);
-  cg.addSubtype(PtrVal, binarysub::make_ptr_store(StoreVal, BitSize));
+  // Stack-canary stores write ABI padding into the frame, not an object member.
+  // Skip both the constant-address field and the pointer store capability so
+  // the slot cannot reappear as a field after object merge.
+  const bool CanaryAccess = isStackCanarySlotValue(Addr) ||
+                            isOpaqueSegmentReadValue(I.getValueOperand());
+  if (!CanaryAccess) {
+    cg.recordStore(Addr, StoreVal, BitSize, &I);
+    cg.addConstantMemoryField(Addr, StoreVal);
+    ConstraintsGenerator::BoundOriginScope StoreOrigin(
+        cg, "store:" + toStableString(Addr) + "[" + std::to_string(BitSize) +
+                "]");
+    cg.addSubtype(PtrVal, binarysub::make_ptr_store(StoreVal, BitSize));
+  }
 }
 
 void ConstraintsGenerator::MLsubVisitor::visitAllocaInst(AllocaInst &I) {
