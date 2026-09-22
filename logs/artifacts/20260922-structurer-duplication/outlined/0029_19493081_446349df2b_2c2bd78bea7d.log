@@ -1,0 +1,196 @@
+Loading LLVM IR: test/evm/solidity-patterns/cases/0029_19493081_446349df2b_2c2bd78bea7d.ll
+Loading MLsub summary override from: /sn640/NotDec/build-notdec-nothreads/share/notdec/mlsub_builtin_summaries.json
+Warning: MLsub summary override function not found: fgets
+Warning: MLsub summary override function not found: fclose
+Warning: MLsub summary override function not found: getopt
+Warning: MLsub summary override function not found: regexec
+Warning: MLsub summary override function not found: strdup
+Warning: MLsub summary override function not found: fprintf
+Warning: MLsub summary override function not found: strncmp
+Warning: MLsub summary override function not found: time
+Warning: MLsub summary override function not found: putc
+Warning: MLsub summary override function not found: fdopen
+Warning: MLsub summary override function not found: getpid
+Warning: MLsub summary override function not found: __assert_fail
+Warning: MLsub summary override function not found: fread
+Warning: MLsub summary override function not found: snprintf
+Warning: MLsub summary override function not found: qsort
+Warning: MLsub summary override function not found: closedir
+Warning: MLsub summary override function not found: exit
+Warning: MLsub summary override function not found: fflush
+Warning: MLsub summary override function not found: free
+Warning: MLsub summary override function not found: tolower
+Warning: MLsub summary override function not found: open
+Warning: MLsub summary override function not found: toupper
+Warning: MLsub summary override function not found: stat
+Warning: MLsub summary override function not found: setlocale
+Warning: MLsub summary override function not found: memcpy
+Warning: MLsub summary override function not found: access
+Warning: MLsub summary override function not found: malloc
+Warning: MLsub summary override function not found: regcomp
+Warning: MLsub summary override function not found: opendir
+Warning: MLsub summary override function not found: read
+Warning: MLsub summary override function not found: fputs
+Warning: MLsub summary override function not found: random
+Warning: MLsub summary override function not found: atoi
+Warning: MLsub summary override function not found: readdir
+Warning: MLsub summary override function not found: strcmp
+Warning: MLsub summary override function not found: lseek
+Warning: MLsub summary override function not found: ntohl
+Warning: MLsub summary override function not found: realloc
+Warning: MLsub summary override function not found: strlen
+Warning: MLsub summary override function not found: regfree
+Warning: MLsub summary override function not found: perror
+Warning: MLsub summary override function not found: srandom
+Warning: MLsub summary override function not found: getenv
+Warning: MLsub summary override function not found: atol
+Warning: MLsub summary override function not found: sleep
+Warning: MLsub summary override function not found: fopen
+Warning: MLsub summary override function not found: close
+Warning: MLsub summary override function not found: strchr
+Warning: MLsub summary override function not found: printf
+Warning: MLsub summary override function not found: strrchr
+Warning: MLsub summary override function not found: fseek
+Warning: MLsub summary override function not found: strncpy
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Applying MLsub summary override to calloc
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 1 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 1 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 1 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 1 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 1 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 1 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 1 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 1 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+Info: transactional call interface merge policy merged 0 pair(s)
+Info: struct pointer slot merge policy merged 0 pair(s)
+Info: struct pointer field follow-up merge policy merged 0 pair(s)
+[hashcons-diagnostic] total=580 unique_hashes=580 dup_ratio=1 max_bucket=1 max_bucket_hash=0x4dba8b12df992ffd
+[hashcons-diagnostic] total=89 unique_hashes=89 dup_ratio=1 max_bucket=1 max_bucket_hash=0xb384c981b0a0702a
+[hashcons-diagnostic] total=89 unique_hashes=89 dup_ratio=1 max_bucket=1 max_bucket_hash=0xea6ba08dbddf81f7
+[hashcons-diagnostic] total=93 unique_hashes=93 dup_ratio=1 max_bucket=1 max_bucket_hash=0xf1a690b637f8d168
+[hashcons-diagnostic] total=93 unique_hashes=93 dup_ratio=1 max_bucket=1 max_bucket_hash=0x87e2d8ec4895ec58
+[hashcons-diagnostic] total=5 unique_hashes=5 dup_ratio=1 max_bucket=1 max_bucket_hash=0xc96b72d1875b4f9d
+[hashcons-diagnostic] total=14 unique_hashes=14 dup_ratio=1 max_bucket=1 max_bucket_hash=0x245691d002244294
+[hashcons-diagnostic] total=7 unique_hashes=7 dup_ratio=1 max_bucket=1 max_bucket_hash=0xb8cc2339c5fdcb3d
+[hashcons-diagnostic] total=7 unique_hashes=7 dup_ratio=1 max_bucket=1 max_bucket_hash=0xa318f86ee8bd9cb
+[hashcons-diagnostic] total=8 unique_hashes=8 dup_ratio=1 max_bucket=1 max_bucket_hash=0xcaf4187030cf4abb
+[hashcons-diagnostic] total=5 unique_hashes=5 dup_ratio=1 max_bucket=1 max_bucket_hash=0x4249943cf0b030c7
+[hashcons-diagnostic] total=8 unique_hashes=8 dup_ratio=1 max_bucket=1 max_bucket_hash=0x3c69cf3c5cc968be
+[hashcons-diagnostic] total=40 unique_hashes=40 dup_ratio=1 max_bucket=1 max_bucket_hash=0x4fb9bc7b6f2b602f
+[hashcons-diagnostic] total=40 unique_hashes=40 dup_ratio=1 max_bucket=1 max_bucket_hash=0x256f72eecf330fb5
+[hashcons-diagnostic] total=18 unique_hashes=18 dup_ratio=1 max_bucket=1 max_bucket_hash=0xbd3fe0088d1e92c
+[hashcons-diagnostic] total=5 unique_hashes=5 dup_ratio=1 max_bucket=1 max_bucket_hash=0x9c57da8af3661259
+[hashcons-diagnostic] total=5 unique_hashes=5 dup_ratio=1 max_bucket=1 max_bucket_hash=0x331488c4f3e312f1
+[hashcons-diagnostic] total=88 unique_hashes=88 dup_ratio=1 max_bucket=1 max_bucket_hash=0x260b3ee58e1a4047
+[hashcons-diagnostic] total=352 unique_hashes=352 dup_ratio=1 max_bucket=1 max_bucket_hash=0x95b0abe2fe03bb5c
+[hashcons-diagnostic] total=230 unique_hashes=230 dup_ratio=1 max_bucket=1 max_bucket_hash=0x2bd42854c07f4b9a
+[hashcons-diagnostic] total=6 unique_hashes=6 dup_ratio=1 max_bucket=1 max_bucket_hash=0x14c552dad24e0c4e
+[hashcons-diagnostic] total=6 unique_hashes=6 dup_ratio=1 max_bucket=1 max_bucket_hash=0x7b2d10b8d5e0f61e
+[hashcons-diagnostic] total=21 unique_hashes=21 dup_ratio=1 max_bucket=1 max_bucket_hash=0x34f3f1637e8d68fc
+[hashcons-diagnostic] total=110 unique_hashes=110 dup_ratio=1 max_bucket=1 max_bucket_hash=0xb7bcb82d44764289
+[hashcons-diagnostic] total=6 unique_hashes=6 dup_ratio=1 max_bucket=1 max_bucket_hash=0x244b61730408d55f
+[hashcons-diagnostic] total=5 unique_hashes=5 dup_ratio=1 max_bucket=1 max_bucket_hash=0xdbdf1bafa8244f1c
+[hashcons-diagnostic] total=4 unique_hashes=4 dup_ratio=1 max_bucket=1 max_bucket_hash=0x727e535c6f8e8554
+[hashcons-diagnostic] total=5 unique_hashes=5 dup_ratio=1 max_bucket=1 max_bucket_hash=0x6fcdd16a89407cab
+[hashcons-diagnostic] total=6 unique_hashes=6 dup_ratio=1 max_bucket=1 max_bucket_hash=0x8dcb784ffe462bd9
+[hashcons-diagnostic] total=6 unique_hashes=6 dup_ratio=1 max_bucket=1 max_bucket_hash=0xe116a4fceff8d1cb
+[hashcons-diagnostic] total=6 unique_hashes=6 dup_ratio=1 max_bucket=1 max_bucket_hash=0x7ac8dfab907745ec
+[hashcons-diagnostic] total=6 unique_hashes=6 dup_ratio=1 max_bucket=1 max_bucket_hash=0xc590c2af819499d5
+[hashcons-diagnostic] total=6 unique_hashes=6 dup_ratio=1 max_bucket=1 max_bucket_hash=0x71b2a19c4ed177e9
+[hashcons-diagnostic] total=5 unique_hashes=5 dup_ratio=1 max_bucket=1 max_bucket_hash=0x92d516305305faf4
+Constraint generation done! SCC count:34
+Info: normalized 2 tail value-recursive record(s) to arrays
+Info: collapsed 2 non-recursive binder(s)
+Info: normalized 3 transparent single-field record(s)
+Decompile result: logs/artifacts/20260922-structurer-duplication/outlined/0029_19493081_446349df2b_2c2bd78bea7d.sol

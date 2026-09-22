@@ -1,0 +1,706 @@
+contract Decompiled {
+    event Event_0xDDF252AD1BE2C89B69C2B068FC378DAA952BA7F163C4A11628F55A4DF523B3EF(uint256 indexed arg0, uint256 indexed arg1);
+    event Event_0x8BE0079C531659141344CD1FD0A4F28419497F9722A3DAAFE3B4186F6B6457E0(uint256 indexed arg0, uint256 indexed arg1);
+    event Event_0xA64373A629BC0C09EACF8A9CC2C7B070FA0A8B7E2E9B8AAEE408A3C02EB1676B(uint256 indexed arg0, uint256 indexed arg1);
+    event Event_0xFBBC329437E8C79F847E170730AD6DD04106B7511CAD70D06D635886D92DE83C(uint256 indexed arg0, uint256 indexed arg1);
+    event Event_0x47C33AA230EB5FD181505AA7BEFEADDD9B8A6F983989CEA73A7868448C3A9ED9(uint256 indexed arg0, uint256 indexed arg1);
+    event Event_0x8C5BE1E5EBEC7D5BD14F71427D1E84F3DD0314C0F7B2291E5B200AC8C7C3B925(uint256 indexed arg0, uint256 indexed arg1);
+
+    uint256 public slot_0;
+    uint256 public slot_10;
+    uint256 public slot_11;
+    uint256 public slot_12;
+    uint256 public slot_13;
+    uint256 public slot_14;
+    uint256 public slot_15;
+    uint256 public slot_16;
+    uint256 public slot_17;
+    uint256 public slot_18;
+    uint256 public slot_19;
+    mapping(uint256 => uint256) public slot_2;
+    uint256 public slot_20;
+    mapping(uint256 => uint256) public slot_4;
+    mapping(uint256 => uint256) public slot_5;
+    mapping(uint256 => uint256) public slot_6;
+    uint256 public slot_7;
+    uint256 public slot_8;
+    uint256 public slot_9;
+
+    function public_0x2a6ed03c() public returns (bool ret0) {
+        // block_0:
+        require(msg.data.length > 35);
+        // block_2:
+        return slot_6[0 /* TODO: unresolved value: evm.calldataload.i.load */] != 0;
+    }
+
+    function public_0x820a6392() public {
+        // block_0:
+        require(msg.data.length > 35);
+        // block_2:
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_3:
+        }
+        else {
+          // block_4:
+          revert(); // error_string, selector=0x8c379a0
+        }
+    }
+
+    function public_0x99fba603() public returns (uint256 ret0) {
+        // block_0:
+        return slot_8;
+    }
+
+    function public_0xd592ca5e() public {
+        // block_0:
+        require(msg.data.length > 67);
+        // block_2:
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_3:
+        }
+        else {
+          // block_4:
+          revert(); // error_string, selector=0x8c379a0
+        }
+    }
+
+    function public_0xeeeeeeee() public {
+        // block_0:
+    }
+
+    function allowance(address arg0, address arg1) public returns (uint256 ret0) {
+        // block_0:
+        require(msg.data.length > 67);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 6789);
+        private__0x18ae_0x18ae(uint256(uint160(arg1)), 363356);
+        return slot_4[(uint256(1) << uint256(160)) + uint256(type(uint256).max) & uint256(uint160(arg0))];
+    }
+
+    function approve(address arg0, uint256 arg1) public returns (bool ret0) {
+        // block_0:
+        require(msg.data.length > 67);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 6366);
+        return private__0x549_0x549(arg1, uint256(uint160(arg0)), 271158) != 0;
+    }
+
+    function balanceOf(address arg0) public returns (uint256 ret0) {
+        // block_0:
+        require(msg.data.length > 35);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 363204);
+        return 0 /* TODO: unresolved value: private__0x6b1_0x6b1 */;
+    }
+
+    function decimals() public returns (uint256 ret0) {
+        // block_0:
+        return 9;
+    }
+
+    function excludeMultipleAccountsFromFees(address arg0, bool arg1) public {
+        // block_0:
+        require(msg.data.length > 67);
+        // block_1:
+        require(uint256(uint160(arg0)) < 18446744073709551616);
+        // block_2:
+        require(uint256(uint160(arg0)) + uint256(35) < msg.data.length);
+        // block_3:
+        require(false /* TODO: evm.gt11.i */);
+        // block_4:
+        require(!false /* TODO: evm.gt18.i.not */);
+        // block_10:
+        // block_13:
+        revert(); // error_string, selector=0x8c379a0
+        if (!(uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0)) {
+          // goto block_13
+        }
+        while (false /* TODO: evm.lt.i.not */) {
+          // block_12:
+        }
+        // block_14:
+        // TODO: recover remaining body
+    }
+
+    function gb() public returns (uint256 ret0) {
+        // block_0:
+        return slot_7;
+    }
+
+    function goMoon(uint256 arg0) public {
+        // block_0:
+        require(msg.data.length > 35);
+        // block_2:
+    }
+
+    function manualsend() public {
+        // block_0:
+    }
+
+    function manualswap() public {
+        // block_0:
+        if ((uint256(1) << uint256(160)) + uint256(type(uint256).max) & uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_17) {
+          // goto block_3
+        }
+        // block_1:
+        if ((uint256(1) << uint256(160)) + uint256(type(uint256).max) & uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_18) {
+          // goto block_3
+        }
+        // block_2:
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // goto block_3
+        }
+        // goto block_12
+        // block_3:
+        slot_20 = uint256(1) << uint256(160) | slot_20 & ~(uint256(255) << uint256(160));
+        if (!false /* TODO: evm.iszero.i.i.not */) {
+          while (false /* TODO: evm.lt52.i.i.not */) {
+            // block_10:
+          }
+          // block_6:
+          require(!false /* TODO: evm.iszero64.i.i.not */);
+          // block_7:
+          if (false /* TODO: evm.iszero70.i.i.not */) {
+            // block_8:
+            revert(); // returndata_forward
+          }
+          else {
+            // block_13:
+            slot_20 = slot_20 & ~(uint256(255) << uint256(160));
+          }
+        }
+        // block_11:
+        revert(); // returndata_forward
+        // block_12:
+        revert(); // empty
+    }
+
+    function name() public {
+        // block_0:
+    }
+
+    function owner() public returns (uint256 ret0) {
+        // block_0:
+        return (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0 & (uint256(1) << uint256(160)) + uint256(type(uint256).max);
+    }
+
+    function renounceOwnership() public {
+        // block_0:
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_1:
+          emit Event_0x8BE0079C531659141344CD1FD0A4F28419497F9722A3DAAFE3B4186F6B6457E0(slot_0 & (uint256(1) << uint256(160)) + uint256(type(uint256).max), 0); // TODO: recover event signature
+          slot_0 = slot_0 & uint256(0) - (uint256(1) << uint256(160));
+        }
+        else {
+          // block_2:
+          revert(); // error_string, selector=0x8c379a0
+        }
+    }
+
+    function rescueForeignTokens(address arg0, address arg1, uint256 arg2) public {
+        // block_0:
+        require(msg.data.length > 99);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 6409);
+        private__0x18ae_0x18ae(uint256(uint160(arg1)), 6425);
+    }
+
+    function setNewDevAddress(address arg0) public {
+        // block_0:
+        require(msg.data.length > 35);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 363204);
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_3:
+          emit Event_0xFBBC329437E8C79F847E170730AD6DD04106B7511CAD70D06D635886D92DE83C(slot_17 & (uint256(1) << uint256(160)) + uint256(type(uint256).max), uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)); // TODO: recover event signature
+          slot_17 = uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) | slot_17 & uint256(0) - (uint256(1) << uint256(160));
+        }
+        else {
+          // block_4:
+          revert(); // error_string, selector=0x8c379a0
+        }
+    }
+
+    function setNewMarketingAddress(address arg0) public {
+        // block_0:
+        require(msg.data.length > 35);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 363204);
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_3:
+          emit Event_0xA64373A629BC0C09EACF8A9CC2C7B070FA0A8B7E2E9B8AAEE408A3C02EB1676B(slot_18 & (uint256(1) << uint256(160)) + uint256(type(uint256).max), uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)); // TODO: recover event signature
+          slot_18 = uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) | slot_18 & uint256(0) - (uint256(1) << uint256(160));
+        }
+        else {
+          // block_4:
+          revert(); // error_string, selector=0x8c379a0
+        }
+    }
+
+    function setRules(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3) public {
+        // block_0:
+        require(msg.data.length > 131);
+        // block_1:
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_2:
+          slot_11 = arg0;
+          slot_13 = arg1;
+          slot_12 = arg2;
+          slot_14 = arg3;
+        }
+        else {
+          // block_3:
+          revert(); // error_string, selector=0x8c379a0
+        }
+    }
+
+    function symbol() public {
+        // block_0:
+    }
+
+    function toggleSwap(bool arg0) public {
+        // block_0:
+        require(msg.data.length > 35);
+        // block_2:
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_3:
+        }
+        else {
+          // block_4:
+          revert(); // error_string, selector=0x8c379a0
+        }
+    }
+
+    function totalSupply() public returns (uint256 ret0) {
+        // block_0:
+        return 420000000000000000000000000;
+    }
+
+    function transferFrom(address arg0, address arg1, uint256 arg2) public returns (uint256 ret0) {
+        // block_0:
+        require(msg.data.length > 99);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 6409);
+        private__0x18ae_0x18ae(uint256(uint160(arg1)), 6425);
+        if (!(uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+          // goto block_3
+        }
+        // goto block_48
+        // block_3:
+        if (!(uint256(uint160(arg1)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+          // goto block_4
+        }
+        // goto block_47
+        // block_4:
+        if (arg2 == 0) {
+          // goto block_46
+        }
+        // block_5:
+        require(slot_6[uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)] == 0, "Transfer not allowed");
+        // block_6:
+        slot_15 = 0;
+        slot_16 = 0;
+        if ((uint256(1) << uint256(160)) + uint256(type(uint256).max) & uint256(uint160(arg0)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // goto block_49
+        }
+        // goto block_7
+        // block_7:
+        // block_8:
+        if (slot_20 / (uint256(1) << uint256(160)) & uint256(255) == 0) {
+          // block_9:
+        }
+        // block_10:
+        // block_11:
+        // goto block_12
+        // block_12:
+        if (false /* TODO: spec.select */) {
+          // goto block_24
+        }
+        // block_13:
+        slot_20 = uint256(1) << uint256(160) | slot_20 & ~(uint256(255) << uint256(160));
+        if (!false /* TODO: evm.iszero.i.i.not */) {
+          while (false /* TODO: evm.lt52.i.i.not */) {
+            // block_20:
+          }
+          // goto block_24
+        }
+        // block_21:
+        revert(); // returndata_forward
+        // block_27:
+        if ((slot_20 ^ uint256(uint160(arg0))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+          // goto block_28
+        }
+        // goto block_35
+        // block_28:
+        if ((slot_19 ^ uint256(uint160(arg1))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+          // goto block_35
+        }
+        // block_29:
+        if (block.number < private__0x1b27_0x1b27(slot_7, slot_8, 4068)) {
+          // block_30:
+          if ((uint256(uint160(arg0)) ^ slot_20) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+            // block_31:
+          }
+        }
+        // block_32:
+        slot_15 = slot_11;
+        slot_16 = slot_12;
+        while (!false /* TODO: evm.slt.i4.reload */) {
+          // block_43:
+        }
+        // block_34:
+        // block_35:
+        if ((slot_20 ^ uint256(uint160(arg1))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+          // block_36:
+          if (!((slot_19 ^ uint256(uint160(arg0))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+            // block_37:
+            slot_15 = slot_13;
+            slot_16 = slot_14;
+          }
+        }
+        // block_38:
+        if (!(slot_5[uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)] == 0)) {
+          // goto block_42
+        }
+        // block_39:
+        if (!(slot_5[uint256(uint160(arg1)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)] == 0)) {
+          // goto block_42
+        }
+        // block_40:
+        if (!((slot_20 ^ uint256(uint160(arg0))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+          // block_41:
+          if (!((slot_20 ^ uint256(uint160(arg1))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+            // goto block_42
+          }
+          // goto block_49
+        }
+        // block_42:
+        slot_15 = 0;
+        slot_16 = 0;
+        // block_49:
+        return 1;
+        // block_16:
+        require(!false /* TODO: evm.iszero64.i.i.not */);
+        // block_17:
+        if (false /* TODO: evm.iszero70.i.i.not */) {
+          // block_18:
+          revert(); // returndata_forward
+        }
+        // block_22:
+        slot_20 = slot_20 & ~(uint256(255) << uint256(160));
+        if (!(address(this).balance == 0)) {
+          // block_23:
+        }
+        // block_24:
+        // block_25:
+        if (!(slot_5[uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)] == 0)) {
+          // goto block_27
+        }
+        // goto block_26
+        // block_26:
+        if (!(slot_8 == 0)) {
+          // goto block_27
+        }
+        // goto block_44
+        // block_44:
+        require(false, "Transfer not open");
+        // block_46:
+        revert(); // error_string, selector=0x8c379a0, string_length=41
+        // block_47:
+        revert(); // error_string, selector=0x8c379a0, string_length=35
+        // block_48:
+        revert(); // error_string, selector=0x8c379a0, string_length=37
+    }
+
+    function transferOwnership(address arg0) public {
+        // block_0:
+        require(msg.data.length > 35);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 363204);
+        if (uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // block_3:
+          emit Event_0x8BE0079C531659141344CD1FD0A4F28419497F9722A3DAAFE3B4186F6B6457E0(slot_0 & (uint256(1) << uint256(160)) + uint256(type(uint256).max), uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)); // TODO: recover event signature
+          slot_0 = (uint256(1) << uint256(160)) + uint256(type(uint256).max) & uint256(uint160(arg0)) | slot_0 & uint256(0) - (uint256(1) << uint256(160));
+        }
+        else {
+          // block_4:
+          revert(); // error_string, selector=0x8c379a0
+        }
+    }
+
+    function transfer(address arg0, uint256 arg1) public returns (uint256 ret0) {
+        // block_0:
+        require(msg.data.length > 67);
+        // block_2:
+        private__0x18ae_0x18ae(uint256(uint160(arg0)), 6366);
+        if (!(uint256(uint160(msg.sender)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+          // goto block_3
+        }
+        // goto block_48
+        // block_3:
+        if (!(uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+          // goto block_4
+        }
+        // goto block_47
+        // block_4:
+        if (arg1 == 0) {
+          // goto block_46
+        }
+        // block_5:
+        require(slot_6[uint256(uint160(msg.sender)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)] == 0, "Transfer not allowed");
+        // block_6:
+        slot_15 = 0;
+        slot_16 = 0;
+        if ((uint256(1) << uint256(160)) + uint256(type(uint256).max) & uint256(uint160(msg.sender)) == (uint256(1) << uint256(160)) + uint256(type(uint256).max) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_0) {
+          // goto block_49
+        }
+        // goto block_7
+        // block_7:
+        // block_8:
+        if (slot_20 / (uint256(1) << uint256(160)) & uint256(255) == 0) {
+          // block_9:
+        }
+        // block_10:
+        // block_11:
+        // goto block_12
+        // block_12:
+        if (false /* TODO: spec.select */) {
+          // goto block_24
+        }
+        // block_13:
+        slot_20 = uint256(1) << uint256(160) | slot_20 & ~(uint256(255) << uint256(160));
+        if (!false /* TODO: evm.iszero.i.i.i.not */) {
+          while (false /* TODO: evm.lt52.i.i.i.not */) {
+            // block_20:
+          }
+          // goto block_24
+        }
+        // block_21:
+        revert(); // returndata_forward
+        // block_27:
+        if ((slot_20 ^ uint256(uint160(msg.sender))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+          // goto block_28
+        }
+        // goto block_35
+        // block_28:
+        if ((slot_19 ^ uint256(uint160(arg0))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+          // goto block_35
+        }
+        // block_29:
+        if (block.number < private__0x1b27_0x1b27(slot_7, slot_8, 4068)) {
+          // block_30:
+          if ((uint256(uint160(msg.sender)) ^ slot_20) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+            // block_31:
+          }
+        }
+        // block_32:
+        slot_15 = slot_11;
+        slot_16 = slot_12;
+        while (!false /* TODO: evm.slt.i.i.reload */) {
+          // block_43:
+        }
+        // block_34:
+        // block_35:
+        if ((slot_20 ^ uint256(uint160(arg0))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+          // block_36:
+          if (!((slot_19 ^ uint256(uint160(msg.sender))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+            // block_37:
+            slot_15 = slot_13;
+            slot_16 = slot_14;
+          }
+        }
+        // block_38:
+        if (!(slot_5[uint256(uint160(msg.sender)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)] == 0)) {
+          // goto block_42
+        }
+        // block_39:
+        if (!(slot_5[uint256(uint160(arg0)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)] == 0)) {
+          // goto block_42
+        }
+        // block_40:
+        if (!((slot_20 ^ uint256(uint160(msg.sender))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+          // block_41:
+          if (!((slot_20 ^ uint256(uint160(arg0))) & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0)) {
+            // goto block_42
+          }
+          // goto block_49
+        }
+        // block_42:
+        slot_15 = 0;
+        slot_16 = 0;
+        // block_49:
+        return 1;
+        // block_16:
+        require(!false /* TODO: evm.iszero64.i.i.i.not */);
+        // block_17:
+        if (false /* TODO: evm.iszero70.i.i.i.not */) {
+          // block_18:
+          revert(); // returndata_forward
+        }
+        // block_22:
+        slot_20 = slot_20 & ~(uint256(255) << uint256(160));
+        if (!(address(this).balance == 0)) {
+          // block_23:
+        }
+        // block_24:
+        // block_25:
+        if (!(slot_5[uint256(uint160(msg.sender)) & (uint256(1) << uint256(160)) + uint256(type(uint256).max)] == 0)) {
+          // goto block_27
+        }
+        // goto block_26
+        // block_26:
+        if (!(slot_8 == 0)) {
+          // goto block_27
+        }
+        // goto block_44
+        // block_44:
+        require(false, "Transfer not open");
+        // block_46:
+        revert(); // error_string, selector=0x8c379a0, string_length=41
+        // block_47:
+        revert(); // error_string, selector=0x8c379a0, string_length=35
+        // block_48:
+        revert(); // error_string, selector=0x8c379a0, string_length=37
+    }
+
+    function uniswapV2Pair() public returns (uint256 ret0) {
+        // block_0:
+        return (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_20 & (uint256(1) << uint256(160)) + uint256(type(uint256).max);
+    }
+
+    function uniswapV2Router() public returns (uint256 ret0) {
+        // block_0:
+        return (uint256(1) << uint256(160)) + uint256(type(uint256).max) & slot_19 & (uint256(1) << uint256(160)) + uint256(type(uint256).max);
+    }
+
+    function private__0x116b_0x116b(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3) internal returns (uint256 ret0) {
+        // block_0:
+        if (arg1 > arg2) {
+          // block_2:
+          revert(); // error_string, selector=0x8c379a0
+        }
+        else {
+          // block_1:
+          return private__0x1b51_0x1b51(arg2, arg1, 362639);
+        }
+    }
+
+    function private__0x1418_0x1418(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3) internal {
+        // block_0:
+        emit Event_0xDDF252AD1BE2C89B69C2B068FC378DAA952BA7F163C4A11628F55A4DF523B3EF((uint256(1) << uint256(160)) + uint256(type(uint256).max) & arg2, (uint256(1) << uint256(160)) + uint256(type(uint256).max) & arg1); // TODO: recover event signature
+    }
+
+    function private__0x1509_0x1509(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3) internal {
+        // block_0:
+        private__0x1418_0x1418(arg0, arg1, arg2, 362717);
+    }
+
+    function private__0x160c_0x160c(uint256 arg0, uint256 arg1, uint256 arg2) internal returns (uint256 ret0) {
+        // block_0:
+        uint256 temp_0;
+        temp_0 = private__0x1b27_0x1b27(arg1, arg0, 5656);
+        if (temp_0 < arg1) {
+          // block_2:
+          revert(); // error_string, selector=0x8c379a0, string_length=27
+        }
+        else {
+          // block_1:
+          return temp_0;
+        }
+    }
+
+    function private__0x16d4_0x16d4(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3) internal returns (uint256 ret0) {
+        // block_0:
+        if (arg1 == 0) {
+          // block_2:
+          revert(); // error_string, selector=0x8c379a0
+        }
+        else {
+          // block_1:
+          return private__0x1bee_0x1bee(arg2, arg1, 362907);
+        }
+    }
+
+    function private__0x17e5_0x17e5(uint256 arg0, uint256 arg1, uint256 arg2) internal returns (uint256 ret0) {
+        // block_0:
+        uint256 temp_0;
+        if (arg1 == 0) {
+          // block_2:
+          return 0;
+        }
+        else {
+          // block_1:
+          temp_0 = private__0x1c0d_0x1c0d(arg1, arg0, 6143);
+          if (private__0x1bee_0x1bee(temp_0, arg1, 6156) == arg0) {
+            // block_3:
+            return temp_0;
+          }
+          else {
+            // block_4:
+            revert(); // error_string, selector=0x8c379a0, string_length=33
+          }
+        }
+    }
+
+    function private__0x18ae_0x18ae(uint256 arg0, uint256 arg1) internal {
+        // block_0:
+        require(arg0 & uint256(0) - (uint256(1) << uint256(160)) == 0);
+        // block_1:
+    }
+
+    function private__0x1974_0x1974(uint256 arg0, uint256 arg1) internal {
+        // block_0:
+        require(arg0 < 2);
+        // block_1:
+    }
+
+    function private__0x1a95_0x1a95(uint256 arg0, uint256 arg1) internal returns (uint256 ret0) {
+        // block_0:
+        return arg0 + uint256(96);
+    }
+
+    function private__0x1b27_0x1b27(uint256 arg0, uint256 arg1, uint256 arg2) internal returns (uint256 ret0) {
+        // block_0:
+        return arg1 + arg0;
+    }
+
+    function private__0x1b51_0x1b51(uint256 arg0, uint256 arg1, uint256 arg2) internal returns (uint256 ret0) {
+        // block_0:
+        return arg0 - arg1;
+    }
+
+    function private__0x1bee_0x1bee(uint256 arg0, uint256 arg1, uint256 arg2) internal returns (uint256 ret0) {
+        // block_0:
+        return arg0 / arg1;
+    }
+
+    function private__0x1c0d_0x1c0d(uint256 arg0, uint256 arg1, uint256 arg2) internal returns (uint256 ret0) {
+        // block_0:
+        return arg1 * arg0;
+    }
+
+    function private__0x549_0x549(uint256 arg0, uint256 arg1, uint256 arg2) internal returns (uint256 ret0) {
+        // block_0:
+        private__0xbaf_0xbaf(arg0, arg1, uint256(uint160(msg.sender)), 272120);
+        return 1;
+    }
+
+    function private__0xbaf_0xbaf(uint256 arg0, uint256 arg1, uint256 arg2, uint256 arg3) internal {
+        // block_0:
+        if (arg2 & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+          // block_4:
+          revert(); // error_string, selector=0x8c379a0, string_length=36
+        }
+        else {
+          // block_1:
+          if (arg1 & (uint256(1) << uint256(160)) + uint256(type(uint256).max) == 0) {
+            // block_3:
+            revert(); // error_string, selector=0x8c379a0, string_length=34
+          }
+          else {
+            // block_2:
+            emit Event_0x8C5BE1E5EBEC7D5BD14F71427D1E84F3DD0314C0F7B2291E5B200AC8C7C3B925((uint256(1) << uint256(160)) + uint256(type(uint256).max) & arg2, arg1 & (uint256(1) << uint256(160)) + uint256(type(uint256).max)); // TODO: recover event signature
+          }
+        }
+    }
+}

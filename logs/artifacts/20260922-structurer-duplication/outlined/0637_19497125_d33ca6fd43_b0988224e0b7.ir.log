@@ -1,0 +1,2 @@
+Loading LLVM IR: test/evm/solidity-patterns/cases/0637_19497125_d33ca6fd43_b0988224e0b7.ll
+TR input IR emitted to logs/artifacts/20260922-structurer-duplication/outlined/0637_19497125_d33ca6fd43_b0988224e0b7.tr.ll
