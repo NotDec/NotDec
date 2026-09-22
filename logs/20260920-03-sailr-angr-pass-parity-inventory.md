@@ -48,3 +48,22 @@
 /sn640/angr/angr/analyses/decompiler/optimization_passes/{condition_constprop,flip_boolean_cmp,expr_op_swapper}.py
 /sn640/angr/angr/analyses/decompiler/structuring/{phoenix,sailr,recursive_structurer}.py
 ```
+
+## 5. P0 迁移源图（angr → 我们）
+
+angr 的"相似度判等"不在 `duplication_reverter.py` 里，而在两个被它 import 的模块：
+
+| angr 文件 | 关键函数 | 迁移目标 |
+| --- | --- | --- |
+| `analyses/decompiler/block_similarity.py` | `is_similar`、`longest_ail_subseq` | 判等核心：把两个 block/语句序列按"AIL 结构等价"比较（表达式归一化后的结构比较），移植到我们对 payload/CFG 的等价判断 |
+| `optimization_passes/duplication_reverter/similarity.py` | `ail_graph_similarity`、`longest_ail_graph_subseq`、`bfs_list_blocks` | 图级相似度：BFS 展开两个候选子图、按索引配对、discontinuity 终止、两个 special case（共用后继/前驱） |
+| `optimization_passes/duplication_reverter/ail_merge_graph.py` | `AILMergeGraph` | 合并子图的构造与再插入 |
+| `optimization_passes/duplication_reverter/duplication_reverter.py` | `_search_for_deduplication_candidate`、`_construct_merged_candidate`、`_reinsert_merged_candidate`、`maximize_similarity_of_blocks`、`_construct_best_condition_block_for_merge`、`similar_conditional_when_single_corrected`、`_correct_all_broken_jumps`、`_find_future_irreducible_gotos`、`collect_conditions_between_nodes` | 我们的 `DuplicationReverter` 要按这些方法逐个对齐（目前只有 7-pass 流水线里的一个窄实现） |
+| `structured_node.py` | `ExpressionNormalizer`、`structured_node_comparison` | 表达式/结构比较的归一化基础，被 `block_similarity` 依赖 |
+
+**迁移顺序**：`block_similarity.is_similar` → `similarity.ail_graph_similarity/longest_ail_graph_subseq` → `AILMergeGraph` → `DuplicationReverter` 的方法族。
+
+## 6. 动手前要和用户确认的两个"表示层"问题（非 angr 逻辑，属于移植桥接）
+
+1. angr 的比较建立在 **AIL**（`ailment.Block`/`Expression`）上，我们的 structurer 建立在 **LLVM IR + StructuredCFG/PayloadRef** 上。需要确认：是"按 angr 的语义在我们的表示上重写等价的比较函数"（推荐，且不引入新逻辑），还是要先把 payload 降到 AIL 式中间表示（工作量大）。
+2. angr 的 `DuplicationReverter` 是 `StructuringOptimizationPass`，跑在 region identification 之后的 AIL 图上；我们的同阶段是 `buildSAILRDeoptimizationPipeline` 的 7 个 pass。需要确认我们的 `DuplicationReverter` 输入图与 angr 的 `self._graph` 语义对齐（有 goto 的 region 图），否则相似度候选集会不一致。
