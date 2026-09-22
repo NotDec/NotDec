@@ -409,6 +409,27 @@ rewriteCalldataMinSizeGuards(Function &F, Value *Calldata) {
       if (Normal->getUniquePredecessor() != Branch->getParent()) {
         continue;
       }
+      // Rewrite the guard into the canonical unsigned form
+      // "revert iff calldatasize < MinSize" so the backend renders the
+      // documented require(msg.data.length >= MinSize) instead of a folded
+      // signed comparison over a pointer-relative value.
+      auto *Cmp = dyn_cast<ICmpInst>(Branch->getCondition());
+      const bool AlreadyCanonical =
+          Cmp != nullptr && isCalldataSize(Cmp->getOperand(0), Calldata) &&
+          detail::isConstantIntValue(Cmp->getOperand(1), *MinSize) &&
+          ((FailWhenTrue && Cmp->getPredicate() == ICmpInst::ICMP_ULT) ||
+           (!FailWhenTrue && Cmp->getPredicate() == ICmpInst::ICMP_UGE));
+      if (!AlreadyCanonical) {
+        Function *SizeFn = Branch->getModule()->getFunction("evm_calldatasize");
+        if (SizeFn == nullptr) {
+          continue;
+        }
+        IRBuilder<> Builder(Branch);
+        Value *Size = Builder.CreateCall(SizeFn, {Calldata});
+        Value *Min = ConstantInt::get(Size->getType(), *MinSize);
+        Branch->setCondition(FailWhenTrue ? Builder.CreateICmpULT(Size, Min)
+                                          : Builder.CreateICmpUGE(Size, Min));
+      }
       Guards.push_back(CalldataMinSizeGuard{
           .NormalSuccessor = Normal,
           .MinSize = *MinSize,

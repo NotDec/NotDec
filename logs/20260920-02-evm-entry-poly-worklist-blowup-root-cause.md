@@ -1104,3 +1104,7 @@ IR：`%available = add size, -4; %too.short = icmp sgt %available, 63; br %too.s
 
 提升的理由写在 `compile-budget.json` 的 comment 里（扁平化把共享 guard 复制到每个调用点，structurer 更容易放弃），
 下一步的 structurer 工作是把它压回去。
+- 后端修复（已做）：`BodyBuilder` 的 require 折叠对 else 分支用错极性（`require(!cond)`），已改为 `require(cond)`；
+  `EvmCalldataAccessPass` 把匹配到的最小长度 guard 改写成规范形式（`revert iff calldatasize < MinSize`），
+  于是后端渲染出 `require(msg.data.length >= MinSize)`。source 套件不再 pin，3 个 expected 更新为
+  `require(msg.data.length > 67)` / `>= 100`；两处提交：后端 `5355022`、顶层 `24fa8d25`。

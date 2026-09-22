@@ -96,12 +96,6 @@ function(add_evm_solidity_rewrite_suite test_name manifest_relpath)
 	)
 endfunction()
 
-# Pinned to the outlined shape: the flattened pipeline now exposes the recovered
-# calldata min-size guard in two decoder cases, and the backend renders that
-# branch with inverted polarity (require(... <= 63) instead of >= 68) instead of
-# using the notdec_evm_calldata_min_size marker.  The rendering fix is tracked
-# in logs/; until then the source-text baseline stays on the shape it was
-# written for.
 function(add_evm_solidity_source_suite test_name manifest_relpath)
 	set(solc_args "")
 	if(NOTDEC_SOLC)
@@ -110,7 +104,6 @@ function(add_evm_solidity_source_suite test_name manifest_relpath)
 	add_test(
 		NAME ${test_name}
 		COMMAND
-			${CMAKE_COMMAND} -E env NOTDEC_EVM_INLINE=0
 			${Python3_EXECUTABLE}
 			${CMAKE_CURRENT_SOURCE_DIR}/run_evm_solidity_source_suite.py
 			--binary

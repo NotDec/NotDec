@@ -4,6 +4,8 @@ contract Decompiled {
 
     function two_args(uint256 arg0, uint256 arg1) public {
         // block_0:
+        require(msg.data.length > 67);
+        // block_2:
         slot_0 = arg1;
         slot_1 = arg0;
     }
