@@ -1,11 +1,11 @@
 {
-  "comment": "Ratchet budgets for the whole-pattern-corpus Solidity compile suite. 'condition_todo_occurrences' counts every 'false /* TODO' occurrence (if/while/require contexts). Lower a budget when a change improves the metric; do not raise one without recording why in logs/.",
+  "comment": "Ratchet budgets for the whole-pattern-corpus Solidity compile suite. 'condition_todo_occurrences' counts every 'false /* TODO' occurrence (if/while/require contexts). Lower a budget when a change improves the metric; do not raise one without recording why in logs/. RAISED for the flattened default (NOTDEC_EVM_INLINE=calldata): the calldata chains are expanded before type recovery, so the shared bound/revert scaffolding is duplicated per call site and the structurer emits more gotos/TODOs. The raise and the outlined-shape numbers are recorded in logs/20260920-02-evm-entry-poly-worklist-blowup-root-cause.md section 11.11. The helper floors are re-anchored to the flattened counts; the outlined-shape floors were 1339/1301.",
   "max_compile_failures": 0,
-  "max_unresolved_value_occurrences": 264,
-  "max_condition_todo_occurrences": 729,
-  "max_goto_occurrences": 424,
-  "max_real_jump_occurrences": 343,
-  "max_dangling_goto_occurrences": 69,
-  "min_helper_functions": 1339,
-  "min_helper_call_sites": 1301
+  "max_unresolved_value_occurrences": 289,
+  "max_condition_todo_occurrences": 4647,
+  "max_goto_occurrences": 5437,
+  "max_real_jump_occurrences": 4604,
+  "max_dangling_goto_occurrences": 501,
+  "min_helper_functions": 1271,
+  "min_helper_call_sites": 2412
 }

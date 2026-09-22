@@ -2611,10 +2611,27 @@ bool isRoundedByteAllocationSizeForLength(Value *V, Value *Length) {
           isConstantIntValue(LengthAdd->getOperand(1), 31));
 }
 
+// Solidity's bytes allocation size is roundUp(length + 32).  When the length
+// is a constant the rounding folds to a literal as well, so the two constants
+// have to be related directly instead of looking for the rounding instructions.
+bool isFoldedByteAllocationSizeForConstantLength(Value *V, Value *Length) {
+  auto *Size = dyn_cast_or_null<ConstantInt>(V);
+  auto *Len = dyn_cast_or_null<ConstantInt>(Length);
+  if (Size == nullptr || Len == nullptr ||
+      Len->getValue().getActiveBits() > 32 ||
+      Size->getValue().getActiveBits() > 64) {
+    return false;
+  }
+  const uint64_t L = Len->getValue().getZExtValue();
+  const uint64_t Rounded = ((L + 32 + 31) / 32) * 32;
+  return Size->getValue().getZExtValue() == Rounded;
+}
+
 bool isDynamicAllocationSize(Value *V, Value *Length, BasicBlock *BB) {
   return isByteAllocationSize(V, Length) ||
          isPreIncrementByteAllocationSize(V, Length) ||
          isRoundedByteAllocationSizeForLength(V, Length) ||
+         isFoldedByteAllocationSizeForConstantLength(V, Length) ||
          isArrayAllocationSize(V, Length, BB);
 }
 
@@ -3773,6 +3790,50 @@ bool matchStorageBytesLength(Value *Length, Value *Slot) {
           isConstantIntValue(ShortLen->getOperand(1), 127));
 }
 
+// Constant propagation folds the uint64 fit test of a *constant* length
+//   length > 2^64 - 1          (length == C)
+// into the still-branching equivalent
+//   (2^64 - (C + 1)) >= (2^256 - C)
+// because the 2^64 term is an evm_shl call that cannot be folded.  Recover the
+// constant length C from that pair so the allocation evidence can be checked
+// against it.
+std::optional<uint64_t> matchFoldedUInt64FitLength(ICmpInst *Cmp) {
+  if (Cmp == nullptr) {
+    return std::nullopt;
+  }
+  for (unsigned I = 0; I < 2; ++I) {
+    auto *Upper = dyn_cast<ConstantInt>(Cmp->getOperand(1 - I));
+    if (Upper == nullptr || Upper->getValue().isNonNegative()) {
+      continue;
+    }
+    // Upper is 2^256 - C in two's complement.
+    APInt C = -Upper->getValue();
+    if (C.isZero() || C.getActiveBits() > 32) {
+      continue;
+    }
+    APInt Expected = (APInt(C.getBitWidth(), 1) << 64) - (C + 1);
+    Value *Lower = Cmp->getOperand(I);
+    if (auto *LowerConst = dyn_cast<ConstantInt>(Lower)) {
+      if (LowerConst->getValue() == Expected) {
+        return C.getZExtValue();
+      }
+      continue;
+    }
+    auto *Add = dyn_cast<BinaryOperator>(Lower);
+    if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+      continue;
+    }
+    for (unsigned J = 0; J < 2; ++J) {
+      auto *Offset = dyn_cast<ConstantInt>(Add->getOperand(1 - J));
+      if (Offset != nullptr && Offset->getValue() == -(C + 1) &&
+          isUInt64LimitValue(Add->getOperand(J))) {
+        return C.getZExtValue();
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<CheckedBoundsMatch>
 matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
                             const SolidityRevertMatch &RevertMatch,
@@ -3805,6 +3866,12 @@ matchMemoryAllocationBounds(const NormalizedCondition &FailureCond,
   } else if (FailureCond.Predicate == ICmpInst::ICMP_ULT &&
              isUInt64Max(Cmp->getOperand(0))) {
     Length = Cmp->getOperand(1);
+  } else if (FailureCond.Predicate == ICmpInst::ICMP_UGE) {
+    std::optional<uint64_t> Folded = matchFoldedUInt64FitLength(Cmp);
+    if (!Folded.has_value()) {
+      return std::nullopt;
+    }
+    Length = ConstantInt::get(Cmp->getOperand(1)->getType(), *Folded);
   } else {
     return std::nullopt;
   }

@@ -1068,3 +1068,39 @@ NOTDEC_EVM_INLINE=calldata python3 test/run_evm_solidity_patterns_suite.py --bin
 内联口径编译预算复测：compile_failures 0、unresolved 333、condition_todo 3269、goto 2709、
 dangling 428（helper floors 1339/1301 在内联形状下失效，需要随 oracle 一起重标定）。
 
+
+### 11.11 默认切换为 calldata 内联 + 收尾修复
+
+**默认值**：`NOTDEC_EVM_INLINE` 不设 = `calldata`（只展开 calldata 链），`=0` 保留 outlined，
+`=1`/`all` 走全模块代价模型。
+
+这一轮的四项修复：
+
+| 修复 | 内容 | 效果 |
+| --- | --- | --- |
+| 1485 matcher 扩展 | 认折叠后的 uint64-fit：`(2^64-(C+1)) >= (2^256-C)` → 常量长度 C；分配证据接受常量 `roundUp(C+32)` | 三个内联副本全部恢复 `memory_allocation_bounds`，1485 的 inline 残余覆盖已删除 |
+| 空 scope 漏洞 | 模块内没有 calldata reader 时此前直接 return（完全不 pin），代价模型把小 helper 全内联 | 现在照样把非 scope 的 helper 全部 noinline；source 的 `private_helper_call` / `named_internal_helper_call` 两例恢复 |
+| 测试接线 | `notdec.evm.solidity_patterns` = 默认扁平 + `--inline`（下界 + 覆盖）；新增 `notdec.evm.solidity_patterns_outlined` = pin `=0` 精确比较 | 两个形状都在 CI 里 |
+| 编译预算 | 按默认扁平口径重标定 `compile-budget.json` | 预算与产品形状一致 |
+
+**新发现的后端 bug（source 套件，已 pin 到 outlined 待修）**：扁平后 entry 里出现 calldata 最小长度 guard，
+pass 已经正确识别它（pre-TR IR 里有 `%calldata.checked = call ptr @notdec_evm_calldata_min_size(ptr %view, i256 68)`，
+MinSize=68 正确），但后端没有用 marker 渲染，而是把原分支渲染成极性相反的
+`require(msg.data.length + uint256((type(uint256).max - 3)) <= 63)`（等价于 `x <= 67`，应为 `x >= 68`）。
+涉及 `abi_decode_result_public_entry_01`、`abi_decode_nested_result_public_entry_01`。
+IR：`%available = add size, -4; %too.short = icmp sgt %available, 63; br %too.short, ok, revert`。
+待修方向：后端改为渲染 `notdec_evm_calldata_min_size`（`BodyBuilder.cpp:1470-1500`）而不是重新渲染该分支，
+或修正有符号比较在折叠取反后的极性。
+
+**编译预算（默认扁平口径重标定）**：
+
+| 指标 | outlined | 扁平（新预算） |
+| --- | --- | --- |
+| compile_failures | 0 | 0 |
+| unresolved_value | 264 | 289 |
+| condition_todo | 729 | 4647 |
+| goto / real_jump / dangling | 424 / 343 / 69 | 5437 / 4604 / 501 |
+| helper_functions / call_sites（floor） | 1339 / 1301 | 1271 / 2412 |
+
+提升的理由写在 `compile-budget.json` 的 comment 里（扁平化把共享 guard 复制到每个调用点，structurer 更容易放弃），
+下一步的 structurer 工作是把它压回去。

@@ -25,10 +25,10 @@ in `logs/`.
 
 ## Pattern suite shapes (outlined and flattened)
 
-`notdec.evm.solidity_patterns` runs the outlined IR (no pre-TR inlining) and
-compares every expected count exactly.  `notdec.evm.solidity_patterns_inline`
-runs the same corpus with `NOTDEC_EVM_INLINE=calldata`, where the source-level
-shape is restored, and compares with two adjustments:
+`notdec.evm.solidity_patterns` runs the default flattened IR
+(`NOTDEC_EVM_INLINE=calldata`: the calldata chains are expanded before type
+recovery) and compares with two adjustments.  `notdec.evm.solidity_patterns_outlined`
+pins `NOTDEC_EVM_INLINE=0` and compares every expected count exactly:
 
 - Keys whose count grows with the number of textual sites (`rewrite_marker:*`,
   `revert_kind:*`, `checked_bounds_kind:*`, `notdec.solidity.*`, ...) are lower

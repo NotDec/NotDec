@@ -2776,17 +2776,7 @@
         "notdec_solidity_rewrite_checked_sub": 1
       },
       "expected_checked_bounds_skip_reasons": {},
-      "expected_checked_bounds_cfg_rewrites": 7,
-      "inline": {
-        "comment": "flattened residual: the private__0x24f4 guard with constant length 150 folds to a tautological uint64 check (icmp ult(add(shl(64,1),-151), -150)) and no longer matches memory_allocation_bounds; kind 1 and cfg rewrites 6 are recorded, candidate matcher extension noted in the log",
-        "expected_checked_bounds_kinds": {
-          "memory_allocation_bounds": 1
-        },
-        "expected_checked_bounds_semantic_markers": {
-          "notdec_solidity_rewrite_memory_allocation_bounds": 1
-        },
-        "expected_checked_bounds_cfg_rewrites": 6
-      }
+      "expected_checked_bounds_cfg_rewrites": 7
     },
     {
       "name": "1847_19507643_148f68d102_07c7230a7676",

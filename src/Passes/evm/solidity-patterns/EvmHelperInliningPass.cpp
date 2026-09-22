@@ -37,17 +37,20 @@ using namespace llvm;
 namespace notdec::passes::evm {
 namespace {
 
-// "0"/unset: keep the outlined shape.  "1"/"all": the whole module goes
-// through the inliner.  "calldata": only the helpers on an entry -> calldata
-// read path are expanded; the arithmetic and revert scaffolding stays outlined
-// so the checked-bounds/revert matchers keep the shape they were calibrated on.
-// The guard helpers in that scaffolding are shared by constant and
-// non-constant callers, and flattening them proves the constant guards dead.
+// The default is "calldata": only the helpers on an entry -> calldata read path
+// are expanded, which restores the absolute calldata offsets the ABI parameter
+// table needs while the arithmetic and revert scaffolding stays outlined (the
+// shared guard helpers there are only constant-foldable dead code once
+// flattened).  "1"/"all" sends the whole module through the inliner, and "0"
+// keeps the pre-inlining outlined shape.
 enum class InlineMode { Off, All, Calldata };
 
 InlineMode getInlineMode() {
   const char *Value = std::getenv("NOTDEC_EVM_INLINE");
-  if (Value == nullptr || Value[0] == '\0' || std::strcmp(Value, "0") == 0) {
+  if (Value == nullptr || Value[0] == '\0') {
+    return InlineMode::Calldata;
+  }
+  if (std::strcmp(Value, "0") == 0) {
     return InlineMode::Off;
   }
   if (std::strcmp(Value, "calldata") == 0) {
@@ -104,9 +107,9 @@ void restrictInliningToCalldataChains(Module &M) {
       Scoped.insert(&F);
     }
   }
-  if (Scoped.empty()) {
-    return;
-  }
+  // An empty reader set still has to pin every helper: the scope means "only
+  // the calldata chains are expanded", so a module without a calldata read has
+  // nothing to expand and must keep the outlined shape.
 
   // Only the upward closure is scoped.  A reader's callees are business logic
   // (balance math, storage updates) that does not need the entry's absolute
