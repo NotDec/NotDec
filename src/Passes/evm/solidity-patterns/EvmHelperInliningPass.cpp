@@ -76,10 +76,11 @@ bool isCalldataReader(const Function &F) {
   return false;
 }
 
-// The calldata chain is the readers plus everything they call (their internal
-// decode helpers) and everything that can reach them (the entry-side
-// wrappers).  Only those calls are forced open; every other helper is pinned
-// with noinline so the LLVM cost model cannot flatten the guard scaffolding.
+// The calldata chain is the readers plus everything that can reach them (the
+// entry-side wrappers).  Only those calls are forced open: the readers' callees
+// are business logic and shared guard scaffolding, and the non-entry helpers
+// nothing on a calldata path reaches are pinned with noinline so the LLVM cost
+// model cannot flatten them either.
 void restrictInliningToCalldataChains(Module &M) {
   SmallPtrSet<const Function *, 32> Scoped;
   for (Function &F : M) {
