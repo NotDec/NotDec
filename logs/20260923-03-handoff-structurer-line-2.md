@@ -100,10 +100,10 @@ oracle 规则：`return X;` 后面不允许接语句（`test/structuring/source-
 
 1. **修 §4 回归**（未 push 前必须处理）；验收用 `structuring-source-cases` + 编译预算 + 单测
    （不再有 outlined 预算）。
-2. **P3 的正解是 per-call-site 实例化，不是收窄内联范围**：让 `KIND_MLSUB_POLYMORPHIC_FUNCTION`
-   也能隔离 public entry（`NOTDEC_EVM_POLY_ENTRIES=1` 已可复现），先解 case 24259 的约束 worklist
-   不收敛。那之后连 pre-inline 形状都能给出正确 ABI 参数，内联范围才值得再讨论
-   （`restrictInliningToCalldataChains` 的 seed/闭包只是次要旋钮）。
+2. **~~P3：per-call-site 实例化~~（2026-09-23 决定：不探索）**：calldata 链内联是最终形状，
+   不再走类型恢复那条路；`NOTDEC_EVM_POLY_ENTRIES` / `NOTDEC_EVM_POLY_STRICT` 只作历史诊断开关。
+   `calldata.index` 的退役三步同样不推进（`EVM-Arch.md` §3 已折叠为历史计划）。详见
+   `20260923-04-remove-evm-inline-switch.md` §5。
 3. **type_recovery 快照刷新/重锚**：4 套 suite 自 2026-08-03 起漂移（含新增 `bytes:` 注解、stack-canary 改动），
    与本次结构器线无关，但要单独决定是重锚还是修行为。
 4. push 子模块 + 顶层（两边都有一长串未 push 提交）。

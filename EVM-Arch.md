@@ -194,7 +194,16 @@ post-TR pass 回答**，判断依据是字段偏移/类型是否符合 ABI、eve
   `IsPublicEntry` / `isPublicEntryFunction` 守卫：当前 103 个 case 的 dump 里 1782 处标注
   **全部在 public entry，helper 内 0 处**（helper 的 ABI 词是通过形参传进来的）。
 - 定位：它是"参数识别搬到 post-TR 之前"的过渡手段，只用于 debug/统计/oracle 与后端临时消费。
-- 约定：**不再扩大它的覆盖范围**（只修 bug）。后续只做一件事——按下面顺序退役：
+- 约定：**不再扩大它的覆盖范围**（只修 bug）。
+- **2026-09-23 决定：退役不推进**（calldata 链内联是最终形状，见
+  `logs/20260923-04-remove-evm-inline-switch.md`）。理由：`calldata.index` 是当前**唯一**在做
+  “哪个访问 = 第几个参数”的机制；post-TR 那套的索引集合本身就来自这些标注
+  （`AbiParamRecoveryPass.cpp` 的 `UsedIndices`），所以“退役”不是换数据源，而是要先重写一个
+  post-TR 的索引推导——那属于已决定不再探索的类型恢复方向。下面三步只作历史记录；
+  record-vs-annotated 的 cross-check oracle 保留。若后续要让参数带类型，直接在现有标注路径上
+  叠加 HType 类型（`AbiParamRecoveryPass` 已算出 `params/typed/missing/extra`）。
+
+<details><summary>历史计划：退役三步（不推进）</summary>
   1. post-TR 参数识别（用 `%calldata` 的 `HTypeBufferView`）在同一批 case 上给出等价或更好的
      参数命名，并用 pattern suite 的 metadata oracle 交叉验证；
      **进展（2026-09-20）**：`EvmCalldataAccessPass` 已给每个 public entry 插入 per-entry
@@ -209,6 +218,8 @@ post-TR pass 回答**，判断依据是字段偏移/类型是否符合 ABI、eve
   2. 后端 `argN` 的来源从 metadata 切到 post-TR 结果；
   3. `AbiDecodeResultPass` 的标注与 `annotatedAbiArgumentExpr` 的消费路径一起删除
      （或降级为纯 debug），避免同一语义两套表达。
+</details>
+
 - 注意：本次的 linkage/分类改动没有触碰上面任何产生或消费逻辑，只改了
   `EvmCalldataAccessPass` 选择"在哪些函数里做 calldata 重写"的判据（名字 → linkage），
   标注本身仍然只在 public entry 产生。

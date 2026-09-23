@@ -27,7 +27,8 @@
 - 真正的解法是 per-call-site 实例化（`KIND_MLSUB_POLYMORPHIC_FUNCTION`）：public entry 变体
   收益很大，但 case 24259 上约束 worklist 不收敛（25 分钟 / 3 GB），目前只在
   `NOTDEC_EVM_POLY_ENTRIES=1` 下可复现（`EvmCalldataAccessPass.cpp:60-78`）。这是下一步方向，
-  不是回到 pre-inline 形状；`NOTDEC_EVM_POLY_ENTRIES` / `NOTDEC_EVM_POLY_STRICT` 这两个诊断开关保留。
+  曾被认为是下一步方向（同日已否决，见 §4），无论如何不是回到 pre-inline 形状；
+  `NOTDEC_EVM_POLY_ENTRIES` / `NOTDEC_EVM_POLY_STRICT` 这两个诊断开关保留。
 
 ## 2. 改了什么
 
@@ -49,7 +50,20 @@
 注意 `20260922-01` 的根因结论（失败形状是共享 join，不是 duplication）与本次删除无关，仍然有效；
 被更正的是“outlined 是并列口径”这个框架。
 
-## 4. 验证
+## 4. 后续方向的决定（同日）
+
+- **不再探索 per-call-site 多态实例化**：calldata 链内联是最终形状；
+  `NOTDEC_EVM_POLY_ENTRIES` / `NOTDEC_EVM_POLY_STRICT` 只作为历史诊断开关保留，不在路线图上。
+  §1 里“真正的解法是 per-call-site 实例化”是当时的判断，保留它只是为了记录“内联是 workaround”
+  的来龙去脉，**不是待办**。
+- **`calldata.index` 退役不推进**：它是当前唯一的 per-use-site 参数索引来源
+  （`AbiParamRecoveryPass` 的 `UsedIndices` 也来自它），而 post-TR 索引推导属于被否掉的方向。
+  `EVM-Arch.md` §3 的三步退役已折叠为历史计划；要让参数带类型，直接在现有标注路径上叠加
+  HType 类型。
+- 下一步重心回到结构器：先修 `fabd348` 引入的 `structuring-source-cases` 回归
+  （复现与定位见 `20260923-03-handoff-structurer-line-2.md` §4）。
+
+## 5. 验证
 
 - `ninja -C build-notdec-nothreads notdec` 通过。
 - 103 case 编译预算逐项不变：goto 1787、real jump 1695、dangling 58、condition TODO 4078、
