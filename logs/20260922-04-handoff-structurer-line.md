@@ -1,5 +1,9 @@
 # 20260922-04 交接：structurer 修复线与 EVM 扁平形状现状
 
+> **【2026-09-23 更正】** 下面 §4① 让“复测并重锚 outlined 口径”的方向是错的，正文已更正；
+> `NOTDEC_EVM_INLINE` 开关本身也已删除（见 `20260923-04-remove-evm-inline-switch.md`）。
+> 本文件其余内容（结构器修复线、指标、风险）仍然有效。
+
 ## 0. 一句话
 
 "扁平形状 goto 洪峰 = 内联复制" 的旧结论是错的：outlined 基线是后端**丢弃渲染不完整的 helper**
@@ -62,8 +66,11 @@ outlined 口径会话中期测过 goto 424→233、cond_todo 729→658；**P1/P2
 
 ## 4. 接下来
 
-1. **复测并重锚 outlined 口径**：P1/P2 之后重跑 `NOTDEC_EVM_INLINE=0` 全语料，若指标下降就
-   收紧（outlined 是 pattern 套件的默认口径之一，`notdec.evm.solidity_patterns_outlined` 是 pin 的精确值）。
+1. ~~**复测并重锚 outlined 口径**~~（**2026-09-23 更正：方向错误，不要执行**）：pre-inline 形状
+   不是产品形状，而且会把不同入口的 calldata 类型合在一起（record==annotated 1858/2316 vs
+   内联 2264/2316），**不要给它建预算棘轮**。`NOTDEC_EVM_INLINE` 开关与
+   `notdec.evm.solidity_patterns_outlined` 都已在 `20260923-04` 删除；拿这个形状做结构器 A/B
+   只能算一次性诊断。真正该推进的是 per-call-site 实例化的收敛性（同上日志）。
 2. **清掉剩余 `TODO(structuring)`**（`test/structuring/structuring_analysis_test.cpp`）：
    - 三个 `refineCyclic` 手搭 CFG 的 DoWhile/InfiniteLoop 期望（疑似受 0f3c38f 折叠影响，需重定形状，
      不是简单数值修正）；

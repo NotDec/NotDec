@@ -1,5 +1,9 @@
 # 交接：EVM Solidity 链路当前状态与下一步（2026-09-20 收尾）
 
+> **【2026-09-23 注】** 本文里的 `NOTDEC_EVM_INLINE` 三档开关已删除：calldata 链内联是唯一
+> 形状（`20260923-04-remove-evm-inline-switch.md`）。文中提到 `=0` / `all` 的段落只作历史记录；
+> 当前的默认与唯一口径就是文中说的 `calldata` 档。
+
 ## 0. 链路与目标
 
 EVM bytecode → Gigahorse → evm2llvm IR → NotDec（pre-TR → 类型恢复 → post-TR）→ Solidity 后端。

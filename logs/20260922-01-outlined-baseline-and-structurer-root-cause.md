@@ -1,5 +1,12 @@
 # 20260922-01 内联 A/B 的真实基线，以及 structurer 失败的根因定位
 
+> **【2026-09-23 注】** 本文的“outlined 基线”是**诊断视角**，不是产品口径：pre-inline 形状会把
+> 不同入口的 calldata 类型合在一起（模块级记录并集，见 `20260920-01` §3），实测
+> record==annotated 1858/2316 vs 内联 2264/2316。`NOTDEC_EVM_INLINE` 开关已删除（`20260923-04`）。
+> §8 P0 的“让基线诚实”应理解为“测量要诚实”（别把后端丢 helper 的结果当成绩），不是
+> “把 outlined 抬成口径”。本文的根因结论——失败形状是共享 join 而不是 duplication——与内联无关，
+> 仍然有效。
+
 结论先行：**不建议先迁移 angr 的 duplication/similarity（ISD）那条线**。
 "outlined 下结构化得很干净" 是后端 **丢弃 helper** 造成的幸存者偏差；同一批函数体在
 **没有内联** 的情况下同样结构化失败。失败点不在重复（duplication），而在 Phoenix 的

@@ -52,7 +52,7 @@ phi 合并块的反 phi 化（dephication）变量此前只出现在赋值侧，
 ## 4. 验证
 
 - `structuring-analysis-test`：**exit 0**（全量单测，含上面所有改动）。
-- 103 case 编译预算（扁平与 outlined 两套，见 20260923-01）在 phi 改动后**逐项不变**：
-  flat goto 1787 / real 1695 / dangling 58 / cond_todo 4078 / unresolved 297 / solc 0 失败；
-  outlined 140 / 100 / 19 / 558 / 267 / 0 失败。即该修复对当前语料是纯收益（测试形状正确了，
-  语料没被扰动），不需要动预算。
+- 103 case 编译预算在 phi 改动后**逐项不变**：goto 1787 / real 1695 / dangling 58 /
+  cond_todo 4078 / unresolved 297 / solc 0 失败。即该修复对当前语料是纯收益（测试形状正确了，
+  语料没被扰动），不需要动预算。（当时一并测过的 pre-inline 形状数字见
+  `20260923-01-outlined-diagnostic-snapshot.md`；该形状及对应预算已在 `20260923-04` 删除。）

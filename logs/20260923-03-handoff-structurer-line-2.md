@@ -1,8 +1,10 @@
-# 20260923-03 交接：outlined 棘轮 + structuring TODO 清零；发现 fabd348 的 C 路径回归
+# 20260923-03 交接：structuring TODO 清零；发现 fabd348 的 C 路径回归（outlined 棘轮已作废）
 
 ## 0. 一句话
 
-交接文档 20260922-04 的 ①② 做完了：outlined 口径建了独立预算棘轮；6 处 `TODO(structuring)` 全部清零
+交接文档 20260922-04 的 ①② 做完了：~~outlined 口径建了独立预算棘轮~~（**2026-09-23 更正：这个棘轮
+方向错误，已随 `NOTDEC_EVM_INLINE` 开关一起删除**，见 `20260923-04-remove-evm-inline-switch.md`）；
+6 处 `TODO(structuring)` 全部清零
 （5 处按折叠后形状重定，1 处是后端真 bug：phi 反 phi 化变量没有声明、读取渲染成 `return 0 /* TODO */`）。
 全量 ctest 之后 6 套 EVM solidity + lifting 全绿，但发现 **`structuring-source-cases` 是 fabd348 引入的回归**
 （7 个 source case 渲染出 `return` 之后的重复语句），4 套 type_recovery 则是 2026-08-03 以来的快照漂移。
@@ -12,14 +14,17 @@
 
 | 顶层 | 子模块 NotDec-llvm2c | 内容 |
 | --- | --- | --- |
-| `48da846c` | — | outlined 独立预算 `compile-budget-outlined.json` + `notdec.evm.solidity_pattern_compile_outlined` |
+| `48da846c` | — | ~~outlined 独立预算~~（**已作废**，见下一行） |
 | `21417e47` | `a147cf7` + `16971a7` | phi dephication 变量声明/读回；6 处 `TODO(structuring)` 清零 |
+| `924cbd2f` | — | 删除 `NOTDEC_EVM_INLINE` 开关：calldata 链内联是唯一形状；删除 outlined 预算与两套 outlined 测试 |
 
-日志：`logs/20260923-01-outlined-baseline-reanchor.md`、`logs/20260923-02-structuring-todo-cleanup.md`。
+日志：`logs/20260923-04-remove-evm-inline-switch.md`（本次更正）、
+`logs/20260923-02-structuring-todo-cleanup.md`、
+`logs/20260923-01-outlined-diagnostic-snapshot.md`（已改写为诊断快照）。
 
 ## 2. 指标（103 case）
 
-| 指标 | flat（交接值 → 现在） | outlined（会话前 → 现在） | all（新测） |
+| 指标 | 内联（唯一形状；交接值 → 现在） | pre-inline（诊断，形状已删除） | all（历史诊断，已删除） |
 | --- | --- | --- | --- |
 | goto | 1787 = 1787 | 424 → **140** | **742** |
 | real jump | 1695 = 1695 | 343 → 100 | 678 |
@@ -29,14 +34,15 @@
 | helper funcs / call sites | 1313 / 2442 | 1339/1301 → 1383/1394 | **182 / 292** |
 | solc 失败 | 0 | 0 | 0 |
 
-- flat 复跑逐项等于交接文档，说明基线可比；phi 修复后两套口径**逐项不变**（语料不受影响）。
-- `NOTDEC_EVM_INLINE=all` 是 P3 的新证据：goto/cond_todo 远低于 flat（742/2603 vs 1787/4078），
-  但 helper 覆盖崩到 182/292（floor 1276/2408）。即当前 calldata scope 仍把大量 goto 留在桌面上，
-  收窄 scope 有空间，但必须同时守住 helper 覆盖 floor。
+- 内联口径复跑逐项等于交接文档，说明基线可比；phi 修复后**逐项不变**（语料不受影响）。
+- 后两列现在只是历史诊断：两个形状都随开关删除了。它们的用途是说明“结构器修复不是内联特有的”
+  （pre-inline 的 goto 同样 424→140），以及内联范围是 ABI 覆盖与结构器输出之间的权衡
+  （`all` 档 goto/cond_todo 更低，但 helper 覆盖崩到 182/292，floor 是 1276/2408）。
 
 ## 3. 全量 ctest（24 项）归因
 
-通过：6 套 `notdec.evm.solidity*`（含新增 outlined 编译预算）、`notdec.lifting.wasm`、
+通过：当时的 6 套 `notdec.evm.solidity*`；删除 outlined 两套后是 4 套（patterns / pattern_compile /
+rewrite / source，已在 `924cbd2f` 之后复跑全绿）、`notdec.lifting.wasm`、
 `sysy-tests`、`phi-demote` / `phi-demote-htypes`（先把 `phi-demote-test` 建出来）、
 `legacy-phoenix-removed` / `structured-phoenix-available` / `shared-structurer-registry`
 （先把 `notdec-llvm2c` 建出来，此前它们因 `FileNotFoundError` 全挂）。
@@ -92,10 +98,12 @@ oracle 规则：`return X;` 后面不允许接语句（`test/structuring/source-
 
 ## 5. 接下来（按优先级）
 
-1. **修 §4 回归**（未 push 前必须处理）；用 `structuring-source-cases` + 两套编译预算 + 单测做验收。
-2. **P3 内联 scope**：用 §2 的 `all` 档数据做方向判断；`EvmHelperInliningPass.cpp` 的
-   `restrictInliningToCalldataChains`（seed = 直接调 `evm_calldataload/copy` 的非 entry 函数；只做向上闭包）
-   是收窄点；`EvmCalldataAccessPass` 已有 polymorphic 集合可用来只展开"偏移相对形参不恒定"的 reader。
+1. **修 §4 回归**（未 push 前必须处理）；验收用 `structuring-source-cases` + 编译预算 + 单测
+   （不再有 outlined 预算）。
+2. **P3 的正解是 per-call-site 实例化，不是收窄内联范围**：让 `KIND_MLSUB_POLYMORPHIC_FUNCTION`
+   也能隔离 public entry（`NOTDEC_EVM_POLY_ENTRIES=1` 已可复现），先解 case 24259 的约束 worklist
+   不收敛。那之后连 pre-inline 形状都能给出正确 ABI 参数，内联范围才值得再讨论
+   （`restrictInliningToCalldataChains` 的 seed/闭包只是次要旋钮）。
 3. **type_recovery 快照刷新/重锚**：4 套 suite 自 2026-08-03 起漂移（含新增 `bytes:` 注解、stack-canary 改动），
    与本次结构器线无关，但要单独决定是重锚还是修行为。
 4. push 子模块 + 顶层（两边都有一长串未 push 提交）。
