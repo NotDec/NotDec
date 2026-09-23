@@ -59,26 +59,6 @@ function(add_evm_solidity_patterns_suite test_name manifest_relpath)
 	)
 endfunction()
 
-# The outlined shape is no longer the default; its exact-comparison baseline
-# still guards the pre-inlining behaviour.
-function(add_evm_solidity_patterns_outlined_suite test_name manifest_relpath)
-	add_test(
-		NAME ${test_name}
-		COMMAND
-			${CMAKE_COMMAND} -E env NOTDEC_EVM_INLINE=0
-			${Python3_EXECUTABLE}
-			${CMAKE_CURRENT_SOURCE_DIR}/run_evm_solidity_patterns_suite.py
-			--binary
-			$<TARGET_FILE:notdec>
-			--manifest
-			${CMAKE_CURRENT_SOURCE_DIR}/${manifest_relpath}
-			--project-root
-			${PROJECT_SOURCE_DIR}
-			--workdir
-			${CMAKE_CURRENT_BINARY_DIR}/artifacts/${test_name}
-	)
-endfunction()
-
 function(add_evm_solidity_rewrite_suite test_name manifest_relpath)
 	add_test(
 		NAME ${test_name}
@@ -145,36 +125,6 @@ function(add_evm_solidity_pattern_compile_suite test_name cases_relpath
 	)
 endfunction()
 
-# Same engine in the outlined shape (NOTDEC_EVM_INLINE=0).  The flattened
-# default changes the helper coverage floors, so this shape carries its own
-# budget file; pinning it keeps the pre-inlining baseline honest instead of
-# letting the backend's dropped-helper bias (lib/Solidity/Reader.cpp) define it.
-function(add_evm_solidity_pattern_compile_outlined_suite test_name cases_relpath
-                                                         budget_relpath)
-	if(NOT NOTDEC_SOLC)
-		return()
-	endif()
-	add_test(
-		NAME ${test_name}
-		COMMAND
-			${CMAKE_COMMAND} -E env NOTDEC_EVM_INLINE=0
-			${Python3_EXECUTABLE}
-			${CMAKE_CURRENT_SOURCE_DIR}/run_evm_solidity_pattern_compile_suite.py
-			--binary
-			$<TARGET_FILE:notdec>
-			--cases
-			${CMAKE_CURRENT_SOURCE_DIR}/${cases_relpath}
-			--budget
-			${CMAKE_CURRENT_SOURCE_DIR}/${budget_relpath}
-			--project-root
-			${PROJECT_SOURCE_DIR}
-			--workdir
-			${CMAKE_CURRENT_BINARY_DIR}/artifacts/${test_name}
-			--solc
-			"${NOTDEC_SOLC}"
-	)
-endfunction()
-
 add_lifting_suite(
 	notdec.lifting.wasm
 	lifting/wasm/manifest.json
@@ -185,22 +135,12 @@ add_evm_solidity_patterns_suite(
 	evm/solidity-patterns/manifest.json
 )
 
-add_evm_solidity_patterns_outlined_suite(
-	notdec.evm.solidity_patterns_outlined
-	evm/solidity-patterns/manifest.json
-)
-
 add_evm_solidity_pattern_compile_suite(
 	notdec.evm.solidity_pattern_compile
 	evm/solidity-patterns/cases
 	evm/solidity-patterns/compile-budget.json
 )
 
-add_evm_solidity_pattern_compile_outlined_suite(
-	notdec.evm.solidity_pattern_compile_outlined
-	evm/solidity-patterns/cases
-	evm/solidity-patterns/compile-budget-outlined.json
-)
 
 add_evm_solidity_rewrite_suite(
 	notdec.evm.solidity_rewrite

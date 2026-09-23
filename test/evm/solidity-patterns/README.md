@@ -23,12 +23,13 @@ When a change improves a metric, lower the budget in the same commit so the
 improvement is locked in.  Raising a budget requires a concrete reason recorded
 in `logs/`.
 
-## Pattern suite shapes (outlined and flattened)
+## Pattern suite shape (flattened)
 
-`notdec.evm.solidity_patterns` runs the default flattened IR
-(`NOTDEC_EVM_INLINE=calldata`: the calldata chains are expanded before type
-recovery) and compares with two adjustments.  `notdec.evm.solidity_patterns_outlined`
-pins `NOTDEC_EVM_INLINE=0` and compares every expected count exactly:
+The EVM pipeline has one shape: `EvmHelperInliningPass` always expands the
+calldata chain before type recovery, so the recovered calldata record sees the
+absolute per-entry offsets.  (The pre-inlining outlined shape no longer exists;
+the earlier logs that calibrate it are historical.)  `notdec.evm.solidity_patterns`
+compares the flattened output with two adjustments:
 
 - Keys whose count grows with the number of textual sites (`rewrite_marker:*`,
   `revert_kind:*`, `checked_bounds_kind:*`, `notdec.solidity.*`, ...) are lower

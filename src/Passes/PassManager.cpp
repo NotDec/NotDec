@@ -426,8 +426,7 @@ void PassEnv::build_passes(int level, bool stopBeforeTypeRecovery,
       // The per-entry calldata view is a type-recovery device only; drop it
       // before every later pass and the backend see it.
       MPM.addPass(evm::EvmCalldataViewCleanupPass());
-      MPM.addPass(
-          evm::AbiReturnPass(*TR, evm::isHelperInliningEnabled()));
+      MPM.addPass(evm::AbiReturnPass(*TR));
       MPM.addPass(evm::SolidityRevertPass(*TR));
       MPM.addPass(createModuleToFunctionPassAdaptor(evm::CheckedBoundsPass()));
       MPM.addPass(evm::EventLogPass(*TR));

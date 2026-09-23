@@ -6,13 +6,15 @@
 // constants the original Solidity had, which is what the recovered calldata
 // record and the ABI parameter table need.
 //
-// The pass deliberately uses LLVM's own inliner and its default cost model
-// instead of expanding every call: the forward compiler also inlined by
-// judgement (single use, small bodies, constant arguments), and an exhaustive
-// expansion floods the structurer with duplicated bounds/revert code.  Running
-// it first -- before entry outlining, the per-entry calldata view and the
-// calldata.index annotations -- means every later EVM pass sees the flattened
-// shape, so the annotations land on the absolute offsets.
+// The scope stays on the calldata chain (the readers plus everything that can
+// reach them) instead of expanding every call: an exhaustive expansion floods
+// the structurer with duplicated bounds/revert code and destroys the helper
+// coverage the Solidity output is meant to keep.  This flattened shape is the
+// only one the EVM pipeline produces -- there is no outlined mode to keep
+// alive.  Running the pass first -- before entry outlining, the per-entry
+// calldata view and the calldata.index annotations -- means every later EVM
+// pass sees the flattened shape, so the annotations land on the absolute
+// offsets.
 #include "Passes/evm/SolidityPatternUtils.h"
 
 #include <llvm/ADT/SmallVector.h>
@@ -37,30 +39,8 @@ using namespace llvm;
 namespace notdec::passes::evm {
 namespace {
 
-// The default is "calldata": only the helpers on an entry -> calldata read path
-// are expanded, which restores the absolute calldata offsets the ABI parameter
-// table needs while the arithmetic and revert scaffolding stays outlined (the
-// shared guard helpers there are only constant-foldable dead code once
-// flattened).  "1"/"all" sends the whole module through the inliner, and "0"
-// keeps the pre-inlining outlined shape.
-enum class InlineMode { Off, All, Calldata };
-
-InlineMode getInlineMode() {
-  const char *Value = std::getenv("NOTDEC_EVM_INLINE");
-  if (Value == nullptr || Value[0] == '\0') {
-    return InlineMode::Calldata;
-  }
-  if (std::strcmp(Value, "0") == 0) {
-    return InlineMode::Off;
-  }
-  if (std::strcmp(Value, "calldata") == 0) {
-    return InlineMode::Calldata;
-  }
-  return InlineMode::All;
-}
-
 bool helperInliningDiagnosticsEnabled() {
-  const char *Value = std::getenv("NOTDEC_EVM_INLINE_DIAG");
+  const char *Value = std::getenv("NOTDEC_EVM_HELPER_INLINE_DIAG");
   return Value != nullptr && Value[0] != '\0' && std::strcmp(Value, "0") != 0;
 }
 
@@ -183,20 +163,10 @@ bool isRemovableHelper(const Function &F) {
 
 } // namespace
 
-// The phase is behind an environment switch until the pattern oracles that
-// were calibrated on the outlined shape are re-baselined.
-bool isHelperInliningEnabled() { return getInlineMode() != InlineMode::Off; }
-
 PreservedAnalyses EvmHelperInliningPass::run(Module &M,
                                              ModuleAnalysisManager &MAM) {
-  const InlineMode Mode = getInlineMode();
-  if (Mode == InlineMode::Off) {
-    return PreservedAnalyses::all();
-  }
   pinPublicEntriesNoInline(M);
-  if (Mode == InlineMode::Calldata) {
-    restrictInliningToCalldataChains(M);
-  }
+  restrictInliningToCalldataChains(M);
 
   const unsigned CallsBefore = countCalls(M);
   const unsigned DefinitionsBefore = countDefinitions(M);
@@ -217,9 +187,8 @@ PreservedAnalyses EvmHelperInliningPass::run(Module &M,
   }
 
   if (helperInliningDiagnosticsEnabled()) {
-    errs() << "[evm-inline-helpers] mode="
-           << (Mode == InlineMode::Calldata ? "calldata" : "all") << " calls "
-           << CallsBefore << " -> "
+    errs() << "[evm-inline-helpers] scope=calldata calls " << CallsBefore
+           << " -> "
            << countCalls(M) << ", definitions " << DefinitionsBefore << " -> "
            << countDefinitions(M) << ", removed " << Dead.size() << "\n";
   }

@@ -90,19 +90,14 @@ struct AbiDecodeResultPass : llvm::PassInfoMixin<AbiDecodeResultPass> {
 
 // Expands the decompiled Yul-function helpers at their call sites, so the
 // recovered calldata record sees the absolute per-entry offsets the forward
-// compiler's inliner would have produced.  Recursive cycles stay outlined.
-// Behind NOTDEC_EVM_INLINE until the calibrated pattern oracles follow.
+// compiler's inliner would have produced.  Recursive cycles stay outlined, and
+// only the calldata chain is expanded so the helper coverage survives.
 struct EvmHelperInliningPass
     : llvm::PassInfoMixin<EvmHelperInliningPass> {
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 
   static bool isRequired() { return true; }
 };
-
-// True when NOTDEC_EVM_INLINE selects the flattened shape.  Passes whose
-// evidence model is shape-specific read it so the outlined shape keeps its
-// exact behaviour while the flattened shape is brought up.
-bool isHelperInliningEnabled();
 
 // Rewrites low-level EVM storage reads/writes into composable storage helper
 // calls after MLsub has recovered the contract-global storage HType.  The pass
@@ -124,16 +119,8 @@ struct EvmStorageHighLevelRewritePass
 // object construction.
 struct AbiReturnPass : llvm::PassInfoMixin<AbiReturnPass> {
   mlsub::MLsubRecovery &TR;
-  // When the pre-TR inliner has expanded the encoder helpers, the ABI
-  // head/length stores are keyed to the encoder's own allocation base and the
-  // recovered two-field record on the return's free-memory base is the only
-  // remaining evidence.  Off by default so the outlined shape keeps its exact
-  // classification.
-  bool InlineHelperEvidence;
 
-  explicit AbiReturnPass(mlsub::MLsubRecovery &TR,
-                         bool InlineHelperEvidence = false)
-      : TR(TR), InlineHelperEvidence(InlineHelperEvidence) {}
+  explicit AbiReturnPass(mlsub::MLsubRecovery &TR) : TR(TR) {}
 
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 
