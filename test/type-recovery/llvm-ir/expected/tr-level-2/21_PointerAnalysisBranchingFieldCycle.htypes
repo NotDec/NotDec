@@ -1,6 +1,10 @@
 # HTypeResult
 
 [decls]
+struct struct_0 {
+  'l:8 | 'n:8 | 'p:8 | 'r:8 field_0; /* at offset: 0, bytes: 1 */
+};
+
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:32
@@ -11,21 +15,21 @@
 [+] const(i8 1)@main::%bb.short_step.i2:0 => lower=bottom:8 ; upper=top:8
 [+] const(i8 4)@main::%bb.wide_left.i2:0 => lower=bottom:8 ; upper=top:8
 [+] const(i8 5)@main::%bb.wide_right.i2:0 => lower=bottom:8 ; upper=top:8
-[-] main::%base => lower=bottom:32 ; upper=i8[]*
+[-] main::%base => lower=bottom:32 ; upper=struct_0*
 [+] main::%done => lower=bool ; upper=bool
-[+] main::%echo.ptr => lower=bottom:32 ; upper=i8[]*
+[+] main::%echo.ptr => lower=bottom:32 ; upper=struct_0*
 [+] main::%i => lower=bottom:32 ; upper=top:32
 [+] main::%i.next => lower=bottom:32 ; upper=top:32
 [+] main::%loaded => lower=bottom:8 ; upper=top:8
-[+] main::%next => lower=bottom:32 ; upper=i8[]*
-[+] main::%next.ptr => lower=bottom:32 ; upper=i8[]*
-[+] main::%p => lower=bottom:32 ; upper=i8[]*
-[+] main::%short.next => lower=bottom:32 ; upper=i8[]*
-[+] main::%short.ptr => lower=bottom:32 ; upper=i8[]*
-[+] main::%wide.left.next => lower=bottom:32 ; upper=i8[]*
-[+] main::%wide.left.ptr => lower=bottom:32 ; upper=i8[]*
-[+] main::%wide.right.next => lower=bottom:32 ; upper=i8[]*
-[+] main::%wide.right.ptr => lower=bottom:32 ; upper=i8[]*
+[+] main::%next => lower=bottom:32 ; upper=struct_0*
+[+] main::%next.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::%p => lower=bottom:32 ; upper=struct_0*
+[+] main::%short.next => lower=bottom:32 ; upper=struct_0*
+[+] main::%short.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::%wide.left.next => lower=bottom:32 ; upper=struct_0*
+[+] main::%wide.left.ptr => lower=bottom:32 ; upper=struct_0*
+[+] main::%wide.right.next => lower=bottom:32 ; upper=struct_0*
+[+] main::%wide.right.ptr => lower=bottom:32 ; upper=struct_0*
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [-] main::arg0 => lower=bottom:32 ; upper=top:32
 [-] main::arg1 => lower=bool ; upper=bool

@@ -4,34 +4,30 @@
 typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
 
 struct struct_0 {
-  top:256 field_0; /* at offset: 32 */
-};
-
-struct struct_1 {
-  struct_2 slot_1; /* storage path: slot:1 (slot 1) */
+  struct_1 slot_1; /* storage path: slot:1 (slot 1), bytes: 1 */
 }; /* EVM storage root */
 
-struct struct_2 {
-  struct_3 map; /* storage path: slot:1.map (slot 1 / mapping) */
+struct struct_1 {
+  struct_2 map; /* storage path: slot:1.map (slot 1 / mapping), bytes: 1 */
 }; /* storage path: slot:1 (slot 1) */
 
-struct struct_3 {
-  top:256 key; /* storage path: slot:1.map.key (slot 1 / mapping / mapping key) */
-  struct_4 value; /* storage path: slot:1.map.value (slot 1 / mapping / mapping value) */
+struct struct_2 {
+  top:256 key; /* storage path: slot:1.map.key (slot 1 / mapping / mapping key), bytes: 1 */
+  struct_3 value; /* storage path: slot:1.map.value (slot 1 / mapping / mapping value), bytes: 1 */
 }; /* storage path: slot:1.map (slot 1 / mapping) */
 
-struct struct_4 {
-  struct_5 map; /* storage path: slot:1.map.value.map (slot 1 / mapping / mapping value / mapping) */
+struct struct_3 {
+  struct_4 map; /* storage path: slot:1.map.value.map (slot 1 / mapping / mapping value / mapping), bytes: 1 */
 }; /* storage path: slot:1.map.value (slot 1 / mapping / mapping value) */
 
-struct struct_5 {
-  top:256 key; /* storage path: slot:1.map.value.map.key (slot 1 / mapping / mapping value / mapping / mapping key) */
-  ptr<load=void, store=void, psize=256> value; /* storage path: slot:1.map.value.map.value (slot 1 / mapping / mapping value / mapping / mapping value) */
+struct struct_4 {
+  top:256 key; /* storage path: slot:1.map.value.map.key (slot 1 / mapping / mapping value / mapping / mapping key), bytes: 1 */
+  ptr<load=void, store=void, psize=256> value; /* storage path: slot:1.map.value.map.value (slot 1 / mapping / mapping value / mapping / mapping value), bytes: 1 */
 }; /* storage path: slot:1.map.value.map (slot 1 / mapping / mapping value / mapping) */
 
 
 [types]
-[+] <null-value> => lower=<null> ; upper=struct_0*
+[+] <null-value> => lower=<null> ; upper=void**
 [+] @evm_sha3 => lower=(bottom:256 (*)(top:256, top:256, top:256))* ; upper=top:64
 [+] @evm_sload => lower=(bottom:256 (*)(top:256))* ; upper=top:64
 [+] @evm_sstore => lower=(void (*)(top:256, top:256))* ; upper=top:64
@@ -62,9 +58,8 @@ struct struct_5 {
 [+] nested_mapping::arg2 => lower=bottom:256 ; upper=top:256
 
 [memory]
-type => struct_0*
+type => void**
 
 [storage]
-decl => struct_1
-type => struct_1
-
+decl => struct_0
+type => struct_0

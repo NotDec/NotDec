@@ -4,16 +4,16 @@
 typedef u256 typedef_0; /* semantic primitive lattice node: prim.uint256.evm.storage_key */
 
 struct struct_0 {
-  struct_1 slot_0; /* storage path: slot:0 (slot 0) */
+  struct_1 slot_0; /* storage path: slot:0 (slot 0), bytes: 1 */
 }; /* EVM storage root */
 
 struct struct_1 {
-  struct_2 bytes; /* storage path: slot:0.bytes (slot 0 / bytes/string) */
+  struct_2 bytes; /* storage path: slot:0.bytes (slot 0 / bytes/string), bytes: 1 */
 }; /* storage path: slot:0 (slot 0) */
 
 struct struct_2 {
-  top:256 length; /* storage path: slot:0.bytes.length (slot 0 / bytes/string / length) */
-  u256 short_data; /* storage path: slot:0.bytes.short_data (slot 0 / bytes/string / short bytes/string data) */
+  top:256 length; /* storage path: slot:0.bytes.length (slot 0 / bytes/string / length), bytes: 1 */
+  u256 short_data; /* storage path: slot:0.bytes.short_data (slot 0 / bytes/string / short bytes/string data), bytes: 1 */
 }; /* storage path: slot:0.bytes (slot 0 / bytes/string) */
 
 
@@ -45,4 +45,3 @@ type => top:64
 [storage]
 decl => struct_0
 type => struct_0
-

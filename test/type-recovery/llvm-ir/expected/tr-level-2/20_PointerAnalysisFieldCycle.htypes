@@ -2,13 +2,16 @@
 
 [decls]
 struct struct_0 {
-  'i:8 field_0; /* at offset: 0 */
-  'i:8[] field_1; /* at offset: 1 */
+  void* field_0; /* at offset: 0, bytes: 1 */
+  struct_1 field_1; /* at offset: 1, bytes: 5 */
 };
 
 struct struct_1 {
-  'i:8 field_0; /* at offset: 0 */
-  'i:8[] field_1; /* at offset: 1 */
+  void* field_0; /* at offset: 0, bytes: 1 */
+};
+
+struct struct_2 {
+  'i:8 field_0; /* at offset: 0, bytes: 1 */
 };
 
 
@@ -22,14 +25,13 @@ struct struct_1 {
 [+] main::%done => lower=bool ; upper=bool
 [+] main::%i => lower=bottom:32 ; upper=top:32
 [+] main::%i.next => lower=bottom:32 ; upper=top:32
-[+] main::%next => lower=bottom:32 ; upper='i:8[]*
-[+] main::%next.ptr => lower=bottom:32 ; upper='i:8[]*
-[+] main::%p => lower=bottom:32 ; upper=struct_1*
-[+] main::%p.ptr => lower=bottom:32 ; upper=struct_1*
+[+] main::%next => lower=bottom:32 ; upper=struct_2*
+[+] main::%next.ptr => lower=bottom:32 ; upper=struct_2*
+[+] main::%p => lower=bottom:32 ; upper=struct_0*
+[+] main::%p.ptr => lower=bottom:32 ; upper=struct_0*
 [+] main::%v => lower=bottom:8 ; upper=top:8
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] main::arg0 => lower=bottom:32 ; upper=top:32
 
 [memory]
 type => top:32
-

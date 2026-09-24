@@ -2,9 +2,12 @@
 
 [decls]
 struct struct_0 {
-  'r:32 field_0; /* at offset: 0 */
-  struct_0 field_1; /* at offset: 4 */
-  top:32 field_2; /* at offset: 8 */
+  'r:32 field_0; /* at offset: 0, bytes: 4 */
+  struct_1 field_1; /* at offset: 4, bytes: 12 */
+};
+
+struct struct_1 {
+  'r:32 field_0; /* at offset: 0, bytes: 4 */
 };
 
 

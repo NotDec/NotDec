@@ -2,18 +2,18 @@
 
 [decls]
 struct struct_0 {
-  'q:32 field_0; /* at offset: -16 */
-  i8[8] padding_0; /* at offset: -12 */
-  'q:32 & top:32 field_1; /* at offset: -4 */
+  'r:32 field_0; /* at offset: -16, bytes: 4 */
+  i8[8] padding_0; /* at offset: -12, bytes: 8 */
+  void* field_1; /* at offset: -4, bytes: 4 */
 };
 
 struct struct_1 {
-  top:32 field_0; /* at offset: -8 */
-  void** field_1; /* at offset: -4 */
+  void* field_0; /* at offset: -8, bytes: 4 */
+  void** field_1; /* at offset: -4, bytes: 4 */
 };
 
 struct struct_2 {
-  top:32 field_0; /* at offset: -24 */
+  void* field_0; /* at offset: -24, bytes: 4 */
 };
 
 

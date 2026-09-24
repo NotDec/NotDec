@@ -1,14 +1,17 @@
 # HTypeResult
 
 [decls]
+struct struct_0 {
+  void* field_0; /* at offset: 1024, bytes: 4 */
+};
+
 
 [types]
-[+] <null-value> => lower=<null> ; upper=top:32
+[+] <null-value> => lower=<null> ; upper=struct_0*
 [+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
 [+] @passMem1 => lower=(bottom:32 (*)())* ; upper=(top:32 (*)())*
+[+] addr(0x400) => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] const(i32 0)@main::%bb.allocator.i1:0 => lower=bottom:32 ; upper=top:32
-[+] const(i32 1024)@main::%memptr1:0 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
-[+] const(i32 1024)@passMem1::%memptr1:0 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] main::%memptr1 => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] main::%r => lower=bottom:32 ; upper=top:32
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
@@ -19,5 +22,4 @@
 [+] passMem1::<ret> => lower=bottom:32 ; upper=top:32
 
 [memory]
-type => top:32
-
+type => struct_0*

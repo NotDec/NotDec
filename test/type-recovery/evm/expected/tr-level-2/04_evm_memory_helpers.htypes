@@ -2,9 +2,9 @@
 
 [decls]
 struct struct_0 {
-  void* field_0; /* at offset: 0 */
-  'h:256 field_1; /* at offset: 32 */
-  'h:256 field_2; /* at offset: 64 */
+  void* field_0; /* at offset: 0, bytes: 32 */
+  'h:256 field_1; /* at offset: 32, bytes: 32 */
+  'h:256 field_2; /* at offset: 64, bytes: 32 */
 };
 
 
@@ -25,4 +25,3 @@ struct struct_0 {
 type => struct_0*
 
 [storage]
-

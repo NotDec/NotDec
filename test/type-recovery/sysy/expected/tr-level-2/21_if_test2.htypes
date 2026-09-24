@@ -7,10 +7,42 @@
 [+] @ifElseIf => lower=(bottom:32 (*)())* ; upper=(top:32 (*)())*
 [+] @main => lower=(bottom:32 (*)())* ; upper=top:64
 [+] @putint => lower=(void (*)(top:32))* ; upper=(void (*)(bottom:32))*
-[+] const(i32 -5)@ifElseIf::%bb0.i0:0 => lower=bottom:32 ; upper=top:32
-[+] const(i32 0)@main::%bb0.i2:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 -5)@ifElseIf::%bb7.i1:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@main::%bb0.i1:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 0)@main::%bb0.i4:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 1)@ifElseIf::%bb4.i1:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 10)@ifElseIf::%bb0.i4:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 10)@ifElseIf::%bb3.i1:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 10)@ifElseIf::%bb6.i1:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 11)@ifElseIf::%bb1.i1:1 => lower=bottom:32 ; upper=top:32
+[+] const(i32 25)@ifElseIf::%bb5.i0:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 5)@ifElseIf::%bb0.i3:0 => lower=bottom:32 ; upper=top:32
+[+] const(i32 6)@ifElseIf::%bb0.i6:1 => lower=bottom:32 ; upper=top:32
+[-] ifElseIf::%bb0.i0 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=32>
+[-] ifElseIf::%bb0.i1 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=32>
+[-] ifElseIf::%bb0.i2 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=32>
+[+] ifElseIf::%bb0.i5 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb0.i6 => lower=bool ; upper=bool
+[+] ifElseIf::%bb1.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb1.i1 => lower=bool ; upper=bool
+[+] ifElseIf::%bb12.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb13.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb2.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb3.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb3.i1 => lower=bool ; upper=bool
+[+] ifElseIf::%bb4.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb4.i1 => lower=bool ; upper=bool
+[+] ifElseIf::%bb6.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb6.i1 => lower=bool ; upper=bool
+[+] ifElseIf::%bb7.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb7.i1 => lower=bool ; upper=bool
+[+] ifElseIf::%bb8.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb8.i1 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb9.i0 => lower=bottom:32 ; upper=top:32
+[+] ifElseIf::%bb9.i1 => lower=bottom:32 ; upper=top:32
 [+] ifElseIf::<ret> => lower=bottom:32 ; upper=top:32
-[+] main::%bb0.i0 => lower=bottom:32 ; upper=top:32
+[-] main::%bb0.i0 => lower=bottom:64 ; upper=ptr<load=void, store=void, psize=32>
+[+] main::%bb0.i2 => lower=bottom:32 ; upper=top:32
 [+] main::<ret> => lower=bottom:32 ; upper=top:32
 [+] putint::arg0 => lower=bottom:32 ; upper=top:32
 

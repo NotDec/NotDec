@@ -2,8 +2,8 @@
 
 [decls]
 struct struct_0 {
-  top:32 field_0; /* at offset: -8 */
-  f32 field_1; /* at offset: -4 */
+  void* field_0; /* at offset: -8, bytes: 4 */
+  f32 field_1; /* at offset: -4, bytes: 4 */
 };
 
 
@@ -30,4 +30,3 @@ struct struct_0 {
 
 [memory]
 type => top:32
-

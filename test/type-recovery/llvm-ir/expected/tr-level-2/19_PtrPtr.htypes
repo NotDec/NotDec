@@ -1,11 +1,15 @@
 # HTypeResult
 
 [decls]
+struct struct_0 {
+  ptr<load=void, store=void, psize=32> field_0; /* at offset: 1024, bytes: 4 */
+};
+
 
 [types]
-[+] <null-value> => lower=<null> ; upper=top:32
+[+] <null-value> => lower=<null> ; upper=struct_0*
 [+] @main => lower=(bottom:32 (*)(top:32, top:32))* ; upper=top:32
-[+] const(i32 1024)@main::%a:0 => lower=bottom:32 ; upper=ptr<load=ptr<load=void, store=void, psize=32>, store=void, psize=32>
+[+] addr(0x400) => lower=bottom:32 ; upper=ptr<load=ptr<load=void, store=void, psize=32>, store=void, psize=32>
 [+] main::%a => lower=bottom:32 ; upper=ptr<load=ptr<load=void, store=void, psize=32>, store=void, psize=32>
 [+] main::%b => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
 [+] main::%c => lower=bottom:32 ; upper=ptr<load=void, store=void, psize=32>
@@ -15,5 +19,4 @@
 [+] main::arg1 => lower=bottom:32 ; upper=top:32
 
 [memory]
-type => top:32
-
+type => struct_0*

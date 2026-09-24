@@ -1,12 +1,6 @@
 # HTypeResult
 
 [decls]
-struct struct_0 {
-  top:256 field_0; /* at offset: 0 */
-  top:256 field_1; /* at offset: 32 */
-  top:256 field_2; /* at offset: 64 */
-};
-
 
 [types]
 [+] <null-value> => lower=<null> ; upper=top:256
@@ -29,8 +23,8 @@ struct struct_0 {
 [+] const(i256 3)@main::%bb.entry.i7:2 => lower=bottom:256 ; upper=top:256
 [+] const(i256 4)@main::%bb.entry.i8:2 => lower=bottom:256 ; upper=top:256
 [+] const(i256 5)@main::%bb.entry.i9:2 => lower=bottom:256 ; upper=top:256
-[+] main::%addr => lower=bottom:256 ; upper=struct_0*
-[-] main::%buf => lower=bottom:256 ; upper=struct_0*
+[+] main::%addr => lower=bottom:256 ; upper=void**
+[-] main::%buf => lower=bottom:256 ; upper=void**
 [+] notdec_solidity_abi_return_data_word_write::arg0 => lower=bottom:256 ; upper=top:256
 [+] notdec_solidity_abi_return_data_word_write::arg1 => lower=bottom:256 ; upper=top:256
 [+] notdec_solidity_abi_return_data_word_write::arg2 => lower=bottom:256 ; upper=top:256
