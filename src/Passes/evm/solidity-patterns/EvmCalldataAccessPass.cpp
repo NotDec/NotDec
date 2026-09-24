@@ -728,6 +728,12 @@ bool rewriteCalldataLoad(CallBase &Call, Value *Calldata, Value *Base,
                                   Call.getName() + ".load");
   Load->setAlignment(Align(1));
   Load->copyMetadata(Call, {LLVMContext::MD_dbg, LLVMContext::MD_annotation});
+  // Every rewritten calldata word load is a direct calldata read: the backend
+  // needs that fact to fall back to a __notdec_calldataload intrinsic when no
+  // higher-level identity applies.
+  Load->setMetadata(KIND_SOLIDITY_CALLDATA_RAW,
+                    MDNode::get(Load->getContext(),
+                                MDString::get(Load->getContext(), "1")));
   // ABI argument numbering is only meaningful relative to the public entry
   // wrapper; outlined private helpers receive ABI words through formals.
   if (IsPublicEntry) {

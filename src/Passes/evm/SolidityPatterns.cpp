@@ -36,6 +36,7 @@ const char *KIND_SOLIDITY_CALLDATA_ARG_INDEX =
     "notdec.solidity.calldata.index";
 const char *KIND_SOLIDITY_CALLDATA_LENGTH =
     "notdec.solidity.calldata.length";
+const char *KIND_SOLIDITY_CALLDATA_RAW = "notdec.solidity.calldata.raw";
 const char *KIND_EVM_YUL_SUMMARY = "notdec.evm.yul_function_summary";
 
 namespace {

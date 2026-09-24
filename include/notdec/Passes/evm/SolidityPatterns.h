@@ -23,6 +23,12 @@ extern const char *KIND_SOLIDITY_CALLDATA_ARG_INDEX;
 // annotated head slot.  The backend renders it as "<arg>.length" for
 // bytes/string parameters.
 extern const char *KIND_SOLIDITY_CALLDATA_LENGTH;
+// Marker ("1") on every rewritten calldata word load.  The Solidity backend
+// falls back to a __notdec_calldataload intrinsic for loads that have no
+// higher-level identity (no ABI head slot, no dynamic-argument length), so the
+// low-level check stays representable and compilable instead of becoming a
+// TODO.
+extern const char *KIND_SOLIDITY_CALLDATA_RAW;
 // Per-function summary of a reconstructed Yul function (an EVM subroutine the
 // forward compiler kept instead of inlining).  Phase 0 only records the
 // calling-convention shape and the parameter-relative calldata reads.
