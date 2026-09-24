@@ -302,10 +302,16 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
+        "notdec.solidity.calldata.length": 1,
         "notdec.solidity.checked_bounds": 3,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 9
+      },
+      "expected_metadata_string_values": {
+        "notdec.solidity.calldata.length": {
+          "0": 1
+        }
       },
       "expected_revert_kinds": {
         "empty": 6,
@@ -342,10 +348,16 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
+        "notdec.solidity.calldata.length": 1,
         "notdec.solidity.checked_bounds": 1,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 8
+      },
+      "expected_metadata_string_values": {
+        "notdec.solidity.calldata.length": {
+          "0": 1
+        }
       },
       "expected_revert_kinds": {
         "empty": 7,
@@ -628,10 +640,16 @@
       "expected_nonpayable_functions": 0,
       "expected_metadata_counts": {
         "notdec.solidity.abi_return": 2,
+        "notdec.solidity.calldata.length": 1,
         "notdec.solidity.checked_bounds": 0,
         "notdec.solidity.event": 0,
         "notdec.solidity.payability_guard": 0,
         "notdec.solidity.revert": 8
+      },
+      "expected_metadata_string_values": {
+        "notdec.solidity.calldata.length": {
+          "0": 1
+        }
       },
       "expected_revert_kinds": {
         "empty": 7,

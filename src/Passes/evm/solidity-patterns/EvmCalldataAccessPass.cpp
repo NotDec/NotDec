@@ -36,6 +36,8 @@ STATISTIC(NumCalldataMinSizeGuards,
           "Number of calldata minimum size guards rewritten");
 STATISTIC(NumCalldataArgumentIndexes,
           "Number of calldata loads annotated with an ABI argument index");
+STATISTIC(NumCalldataDynamicLengths,
+          "Number of dynamic argument length words annotated for the backend");
 
 namespace notdec::passes::evm {
 namespace {
@@ -664,6 +666,54 @@ void annotateCalldataArgumentIndex(Instruction &Load, Value *Offset) {
   ++NumCalldataArgumentIndexes;
 }
 
+// The ABI tail of a dynamic argument: its length word sits at "head + 4",
+// where head is the offset word of an annotated ABI head slot.  Record the
+// argument index on the rewritten load so the Solidity backend can render
+// "<arg>.length" instead of leaving every condition over it unresolved.
+void annotateCalldataDynamicLength(Instruction &Load, Value *Offset) {
+  const auto *Add = dyn_cast<BinaryOperator>(Offset);
+  if (Add == nullptr || Add->getOpcode() != Instruction::Add) {
+    return;
+  }
+  Value *Head = nullptr;
+  for (unsigned I = 0; I < 2; ++I) {
+    if (detail::isConstantIntValue(Add->getOperand(I), 4)) {
+      Head = Add->getOperand(1 - I);
+      break;
+    }
+  }
+  const auto *HeadLoad = dyn_cast_or_null<LoadInst>(Head);
+  if (HeadLoad == nullptr) {
+    return;
+  }
+  const MDNode *MD = HeadLoad->getMetadata(KIND_SOLIDITY_CALLDATA_ARG_INDEX);
+  if (MD == nullptr || MD->getNumOperands() != 1) {
+    return;
+  }
+  const auto *Text = dyn_cast<MDString>(MD->getOperand(0));
+  if (Text == nullptr) {
+    return;
+  }
+  llvm::StringRef IndexText = Text->getString();
+  if (IndexText.empty()) {
+    return;
+  }
+  for (char C : IndexText) {
+    if (C < '0' || C > '9') {
+      return;
+    }
+  }
+  unsigned Index = 0;
+  if (IndexText.getAsInteger(10, Index)) {
+    return;
+  }
+  // Backend interface annotation only: the load stays as-is.
+  LLVMContext &Ctx = Load.getContext();
+  Load.setMetadata(KIND_SOLIDITY_CALLDATA_LENGTH,
+                   MDNode::get(Ctx, MDString::get(Ctx, std::to_string(Index))));
+  ++NumCalldataDynamicLengths;
+}
+
 bool rewriteCalldataLoad(CallBase &Call, Value *Calldata, Value *Base,
                          bool IsPublicEntry) {
   if (!detail::isCallTo(&Call, "evm_calldataload") ||
@@ -682,6 +732,9 @@ bool rewriteCalldataLoad(CallBase &Call, Value *Calldata, Value *Base,
   // wrapper; outlined private helpers receive ABI words through formals.
   if (IsPublicEntry) {
     annotateCalldataArgumentIndex(*Load, Offset);
+    if (Load->getMetadata(KIND_SOLIDITY_CALLDATA_ARG_INDEX) == nullptr) {
+      annotateCalldataDynamicLength(*Load, Offset);
+    }
   }
   Call.replaceAllUsesWith(Load);
   Call.eraseFromParent();

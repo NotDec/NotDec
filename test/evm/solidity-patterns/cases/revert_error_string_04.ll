@@ -156,7 +156,7 @@ bb._0x19:                                         ; preds = %bb._0xf
   br i1 %evm.branch.cond4, label %bb._0x20aa, label %bb._0x16aa, !notdec.evm !10
 
 bb._0x20aa:                                       ; preds = %bb._0x19
-  call void @public__0x3a276523_0x2d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env), !notdec.evm !11
+  call void @public_run_bytes__0x3a276523(ptr %mem, ptr %calldata, ptr %returndata, ptr %env), !notdec.evm !11
   ret void
 
 bb._0x16aa:                                       ; preds = %bb._0x19, %bb._0xf
@@ -174,7 +174,7 @@ bb._0x29:
   unreachable, !notdec.evm !14
 }
 
-define void @public__0x3a276523_0x2d(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
+define void @public_run_bytes__0x3a276523(ptr %mem, ptr %calldata, ptr %returndata, ptr %env) #0 {
 bb._0x2d:
   %evm.calldatasize = call i256 @evm_calldatasize(ptr %calldata), !notdec.evm !15
   br label %bb._0xa2, !notdec.evm !16

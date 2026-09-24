@@ -34,6 +34,8 @@ const char *KIND_SOLIDITY_CHECKED_BOUNDS = "notdec.solidity.checked_bounds";
 const char *KIND_SOLIDITY_EVENT = "notdec.solidity.event";
 const char *KIND_SOLIDITY_CALLDATA_ARG_INDEX =
     "notdec.solidity.calldata.index";
+const char *KIND_SOLIDITY_CALLDATA_LENGTH =
+    "notdec.solidity.calldata.length";
 const char *KIND_EVM_YUL_SUMMARY = "notdec.evm.yul_function_summary";
 
 namespace {

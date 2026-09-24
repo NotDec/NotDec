@@ -18,6 +18,11 @@ extern const char *KIND_SOLIDITY_EVENT;
 // Decimal ABI argument index (as a string) attached to a rewritten calldata
 // word load whose constant byte offset is 4 + 32*i.
 extern const char *KIND_SOLIDITY_CALLDATA_ARG_INDEX;
+// Decimal ABI argument index (as a string) attached to the length word of a
+// dynamic argument: the load at "head + 4" where head is the offset word of an
+// annotated head slot.  The backend renders it as "<arg>.length" for
+// bytes/string parameters.
+extern const char *KIND_SOLIDITY_CALLDATA_LENGTH;
 // Per-function summary of a reconstructed Yul function (an EVM subroutine the
 // forward compiler kept instead of inlining).  Phase 0 only records the
 // calling-convention shape and the parameter-relative calldata reads.
