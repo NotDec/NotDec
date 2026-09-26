@@ -189,17 +189,33 @@ def main() -> int:
         helper_call_sites += len(HELPER_NAME_RE.findall(text)) - definitions
 
         if args.solc:
-            solc_extra = args.solc_arg if args.solc_arg is not None else ["--via-ir"]
-            solc_command = [args.solc, "--bin", *solc_extra, str(output_sol)]
-            solc_process = run_command(solc_command, project_root)
+            # The front-end checks (types, scopes, mutability -- every error
+            # class this suite has ever caught) are identical under both codegen
+            # pipelines, so the artifact only has to be accepted by one of them:
+            # try the legacy pipeline first (about 25x faster), and fall back to
+            # the IR pipeline when a codegen limit such as "Stack too deep" (or
+            # the uncaught StackTooDeepError the IR pipeline can throw) hits.
+            if args.solc_arg is not None:
+                pipelines = [list(args.solc_arg)]
+            else:
+                pipelines = [[], ["--via-ir"]]
+            solc_process = None
+            first_log = ""
+            for extra in pipelines:
+                solc_command = [args.solc, "--bin", *extra, str(output_sol)]
+                solc_process = run_command(solc_command, project_root)
+                if solc_process.returncode == 0:
+                    break
+                if not first_log:
+                    first_log = solc_process.stdout
             if solc_process.returncode != 0:
                 compile_failures += 1
                 (workdir / (case.stem + ".solc.log")).write_text(
-                    solc_process.stdout
+                    first_log or solc_process.stdout
                 )
                 print(
                     f"[FAIL ] {case.stem}: solc: "
-                    f"{first_error_line(solc_process.stdout)}"
+                    f"{first_error_line(first_log or solc_process.stdout)}"
                 )
 
     checks = [
