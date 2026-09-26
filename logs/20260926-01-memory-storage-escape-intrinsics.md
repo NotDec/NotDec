@@ -8,6 +8,10 @@
 real jump 1111 → 1110；25 个 case 变好，唯一变差的是 case 24612 的 dangling goto 5 → 6
 （下面第 4 节记录原因，已按约定写进 budget 注释）。
 
+同一轮还补了**语句位置**的 `__notdec_sstore(slot, value)`：`formatStorageStore` 只处理具名 slot，
+未识别的 `evm_sstore` 此前**不产生任何 statement**（静默丢掉副作用）。接上 escape 后 189 条存储写
+回到输出，指标零代价（TODO/unresolved/goto/dangling 全部不变）、103 case 仍然全过 solc。
+
 ## 1. 起因：`evm.branch.cond.not` 是当时最大的单点 TODO
 
 按剩余 condition TODO 的名字排序，第一名是 `evm.branch.cond.not`（171 条），远高于
@@ -69,6 +73,14 @@ payability guard），真正卡住的是叶子 `evm_callvalue`：`evmEnvBuiltinE
    `__notdec_sload(0 /* TODO: evm.alloc.addr */)` 会把 1 条占位符变成 2~3 条（case 24601 实测
    unresolved 6 → 11），反而不如保留原来那条紧凑的 `evm_sload`。
 
+6. **语句位置的 SSTORE escape**（`formatStorageStoreEscape`）：`evm_sstore` 且 slot 不是可命名
+   状态变量时，`formatStorageStore` 返回 nullopt 后原本什么都不输出。现在补一条
+   `__notdec_sstore(slot, value)`（`internal` + `assembly { sstore(slot, value) }`，**不带**
+   `pure/view`，因为它是状态写）。语句位置不需要新的 AST 节点：intrinsic 是普通函数调用，
+   直接作为 ExpressionStatement 输出，比在函数体里塞 `AssemblyStatement` 更安全
+   （assembly 只能引用局部变量名，不能放任意表达式）。
+   两个操作数同样要求已解析且非裸动态标识符，并统一过 `wordOperandExpr`。
+
 ## 3. 效果
 
 指标（103 case，相对本轮起点 = 上一轮 escape 原型提交）：
@@ -81,11 +93,20 @@ payability guard），真正卡住的是叶子 `evm_callvalue`：`evmEnvBuiltinE
 | real jump | 1111 | 1110 | −1 |
 | dangling goto | 5 | 6 | +1（见 4.1） |
 | helper functions | 1313 | **1548** | +235 |
-| helper call sites | 2751 | **3112** | +361 |
+| helper call sites | 2751 | **3125** | +374 |
 | 变差的 case | — | 1（24612，仅 dangling） | — |
 
-escape 使用量：`__notdec_calldataload` 1967、`__notdec_mload` 261、`__notdec_sload` 213、
-`__notdec_callvalue` 202、`__notdec_sha3` 157、`__notdec_msize` 1。
+escape 使用量（含 SSTORE escape 之后）：`__notdec_calldataload` 1969、`__notdec_sload` 351、
+`__notdec_sha3` 280、`__notdec_mload` 262、`__notdec_callvalue` 202、`__notdec_sstore` 189、
+`__notdec_msize` 1。其中 sstore/sload/sha3 的绝对值在接上 SSTORE escape 后一起上涨，是因为
+`__notdec_sstore` 让一批 helper body 变干净从而可发射，连带把 body 里的其它 escape 也带进输出。
+SSTORE escape 的典型形态（读-改-写一眼可辨，折叠 matcher 的现成输入）：
+
+```solidity
+__notdec_sstore(__notdec_sha3(0, 64), arg0 + __notdec_sload(__notdec_sha3(0, 64)));   // map[k] += arg0
+__notdec_sstore(__notdec_sha3(0, 64), __notdec_sload(__notdec_sha3(0, 64)) & uint256(type(uint256).max - 255) | uint256(1));  // map[k] = (map[k] & ~0xff) | 1
+__notdec_sstore(uint256(uint160(arg1)), ...);                                         // map[addr] = ...
+```
 
 变好最多：25928 −77、0651 −43、0648 −42、24534 −32、24763 −15、24541 −14。典型输出：
 
@@ -154,11 +175,12 @@ ctest --test-dir build-notdec-nothreads -R notdec.evm.solidity --output-on-failu
 
 ## 6. 下一步
 
-1. **语句位置 escape**：`MSTORE`/`SSTORE` 现在仍然会**静默丢副作用** —— `formatStorageStore`
-   只处理具名 slot，返回 nullopt 时该 store 不产生任何 statement；memory store 同理（
-   `collectStatements` 根本不看 `StoreInst`）。补 `__notdec_mstore(off,val)`、
-   `__notdec_sstore(slot,val)`（同样 `internal` + assembly body，语句位置直接调用即可，
-   不需要新的 AST 节点），条件与表达式 escape 相同（实参必须已解析、过 `wordOperandExpr`）。
+1. **MSTORE 的语句位置 escape**（SSTORE 已完成）：`collectStatements` 根本不看 `StoreInst`，
+   所以 memory store 仍然静默丢弃。难点不是 escape 本身（照抄 `__notdec_mstore(off,val)`），
+   而是**去重**：return buffer 的 store 已经被 `formatSingleWordReturn`/`formatMultiWordReturn`
+   反向扫描重建成 `return x`，如果无条件输出 mstore 会重复。需要在 `collectStatements` 之前
+   先扫一遍本 basic block 的 `evm_return`/`evm_call*`，收集它们认领的 store（或把两个 formatter
+   改成返回「认领的 store 集合」），再对未认领的 store 做 escape。
 2. **折叠 matcher**：`__notdec_sha3(slot, len)` + `__notdec_sload` → `mapping[key]`；
    `__notdec_mload(0x40)` → free memory pointer 语义；`__notdec_calldataload` → ABI 参数。
    需要一层按基本块的内存值编号（`mstore(off, v)` 的 def-use），这是下一块较大的工作。
