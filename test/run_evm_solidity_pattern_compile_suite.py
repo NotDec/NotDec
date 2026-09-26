@@ -117,6 +117,19 @@ def main() -> int:
         default="",
         help="Optional solc binary; when set every generated .sol must compile",
     )
+    # The IR pipeline is the default for this suite: the legacy codegen keeps
+    # locals in EVM stack slots and rejects a body whose live locals exceed the
+    # 16 slots DUP/SWAP can reach ("Stack too deep"), while the generated
+    # decompiler output legitimately has many locals (SSA demotion slots, tuple
+    # returns).  The front-end checks -- types, scopes, mutability: every error
+    # class this suite has actually caught -- are identical under both
+    # pipelines, so the validation net is unaffected.
+    parser.add_argument(
+        "--solc-arg",
+        action="append",
+        default=None,
+        help="Extra solc argument; defaults to --via-ir",
+    )
     args = parser.parse_args()
 
     cases_dir = Path(args.cases).resolve()
@@ -176,7 +189,8 @@ def main() -> int:
         helper_call_sites += len(HELPER_NAME_RE.findall(text)) - definitions
 
         if args.solc:
-            solc_command = [args.solc, "--bin", str(output_sol)]
+            solc_extra = args.solc_arg if args.solc_arg is not None else ["--via-ir"]
+            solc_command = [args.solc, "--bin", *solc_extra, str(output_sol)]
             solc_process = run_command(solc_command, project_root)
             if solc_process.returncode != 0:
                 compile_failures += 1
