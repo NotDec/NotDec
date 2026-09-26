@@ -198,7 +198,10 @@ def main() -> int:
             if args.solc_arg is not None:
                 pipelines = [list(args.solc_arg)]
             else:
-                pipelines = [[], ["--via-ir"]]
+                # The IR pipeline needs its optimizer enabled for the deepest
+                # bodies (solc's own recommendation for Stack too deep), so that
+                # is the last resort.
+                pipelines = [[], ["--via-ir"], ["--via-ir", "--optimize"]]
             solc_process = None
             first_log = ""
             for extra in pipelines:
