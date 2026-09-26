@@ -729,7 +729,7 @@ bool rewriteCalldataLoad(CallBase &Call, Value *Calldata, Value *Base,
   Load->setAlignment(Align(1));
   Load->copyMetadata(Call, {LLVMContext::MD_dbg, LLVMContext::MD_annotation});
   // Every rewritten calldata word load is a direct calldata read: the backend
-  // needs that fact to fall back to a __notdec_calldataload intrinsic when no
+  // needs that fact to fall back to a __evm_calldataload intrinsic when no
   // higher-level identity applies.
   Load->setMetadata(KIND_SOLIDITY_CALLDATA_RAW,
                     MDNode::get(Load->getContext(),

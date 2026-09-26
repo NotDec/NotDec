@@ -2,13 +2,13 @@
 
 ## 0. 一句话
 
-沿用上一轮的 escape 阶梯，把剩下的低层 word 读取接成 intrinsic：`__notdec_mload(off)`、
-`__notdec_sload(slot)`、`__notdec_sha3(off,len)`、`__notdec_msize()`、`__notdec_callvalue()`。
+沿用上一轮的 escape 阶梯，把剩下的低层 word 读取接成 intrinsic：`__evm_mload(off)`、
+`__evm_sload(slot)`、`__evm_sha3(off,len)`、`__evm_msize()`、`__evm_callvalue()`。
 103 case condition TODO **3452 → 3211（−241）**、unresolved **216 → 155（−61）**、
 real jump 1111 → 1110；25 个 case 变好，唯一变差的是 case 24612 的 dangling goto 5 → 6
 （下面第 4 节记录原因，已按约定写进 budget 注释）。
 
-同一轮还补了**语句位置**的 `__notdec_sstore(slot, value)`：`formatStorageStore` 只处理具名 slot，
+同一轮还补了**语句位置**的 `__evm_sstore(slot, value)`：`formatStorageStore` 只处理具名 slot，
 未识别的 `evm_sstore` 此前**不产生任何 statement**（静默丢掉副作用）。接上 escape 后 189 条存储写
 回到输出，指标零代价（TODO/unresolved/goto/dangling 全部不变）、103 case 仍然全过 solc。
 
@@ -29,7 +29,7 @@ payability guard），真正卡住的是叶子 `evm_callvalue`：`evmEnvBuiltinE
 理由是「msg.value 在 non-payable 函数里非法」。这个理由**是成立的**（solc 0.8.25 实测：
 `"msg.value" and "callvalue()" can only be used in payable public functions`，且 assembly 里直接写
 `callvalue()` 在 `pure` 函数里也会报错），但结论不该是「整条条件退化成 TODO」。
-所以 callvalue 走 escape：`internal view` 的 `__notdec_callvalue()`，函数体
+所以 callvalue 走 escape：`internal view` 的 `__evm_callvalue()`，函数体
 `assembly { value := callvalue() }`。
 
 ## 2. 实现
@@ -38,11 +38,11 @@ payability guard），真正卡住的是叶子 `evm_callvalue`：`evmEnvBuiltinE
 
 | intrinsic | 签名 | mutability | Yul 体 |
 | --- | --- | --- | --- |
-| `__notdec_mload` | `(uint256 offset) returns (uint256 value)` | pure | `value := mload(offset)` |
-| `__notdec_msize` | `() returns (uint256 value)` | pure | `value := msize()` |
-| `__notdec_sha3` | `(uint256 offset, uint256 size) returns (uint256 value)` | pure | `value := keccak256(offset, size)` |
-| `__notdec_sload` | `(uint256 slot) returns (uint256 value)` | **view** | `value := sload(slot)` |
-| `__notdec_callvalue` | `() returns (uint256 value)` | **view** | `value := callvalue()` |
+| `__evm_mload` | `(uint256 offset) returns (uint256 value)` | pure | `value := mload(offset)` |
+| `__evm_msize` | `() returns (uint256 value)` | pure | `value := msize()` |
+| `__evm_sha3` | `(uint256 offset, uint256 size) returns (uint256 value)` | pure | `value := keccak256(offset, size)` |
+| `__evm_sload` | `(uint256 slot) returns (uint256 value)` | **view** | `value := sload(slot)` |
+| `__evm_callvalue` | `() returns (uint256 value)` | **view** | `value := callvalue()` |
 
 `sload`/`callvalue` 读的是状态/环境，在 `pure` 里 solc 直接报错，所以这两个 prelude 是 `view`；
 调用方（public entry、helper）本来就没有 mutability 标注（= non-payable），从它们调用 `view` 合法。
@@ -52,34 +52,48 @@ payability guard），真正卡住的是叶子 `evm_callvalue`：`evmEnvBuiltinE
 1. **memory load**（`rawMemoryLoadExpr`）：EVM memory 在 IntToPtr 模型下就是
    `inttoptr <offset word>` 之后一次 `load i256`（另一种模型是 GEP 进
    `@notdec_evm_memory`）。识别 `memoryOffsetOfPointer()` 拿 offset，渲染
-   `__notdec_mload(offset)`。
+   `__evm_mload(offset)`。
    两道保护：
    - 只看 `i256` 的 load（`mstore8` 的 i8 读、`calloc` 后备缓冲的指针 load 都不碰）；
    - `dependsOnPointerAddress()`：沿 def-use 链发现 `ptrtoint` 就放弃 —— calldata/returndata 也是
      `inttoptr(算术)` 的形状，没有这道判断会把 calldata 读误标成 memory 读。
 2. **storage load**：`storageHelperExpr` 已能把具名 slot 还原成状态变量；它返回 nullopt 时
    （未识别 slot、mapping/array 这类整体读）不再直接落到 unresolved，而是渲染
-   `__notdec_sload(slot)`，slot 用原始操作数表达式。
+   `__evm_sload(slot)`，slot 用原始操作数表达式。
 3. **`evm_msize(env)` / `evm_sha3(mem, off, size)` / `evm_callvalue(env)`**：出现在 call 路径。
    第一个实参是四个 runtime 指针之一（生成的 Solidity 不声明它们），按既有约定丢掉；
-   `evm_sha3` 取 args 1/2 渲染成 `__notdec_sha3(off, size)`（Yul 的 `keccak256(offset, size)`）。
+   `evm_sha3` 取 args 1/2 渲染成 `__evm_sha3(off, size)`（Yul 的 `keccak256(offset, size)`）。
 4. **实参卫生**：prelude 形参都是 `uint256`，而实参表达式可能是 `address` 或 `bool`
-   （例如 `__notdec_sload(arg1)` 里 `arg1` 是 `address` 型 ABI 参数）。所有 escape 实参统一过
+   （例如 `__evm_sload(arg1)` 里 `arg1` 是 `address` 型 ABI 参数）。所有 escape 实参统一过
    `wordOperandExpr`（address → `uint256(uint160(...))`，i1 → `x ? 1 : 0`）。
    这一步是修 3 个 solc 失败（0648/0651/24541：`Invalid implicit conversion from address to
-   uint256 requested`）时补上的，`__notdec_calldataload` 也一并补了。
-5. **操作数未解析就不 escape**：`__notdec_mload/sload/sha3` 都要求实参表达式
+   uint256 requested`）时补上的，`__evm_calldataload` 也一并补了。
+5. **操作数未解析就不 escape**：`__evm_mload/sload/sha3` 都要求实参表达式
    `!containsUnresolvedValue() && !containsBareDynamicValue()`。否则
-   `__notdec_sload(0 /* TODO: evm.alloc.addr */)` 会把 1 条占位符变成 2~3 条（case 24601 实测
+   `__evm_sload(0 /* TODO: evm.alloc.addr */)` 会把 1 条占位符变成 2~3 条（case 24601 实测
    unresolved 6 → 11），反而不如保留原来那条紧凑的 `evm_sload`。
 
 6. **语句位置的 SSTORE escape**（`formatStorageStoreEscape`）：`evm_sstore` 且 slot 不是可命名
    状态变量时，`formatStorageStore` 返回 nullopt 后原本什么都不输出。现在补一条
-   `__notdec_sstore(slot, value)`（`internal` + `assembly { sstore(slot, value) }`，**不带**
+   `__evm_sstore(slot, value)`（`internal` + `assembly { sstore(slot, value) }`，**不带**
    `pure/view`，因为它是状态写）。语句位置不需要新的 AST 节点：intrinsic 是普通函数调用，
    直接作为 ExpressionStatement 输出，比在函数体里塞 `AssemblyStatement` 更安全
    （assembly 只能引用局部变量名，不能放任意表达式）。
    两个操作数同样要求已解析且非裸动态标识符，并统一过 `wordOperandExpr`。
+
+7. **命名：`__notdec_*` → `__evm_*`**（`__evm_calldataload`、`__evm_mload`、
+   `__evm_sload`、`__evm_sstore`、`__evm_sha3`、`__evm_msize`、`__evm_callvalue`）。
+   先澄清一层：这些**不是 Yul 函数**，而是合约级 `internal` Solidity 函数（prelude），
+   Yul 只出现在函数体里（`assembly { value := sload(slot) }`）；调用点是普通 Solidity 表达式，
+   出现在 `require(...)`/`if (...)`/算术里。之所以必须是函数、不能把 assembly 直接内联到调用点：
+   inline assembly 只能出现在**语句**位置，而且实参必须是 Solidity 变量/字面量，不能把
+   `a + b` 这类任意表达式塞进 Yul 调用实参；函数调用则同时支持表达式位置和任意实参。
+   为什么不用裸 `evm_sload`：输入 IR 的 runtime intrinsic 就叫 `@evm_sload`，而 unresolved 诊断
+   打印的正是这个名字（`0 /* TODO: unresolved value: evm_sload */`），「escape 调用」和
+   「未解析占位」会变成同一个字符串；将来把 escape 用量计入 pattern oracle 时也会和残留计数混淆。
+   `__evm_` 前缀全树 0 冲突（helper 名来自 `sanitizeIdentifier(IR 名)`，frontend 只产生
+   `public_*`/`private__0x*`/`bb.*`/`evm.*`）。历史 log（`20260924-03`）保留当时的
+   `__notdec_*` 名字，不改写记录。
 
 ## 3. 效果
 
@@ -96,29 +110,29 @@ payability guard），真正卡住的是叶子 `evm_callvalue`：`evmEnvBuiltinE
 | helper call sites | 2751 | **3125** | +374 |
 | 变差的 case | — | 1（24612，仅 dangling） | — |
 
-escape 使用量（含 SSTORE escape 之后）：`__notdec_calldataload` 1969、`__notdec_sload` 351、
-`__notdec_sha3` 280、`__notdec_mload` 262、`__notdec_callvalue` 202、`__notdec_sstore` 189、
-`__notdec_msize` 1。其中 sstore/sload/sha3 的绝对值在接上 SSTORE escape 后一起上涨，是因为
-`__notdec_sstore` 让一批 helper body 变干净从而可发射，连带把 body 里的其它 escape 也带进输出。
+escape 使用量（含 SSTORE escape 之后）：`__evm_calldataload` 1969、`__evm_sload` 351、
+`__evm_sha3` 280、`__evm_mload` 262、`__evm_callvalue` 202、`__evm_sstore` 189、
+`__evm_msize` 1。其中 sstore/sload/sha3 的绝对值在接上 SSTORE escape 后一起上涨，是因为
+`__evm_sstore` 让一批 helper body 变干净从而可发射，连带把 body 里的其它 escape 也带进输出。
 SSTORE escape 的典型形态（读-改-写一眼可辨，折叠 matcher 的现成输入）：
 
 ```solidity
-__notdec_sstore(__notdec_sha3(0, 64), arg0 + __notdec_sload(__notdec_sha3(0, 64)));   // map[k] += arg0
-__notdec_sstore(__notdec_sha3(0, 64), __notdec_sload(__notdec_sha3(0, 64)) & uint256(type(uint256).max - 255) | uint256(1));  // map[k] = (map[k] & ~0xff) | 1
-__notdec_sstore(uint256(uint160(arg1)), ...);                                         // map[addr] = ...
+__evm_sstore(__evm_sha3(0, 64), arg0 + __evm_sload(__evm_sha3(0, 64)));   // map[k] += arg0
+__evm_sstore(__evm_sha3(0, 64), __evm_sload(__evm_sha3(0, 64)) & uint256(type(uint256).max - 255) | uint256(1));  // map[k] = (map[k] & ~0xff) | 1
+__evm_sstore(uint256(uint160(arg1)), ...);                                         // map[addr] = ...
 ```
 
 变好最多：25928 −77、0651 −43、0648 −42、24534 −32、24763 −15、24541 −14。典型输出：
 
 ```solidity
 // 24534 DOMAIN_SEPARATOR（原来是 require(false /* TODO: evm.branch.cond.not */)）
-require(__notdec_callvalue() == 0);
+require(__evm_callvalue() == 0);
 
 // 24612
-if (temp_2 > temp_1) { ... private__0xe5f_0xe5f(..., __notdec_sload(arg0), 3249); }
+if (temp_2 > temp_1) { ... private__0xe5f_0xe5f(..., __evm_sload(arg0), 3249); }
 
 // 1274
-if (!(__notdec_sload(__notdec_sha3(0, 64)) & uint256(255) == 0)) { ... }
+if (!(__evm_sload(__evm_sha3(0, 64)) & uint256(255) == 0)) { ... }
 ```
 
 helper 数量上升是 escape 的直接后果：helper body 里原本有 unresolved 值就整体不发射
@@ -143,10 +157,10 @@ revert 块，而该块的 `Label` 已经被渲染器的 `require` 折叠（`if (
 
 生成的合约里 `assembly { mload(offset) }` 读的是**生成代码自己的**内存，而 `offset` 来自原
 EVM 程序的 memory 布局（`0x40` 是原程序的 free memory pointer，在生成合约里是 solc 的 free
-memory pointer）。所以 `__notdec_mload(64)` 只是把「这里有一个真实的 word 读」表达出来，
+memory pointer）。所以 `__evm_mload(64)` 只是把「这里有一个真实的 word 读」表达出来，
 不代表数值等价。价值在于：(a) 不再退化成 `0 /* TODO */`；(b) 后续折叠 matcher 有了统一的
-中间形态（`__notdec_sha3` + `__notdec_sload` 正是 `sload(keccak256(slot, key))` 即
-`mapping[key]` 的形状，`__notdec_mload/__notdec_calldataload` 是 decoder 读的形状）。
+中间形态（`__evm_sha3` + `__evm_sload` 正是 `sload(keccak256(slot, key))` 即
+`mapping[key]` 的形状，`__evm_mload/__evm_calldataload` 是 decoder 读的形状）。
 
 ### 4.3 跨会话干扰（已排除）
 
@@ -181,11 +195,11 @@ ctest --test-dir build-notdec-nothreads -R notdec.evm.solidity --output-on-failu
    反向扫描重建成 `return x`，如果无条件输出 mstore 会重复。需要在 `collectStatements` 之前
    先扫一遍本 basic block 的 `evm_return`/`evm_call*`，收集它们认领的 store（或把两个 formatter
    改成返回「认领的 store 集合」），再对未认领的 store 做 escape。
-2. **折叠 matcher**：`__notdec_sha3(slot, len)` + `__notdec_sload` → `mapping[key]`；
-   `__notdec_mload(0x40)` → free memory pointer 语义；`__notdec_calldataload` → ABI 参数。
+2. **折叠 matcher**：`__evm_sha3(slot, len)` + `__evm_sload` → `mapping[key]`；
+   `__evm_mload(0x40)` → free memory pointer 语义；`__evm_calldataload` → ABI 参数。
    需要一层按基本块的内存值编号（`mstore(off, v)` 的 def-use），这是下一块较大的工作。
 3. **payability 声明**：`notdec.solidity.nonpayable` 目前只被写、没有被读。消费它（并把没有该
-   标记的 entry 声明成 `payable`）之后，`require(__notdec_callvalue() == 0)` 可以回写成
+   标记的 entry 声明成 `payable`）之后，`require(__evm_callvalue() == 0)` 可以回写成
    `require(msg.value == 0)`，可读性更好；代价是要连带处理 payable 语义。
 4. **escape 用量进 pattern oracle**：把 `__notdec_*` 的使用计数（或对应 IR 标记）加进若干
    pattern case 的 `expected_metadata_counts`，让 escape 覆盖面也受棘轮约束。
