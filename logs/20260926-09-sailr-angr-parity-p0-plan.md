@@ -79,6 +79,33 @@ EVM 侧 real jump / goto 下降，condition TODO 不上升。
   必要时只对 `DuplicationReverter` 启用归一化视图。
 - 旧 inventory 的名字与本 checkout 不一致，实现前必须核对，避免按过时语义实现。
 
+## 4.5 实现前核实（S1 开动的第一刀）：我们的判等在 LLVM origin 层，不在 payload 结构层
+
+读代码后的决定性事实：`samePayload` 是
+
+```cpp
+bool samePayload(const StructuredCFG &Graph, PayloadRef Lhs, PayloadRef Rhs) {
+  return Graph.payloadOrigin(Lhs.Id) == Graph.payloadOrigin(Rhs.Id);   // SAILRDeoptimization.cpp:19-21
+}
+```
+
+即**比较 payload 的来源 id**（来源就是 LLVM 侧的那个值/指令），而 payload 的实际 AST
+（`BodyBuilder` 的 `Payload = variant<Statement, Expression>`）由**渲染器**持有，structuring 层只存
+`PayloadRef` + origin 表（`StructuredCFG.h:279`）。angr 那边相反：deopt pass 直接比较 **AIL**，
+也就是结构器自己的 IR，所以 `ail_graph_similarity` 才可能成立。
+
+结论（修正 S1/S2 的顺序）：
+
+- **S1'（前置，必须最先做）**：给 structuring 层一个**语义判等钩子**——渲染器按 payload 计算"归一化后的
+  结构键"（或直接提供 `samePayloadSemantics(Lhs, Rhs)`），deopt pass 通过它比较，而不是比 origin。
+  两种形态：(a) 回调比较；(b) 归一化结构哈希（更接近 angr 的 similarity，且给 S2 的 LCS 复用）。
+- **S1 归一化规则**照原计划（vvar/临时名 alpha 重命名、常量折叠、交换律、比较极性、去冗余
+  mask/not），但**作用在结构键的构造里**，不是作用在 origin 上。
+- **S2** 的 `ail_graph_similarity`/`longest_ail_graph_subseq` 移植随后进行，输入换成结构键 + 图上下文。
+
+之所以必须先做 S1'：在 origin 判等下，无论加多少归一化，两份"语义相同、来源不同"的 payload
+都不可能判等，改动不会产生任何效果（这也是为什么现有 `DuplicationReverter` 只能吃 exact-match 子集）。
+
 ## 5. 本轮状态
 
 只落规划文件，未改代码（S1 的第一个动作是读 `dephication/` 与 `peephole_optimizations/` 并定稿规则清单）。
