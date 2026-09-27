@@ -89,14 +89,27 @@ bool samePayload(const StructuredCFG &Graph, PayloadRef Lhs, PayloadRef Rhs) {
 }
 ```
 
-即**比较 payload 的来源 id**（来源就是 LLVM 侧的那个值/指令），而 payload 的实际 AST
+即**比较 payload 的来源 id**。来源是**另一个 payload id**（`StructuredCFG.cpp:302-308` 的
+`PayloadOrigins` 映射：copy 出来的 payload 用 `setPayloadOrigin(newId, srcId)` 指回它复制自的那个
+原始 payload），所以这个判等的语义是"**这两个 payload 是不是同一个原始渲染点的副本**"，而不是内容比较。
+换句话说：今天没有任何"内容"层面的判等可供归一化，缺的是**内容/结构键**。而 payload 的实际 AST
 （`BodyBuilder` 的 `Payload = variant<Statement, Expression>`）由**渲染器**持有，structuring 层只存
 `PayloadRef` + origin 表（`StructuredCFG.h:279`）。angr 那边相反：deopt pass 直接比较 **AIL**，
 也就是结构器自己的 IR，所以 `ail_graph_similarity` 才可能成立。
 
 结论（修正 S1/S2 的顺序）：
 
-- **S1'（前置，必须最先做）**：给 structuring 层一个**语义判等钩子**——渲染器按 payload 计算"归一化后的
+- **S1' 的第一选择（LLVM 侧结构键，推荐）**：payload 与 LLVM 值是 1:1 的（渲染器就是按那个值渲染的），
+  所以可以直接在 LLVM 侧算一个**递归结构键**：值 → (kind/opcode, 归一化后的操作数键)，对
+  add/mul/and/or/xor/eq 做交换律归一、常量操作数折叠，**忽略 SSA 名字**，按函数 memoize；
+  渲染器（payload provider）本来就在那个点上持有 `llvm::Value`，把键随 payload 一起交给 CFG 即可，
+  `samePayload` 在有键时比键。这条路**不动 AST、不动结构器算法**，约 150~250 行 + 键的传递与单测。
+  LLVM 里可参考/复用的现成物：`llvm/IR/StructuralHash.h`（忽略名字的递归结构哈希，API 是函数/模块级）、
+  `llvm/Transforms/Utils/FunctionComparator.h`（MergeFunctions 的"带 Value→Value 映射走 def-DAG"实现，
+  正是 α 等价的经典写法，但不是稳定的公开 API）；`Instruction::isIdenticalTo/isSameOperationAs` 只比
+  操作数指针，跨副本无用。注意这是**代理判等**（比的是渲染前的 IR 结构，不是最终文本），angr 比 AIL 同理。
+- **S1' 的第二选择（AST 侧结构键，必要时）**：只有当代理解等不够时（例如不同 LLVM 值渲染出同一高层形态，
+  或同一值被不同 matcher 渲染成不同形态）才做：给 structuring 层一个**语义判等钩子**——渲染器按 payload 计算"归一化后的
   结构键"（或直接提供 `samePayloadSemantics(Lhs, Rhs)`），deopt pass 通过它比较，而不是比 origin。
   两种形态：(a) 回调比较；(b) 归一化结构哈希（更接近 angr 的 similarity，且给 S2 的 LCS 复用）。
 - **S1 归一化规则**照原计划（vvar/临时名 alpha 重命名、常量折叠、交换律、比较极性、去冗余
