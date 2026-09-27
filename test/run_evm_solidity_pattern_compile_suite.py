@@ -157,7 +157,8 @@ def main() -> int:
     helper_functions = 0
     helper_call_sites = 0
     switch_todo = 0
-    recover_todo = 0
+    recover_body_todo = 0
+    event_signature_todo = 0
 
     for case in cases:
         output_sol = workdir / (case.stem + ".sol")
@@ -185,7 +186,11 @@ def main() -> int:
         # they used to be invisible to the ratchet because it only counted the
         # "false /* TODO" condition form.
         switch_todo += text.count("/* TODO: switch")
-        recover_todo += text.count("TODO: recover")
+        # Two different gaps: a body the structurer only partially recovered,
+        # and an event whose ABI (parameter list) could not be recovered.
+        recover_body_todo += text.count("TODO: recover remaining body")
+        recover_body_todo += text.count("/* TODO: recover body */")
+        event_signature_todo += text.count("TODO: recover event signature")
         total, fallthrough, dangling, real = count_goto_kinds(text)
         gotos += total
         goto_fallthrough += fallthrough
@@ -257,9 +262,14 @@ def main() -> int:
             budget.get("max_switch_todo_occurrences", 0),
         ),
         (
-            "recover_todo_occurrences",
-            recover_todo,
-            budget.get("max_recover_todo_occurrences", 0),
+            "recover_body_todo_occurrences",
+            recover_body_todo,
+            budget.get("max_recover_body_todo_occurrences", 0),
+        ),
+        (
+            "event_signature_todo_occurrences",
+            event_signature_todo,
+            budget.get("max_event_signature_todo_occurrences", 0),
         ),
     ]
     print(
