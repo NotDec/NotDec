@@ -156,6 +156,8 @@ def main() -> int:
     compile_failures = 0
     helper_functions = 0
     helper_call_sites = 0
+    switch_todo = 0
+    recover_todo = 0
 
     for case in cases:
         output_sol = workdir / (case.stem + ".sol")
@@ -179,6 +181,11 @@ def main() -> int:
         text = output_sol.read_text()
         unresolved += text.count("TODO: unresolved value")
         condition_todo += text.count("false /* TODO")
+        # Switch statements and whole-body fallbacks are control-flow gaps too;
+        # they used to be invisible to the ratchet because it only counted the
+        # "false /* TODO" condition form.
+        switch_todo += text.count("/* TODO: switch")
+        recover_todo += text.count("TODO: recover")
         total, fallthrough, dangling, real = count_goto_kinds(text)
         gotos += total
         goto_fallthrough += fallthrough
@@ -243,6 +250,16 @@ def main() -> int:
             "dangling_goto_occurrences",
             goto_dangling,
             budget["max_dangling_goto_occurrences"],
+        ),
+        (
+            "switch_todo_occurrences",
+            switch_todo,
+            budget.get("max_switch_todo_occurrences", 0),
+        ),
+        (
+            "recover_todo_occurrences",
+            recover_todo,
+            budget.get("max_recover_todo_occurrences", 0),
         ),
     ]
     print(
