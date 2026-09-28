@@ -7362,6 +7362,39 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   // Create TypeBuilder context and builder.  Keep this SCC-local until cross-SCC
   // type sharing has a dedicated design.
   TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, notdec::getWorkDirOpt());
+  // μ 名的栈外解析（TypeBuilderContext::RecursiveTypeLookup）：转换入口可能正好
+  // 落在 μ body 内部（值本身就是那个 μ 名节点），此时名字不在转换栈上，历史行为
+  // 是退化成裸类型变量，桥按名字解析失败 → 整个参数 0 命中（见
+  // microsub2/logs/20260928-59、-60）。真的遇到这种名字时才扫描本轮（本 SCC）所有
+  // 已解出的根，按名字索引 μ 节点；扫描只做一次，之后就是普通 map 查找
+  // （RecursiveTypeCollector 内部按节点去重，图只走一遍）。
+  //
+  // 默认关闭：全量 coreutils 的 A/B（logs/20260928-60）显示它把 du 一类参数从
+  // 裸 μ 名修成真实结构（+0.5..1.2 pt 覆盖，在噪声带附近），但 FP 稳定上升
+  // +1.8..3.3 pt——收益不明确、代价明确，等 frame 形状对象那一侧的处理到位
+  // （NotDec 前端未提交的 frame merge veto 工作）再复测。开启方式：
+  // NOTDEC_RECURSIVE_TYPE_LOOKUP=1。
+  static const bool RecursiveTypeLookupEnabled = [] {
+    const char *Env = std::getenv("NOTDEC_RECURSIVE_TYPE_LOOKUP");
+    return Env != nullptr && Env[0] != '\0' && Env[0] != '0';
+  }();
+  if (RecursiveTypeLookupEnabled) {
+    auto RecursiveTypes = std::make_shared<binarysub::RecursiveTypeCollector>();
+    TBCtx.RecursiveTypeLookup =
+        [&Res, RecursiveTypes](const std::string &Name) -> binarysub::UTypePtr {
+      if (RecursiveTypes->Types.empty()) {
+        std::vector<binarysub::UTypePtr> Roots;
+        Roots.reserve(Res.size());
+        for (const auto &Ent : Res) {
+          Roots.push_back(Ent.second);
+        }
+        RecursiveTypes->collect(Roots);
+      }
+      auto It = RecursiveTypes->Types.find(Name);
+      return It == RecursiveTypes->Types.end() ? binarysub::UTypePtr(nullptr)
+                                               : It->second;
+    };
+  }
 #ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
   // Field-level traceability: map each original variable id back to the bound
   // origins the solver recorded on it, so TypeBuilder can explain a field.
