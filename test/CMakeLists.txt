@@ -123,6 +123,10 @@ function(add_evm_solidity_pattern_compile_suite test_name cases_relpath
 			--solc
 			"${NOTDEC_SOLC}"
 	)
+	# solc --via-ir on the largest corpus case dominates this suite's runtime
+	# (about 24 min on the reference machine), leaving no headroom under
+	# ctest's 1500 s default timeout.
+	set_tests_properties(${test_name} PROPERTIES TIMEOUT 3600)
 endfunction()
 
 add_lifting_suite(
