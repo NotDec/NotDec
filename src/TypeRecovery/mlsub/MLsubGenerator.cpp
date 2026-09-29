@@ -7369,14 +7369,15 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   // 已解出的根，按名字索引 μ 节点；扫描只做一次，之后就是普通 map 查找
   // （RecursiveTypeCollector 内部按节点去重，图只走一遍）。
   //
-  // 默认关闭：全量 coreutils 的 A/B（logs/20260928-60）显示它把 du 一类参数从
-  // 裸 μ 名修成真实结构（+0.5..1.2 pt 覆盖，在噪声带附近），但 FP 稳定上升
-  // +1.8..3.3 pt——收益不明确、代价明确，等 frame 形状对象那一侧的处理到位
-  // （NotDec 前端未提交的 frame merge veto 工作）再复测。开启方式：
-  // NOTDEC_RECURSIVE_TYPE_LOOKUP=1。
+  // 默认开启（NOTDEC_RECURSIVE_TYPE_LOOKUP=0 可回退做对照）：它把"同一个参数在
+  // 两轮之间要么是真实结构、要么是裸 μ 名"的那类翻转消掉——同一二进制两轮的
+  // 0↔非0 翻转从 62+31 / 63+28 / 36+50 条降到 2+1 条，两轮 coverage 差从
+  // 0.54..0.735 pt 降到 0.379 pt。代价是 FP 上升（相对命名后的默认基线
+  // +2.6..3.4 pt，coverage +1.5..2.2 pt），按"覆盖率优先"接受；数据见
+  // microsub2/logs/20260928-60、-62。
   static const bool RecursiveTypeLookupEnabled = [] {
     const char *Env = std::getenv("NOTDEC_RECURSIVE_TYPE_LOOKUP");
-    return Env != nullptr && Env[0] != '\0' && Env[0] != '0';
+    return Env == nullptr || Env[0] != '0';
   }();
   if (RecursiveTypeLookupEnabled) {
     auto RecursiveTypes = std::make_shared<binarysub::RecursiveTypeCollector>();
