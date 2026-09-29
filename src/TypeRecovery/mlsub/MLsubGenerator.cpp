@@ -7362,40 +7362,9 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   // Create TypeBuilder context and builder.  Keep this SCC-local until cross-SCC
   // type sharing has a dedicated design.
   TypeBuilderContext TBCtx(HCtx, PointerSizeBytes, notdec::getWorkDirOpt());
-  // μ 名的栈外解析（TypeBuilderContext::RecursiveTypeLookup）：转换入口可能正好
-  // 落在 μ body 内部（值本身就是那个 μ 名节点），此时名字不在转换栈上，历史行为
-  // 是退化成裸类型变量，桥按名字解析失败 → 整个参数 0 命中（见
-  // microsub2/logs/20260928-59、-60）。真的遇到这种名字时才扫描本轮（本 SCC）所有
-  // 已解出的根，按名字索引 μ 节点；扫描只做一次，之后就是普通 map 查找
-  // （RecursiveTypeCollector 内部按节点去重，图只走一遍）。
-  //
-  // 默认开启（NOTDEC_RECURSIVE_TYPE_LOOKUP=0 可回退做对照）：它把"同一个参数在
-  // 两轮之间要么是真实结构、要么是裸 μ 名"的那类翻转消掉——同一二进制两轮的
-  // 0↔非0 翻转从 62+31 / 63+28 / 36+50 条降到 2+1 条，两轮 coverage 差从
-  // 0.54..0.735 pt 降到 0.379 pt。代价是 FP 上升（相对命名后的默认基线
-  // +2.6..3.4 pt，coverage +1.5..2.2 pt），按"覆盖率优先"接受；数据见
-  // microsub2/logs/20260928-60、-62。
-  static const bool RecursiveTypeLookupEnabled = [] {
-    const char *Env = std::getenv("NOTDEC_RECURSIVE_TYPE_LOOKUP");
-    return Env == nullptr || Env[0] != '0';
-  }();
-  if (RecursiveTypeLookupEnabled) {
-    auto RecursiveTypes = std::make_shared<binarysub::RecursiveTypeCollector>();
-    TBCtx.RecursiveTypeLookup =
-        [&Res, RecursiveTypes](const std::string &Name) -> binarysub::UTypePtr {
-      if (RecursiveTypes->Types.empty()) {
-        std::vector<binarysub::UTypePtr> Roots;
-        Roots.reserve(Res.size());
-        for (const auto &Ent : Res) {
-          Roots.push_back(Ent.second);
-        }
-        RecursiveTypes->collect(Roots);
-      }
-      auto It = RecursiveTypes->Types.find(Name);
-      return It == RecursiveTypes->Types.end() ? binarysub::UTypePtr(nullptr)
-                                               : It->second;
-    };
-  }
+  // μ 回边的解析现在由类型本身携带：递归变量节点的
+  // UTypeVariable::recursiveType 直接指向它所属的递归类型节点（生成侧写好），
+  // 解析时不再需要按名字扫本轮根建索引，也不再受同名影响 / 不受 SCC 边界限制。
 #ifdef BINARYSUB_ENABLE_BOUND_ORIGINS
   // Field-level traceability: map each original variable id back to the bound
   // origins the solver recorded on it, so TypeBuilder can explain a field.
