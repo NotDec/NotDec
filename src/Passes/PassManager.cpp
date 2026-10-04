@@ -54,6 +54,7 @@
 #include "Passes/StackAlloca.h"
 #include "Passes/evm/SolidityPatterns.h"
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
+#include "TypeRecovery/mlsub/PolymorphicMarking.h"
 #include "Utils/Utils.h"
 #include "notdec-wasm2llvm/utils.h"
 
@@ -332,6 +333,9 @@ void PassEnv::add_type_recovery_passes(int level, bool SplitFreePhi) {
   }
   // 类型推理前扫描危险模式：对可能让推理爆炸的函数报 warning。
   MPM.addPass(DangerousTypePatternScan());
+  // 多态函数识别与标记：必须在类型推理前完成（多态 SCC 会成为摘要边界，
+  // 层号 +1 且不参与同层合并，调用点各自实例化）。
+  MPM.addPass(mlsub::PolymorphicMarkingPass(*TR));
   MPM.addPass(mlsub::MLsubRecoveryMain(*TR));
 
   // level 3 with additional optimization and cleanup.

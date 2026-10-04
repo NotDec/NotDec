@@ -1,4 +1,4 @@
-#include "notdec/TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.h"
+#include "notdec/TypeRecovery/mlsub/AllocatorBoundaryAnalysis.h"
 
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallPtrSet.h>
@@ -153,6 +153,35 @@ PointerUseShape analyzePointerUses(
         }
         Worklist.push_back({GEP, NextOffset});
         continue;
+      }
+      // The ABI-erased lifted IR expresses field access as integer arithmetic
+      // plus inttoptr (there are no typed GEPs): follow "add/sub const" and
+      // "inttoptr" so the shapes below see the same offsets as a typed IR.
+      if (auto *BO = llvm::dyn_cast<llvm::BinaryOperator>(I)) {
+        if ((BO->getOpcode() == llvm::Instruction::Add ||
+             BO->getOpcode() == llvm::Instruction::Sub) &&
+            Item.Offset) {
+          const llvm::Value *Other = nullptr;
+          if (BO->getOperand(0) == Item.Value) {
+            Other = BO->getOperand(1);
+          } else if (BO->getOperand(1) == Item.Value) {
+            Other = BO->getOperand(0);
+          }
+          if (auto *C = llvm::dyn_cast_or_null<llvm::ConstantInt>(Other)) {
+            std::int64_t Delta = C->getSExtValue();
+            std::int64_t Next = BO->getOpcode() == llvm::Instruction::Add
+                                    ? *Item.Offset + Delta
+                                    : *Item.Offset - Delta;
+            Worklist.push_back({BO, Next});
+            continue;
+          }
+        }
+      }
+      if (auto *ITP = llvm::dyn_cast<llvm::IntToPtrInst>(I)) {
+        if (ITP->getOperand(0) == Item.Value) {
+          Worklist.push_back({ITP, Item.Offset});
+          continue;
+        }
       }
       if (llvm::isa<llvm::BitCastInst, llvm::AddrSpaceCastInst,
                     llvm::FreezeInst>(I)) {
@@ -512,11 +541,11 @@ bool hasPointerInterface(const llvm::Function &F) {
   });
 }
 
-AnonymousRawBufferSlotEvidence analyzeRawBufferSlot(
+RawBufferSlotEvidence analyzeRawBufferSlot(
     const llvm::Function &F, const llvm::Argument &PointerArg,
     llvm::ArrayRef<const llvm::CallBase *> Calls, const llvm::DataLayout &DL,
     const std::map<const llvm::Function *, unsigned> &FunctionIndices) {
-  AnonymousRawBufferSlotEvidence Result;
+  RawBufferSlotEvidence Result;
   Result.ArgIndex = PointerArg.getArgNo();
 
   std::vector<const llvm::Argument *> IntegerArgs;
@@ -675,11 +704,11 @@ AnonymousRawBufferSlotEvidence analyzeRawBufferSlot(
   return Result;
 }
 
-AnonymousDeallocatorSlotEvidence analyzeDeallocatorSlot(
+DeallocatorSlotEvidence analyzeDeallocatorSlot(
     const llvm::Function &F, const llvm::Argument &PointerArg,
     llvm::ArrayRef<const llvm::CallBase *> Calls, const llvm::DataLayout &DL,
     const std::map<const llvm::Function *, unsigned> &FunctionIndices) {
-  AnonymousDeallocatorSlotEvidence Result;
+  DeallocatorSlotEvidence Result;
   Result.ArgIndex = PointerArg.getArgNo();
 
   PointerUseShape BodyShape =
@@ -765,8 +794,8 @@ AnonymousDeallocatorSlotEvidence analyzeDeallocatorSlot(
 
 } // namespace
 
-std::vector<AnonymousPolyBoundaryEvidence>
-analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
+std::vector<AllocatorBoundaryEvidence>
+analyzeAllocatorBoundaries(const llvm::Module &M) {
   const llvm::DataLayout &DL = M.getDataLayout();
   std::map<const llvm::Function *, unsigned> FunctionIndices;
   unsigned FunctionIndex = 0;
@@ -787,7 +816,7 @@ analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
     }
   }
 
-  std::vector<AnonymousPolyBoundaryEvidence> Results;
+  std::vector<AllocatorBoundaryEvidence> Results;
   std::map<const llvm::Function *, std::set<const llvm::Function *>>
       ReturnedCallees;
   std::map<const llvm::Function *, std::set<std::string>> DirectResultShapes;
@@ -799,7 +828,7 @@ analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
     }
     llvm::ArrayRef<const llvm::CallBase *> Calls(CallIt->second);
 
-    AnonymousPolyBoundaryEvidence Result;
+    AllocatorBoundaryEvidence Result;
     Result.Function = &F;
     Result.FunctionIndex = FunctionIndices.at(&F);
     Result.DirectCallSites = Calls.size();
@@ -984,8 +1013,8 @@ analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
   // A pure wrapper is only as allocator-like as the storage origin it returns.
   // Propagating this fact down a forwarding chain rejects object lookup APIs
   // that happen to have allocator-like size arguments at their outer wrapper.
-  std::map<const llvm::Function *, AnonymousPolyBoundaryEvidence *> ByFunction;
-  for (AnonymousPolyBoundaryEvidence &Result : Results) {
+  std::map<const llvm::Function *, AllocatorBoundaryEvidence *> ByFunction;
+  for (AllocatorBoundaryEvidence &Result : Results) {
     ByFunction.emplace(Result.Function, &Result);
   }
 
@@ -995,13 +1024,13 @@ analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
   // neither the imported symbol nor source attributes are consulted.
   auto PropagatedResultShapes = DirectResultShapes;
   std::map<const llvm::Function *, unsigned> PropagatedStructuredSites;
-  for (const AnonymousPolyBoundaryEvidence &Result : Results) {
+  for (const AllocatorBoundaryEvidence &Result : Results) {
     PropagatedStructuredSites.emplace(Result.Function,
                                       Result.StructuredResultCallSites);
   }
   for (std::size_t Iteration = 0; Iteration < Results.size(); ++Iteration) {
     bool Changed = false;
-    for (const AnonymousPolyBoundaryEvidence &Wrapper : Results) {
+    for (const AllocatorBoundaryEvidence &Wrapper : Results) {
       if (!Wrapper.PureReturnedCallForwarder ||
           (!Wrapper.IntegerArgumentFlowsToReturnedCall &&
            !Wrapper.PointerArgumentFlowsToReturnedCall)) {
@@ -1031,7 +1060,7 @@ analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
       break;
     }
   }
-  for (AnonymousPolyBoundaryEvidence &Result : Results) {
+  for (AllocatorBoundaryEvidence &Result : Results) {
     Result.PropagatedDistinctResultShapes =
         PropagatedResultShapes[Result.Function].size();
     Result.PropagatedStructuredResultCallSites =
@@ -1063,7 +1092,7 @@ analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
                EvidenceIt->second->PropagatedDistinctResultShapes >= 4 &&
                EvidenceIt->second->PropagatedStructuredResultCallSites >= 2;
     } else if (auto It = ByFunction.find(F); It != ByFunction.end()) {
-      const AnonymousPolyBoundaryEvidence &Evidence = *It->second;
+      const AllocatorBoundaryEvidence &Evidence = *It->second;
       Result =
           Evidence.CoreAllocatorStateEvidence || Evidence.ReturnFromIntToPtr;
       if (!Result && Evidence.PureReturnedCallForwarder &&
@@ -1081,7 +1110,7 @@ analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
     return Result;
   };
 
-  for (AnonymousPolyBoundaryEvidence &Result : Results) {
+  for (AllocatorBoundaryEvidence &Result : Results) {
     if (!Result.PureReturnedCallForwarder) {
       continue;
     }
@@ -1101,12 +1130,12 @@ analyzeAnonymousPolymorphicBoundaries(const llvm::Module &M) {
   return Results;
 }
 
-void writeAnonymousPolymorphicBoundaryReport(
+void writeAllocatorBoundaryReport(
     const llvm::Module &M,
-    const std::vector<AnonymousPolyBoundaryEvidence> &Evidence,
+    const std::vector<AllocatorBoundaryEvidence> &Evidence,
     llvm::raw_ostream &Out) {
   (void)M;
-  for (const AnonymousPolyBoundaryEvidence &Entry : Evidence) {
+  for (const AllocatorBoundaryEvidence &Entry : Evidence) {
     llvm::json::Object Object;
     Object["function_index"] = Entry.FunctionIndex;
     Object["audit_symbol"] = Entry.Function->hasName()
@@ -1145,7 +1174,7 @@ void writeAnonymousPolymorphicBoundaryReport(
     Object["allocator"] = std::move(Allocator);
 
     llvm::json::Array Slots;
-    for (const AnonymousRawBufferSlotEvidence &Slot : Entry.RawBufferSlots) {
+    for (const RawBufferSlotEvidence &Slot : Entry.RawBufferSlots) {
       llvm::json::Object SlotObject;
       SlotObject["arg_index"] = Slot.ArgIndex;
       SlotObject["score"] = Slot.Score;
@@ -1165,7 +1194,7 @@ void writeAnonymousPolymorphicBoundaryReport(
     Object["raw_buffer_slots"] = std::move(Slots);
 
     llvm::json::Array DeallocatorSlots;
-    for (const AnonymousDeallocatorSlotEvidence &Slot :
+    for (const DeallocatorSlotEvidence &Slot :
          Entry.DeallocatorSlots) {
       llvm::json::Object SlotObject;
       SlotObject["arg_index"] = Slot.ArgIndex;
@@ -1183,6 +1212,609 @@ void writeAnonymousPolymorphicBoundaryReport(
     Object["deallocator_slots"] = std::move(DeallocatorSlots);
     Out << llvm::formatv("{0}\n", llvm::json::Value(std::move(Object)));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Container boundaries (see the header): the decision comes from the call
+// sites, not from the body.
+// ---------------------------------------------------------------------------
+namespace {
+
+// A field address the function computes: inttoptr(base + K) where the base is a
+// parameter or a call result (an object the function allocated itself).
+struct TrackedFieldOrigin {
+  const llvm::Value *Base = nullptr;
+  std::int64_t Offset = 0;
+  bool FromArgument = false;
+};
+
+// Raw per-function facts of the first module sweep, before the module-wide
+// callback-offset table exists.
+struct ContainerFunctionFacts {
+  const llvm::Function *Function = nullptr;
+  unsigned FunctionIndex = 0;
+  unsigned DirectCallSites = 0;
+  unsigned DistinctCallers = 0;
+  // object base -> offset -> access widths in bits
+  std::map<const llvm::Value *,
+           std::map<std::int64_t, std::set<std::uint64_t>>>
+      ObjectOffsets;
+  std::vector<std::pair<std::int64_t, const llvm::Value *>> Stores;
+  std::vector<std::int64_t> CallOffsets;
+  std::vector<std::int64_t> FieldLoadOffsets;
+  std::set<const llvm::Value *> ObjectBases;
+  std::set<const llvm::Value *> OwnObjectBases;
+  bool HasArrayWalk = false;
+  unsigned OpaqueForwarded = 0;
+};
+
+// Resolve an integer value to (base, offset) while it is a parameter or a call
+// result plus/minus constants.  This is the ABI-erased form of a field address:
+// there are no typed GEPs in the lifted IR.
+bool resolveObjectAddress(const llvm::Value *Value, const llvm::Value *&Base,
+                          std::int64_t &Offset) {
+  const llvm::Value *Cur = Value;
+  std::int64_t Off = 0;
+  for (unsigned Guard = 0; Guard < 8; ++Guard) {
+    if (llvm::isa<llvm::Argument>(Cur) || llvm::isa<llvm::CallBase>(Cur)) {
+      Base = Cur;
+      Offset = Off;
+      return true;
+    }
+    auto *BO = llvm::dyn_cast<llvm::BinaryOperator>(Cur);
+    if (BO == nullptr) {
+      return false;
+    }
+    const llvm::Value *L = BO->getOperand(0);
+    const llvm::Value *R = BO->getOperand(1);
+    if (BO->getOpcode() == llvm::Instruction::Add) {
+      auto *C = llvm::dyn_cast<llvm::ConstantInt>(R);
+      const llvm::Value *Next = L;
+      if (C == nullptr) {
+        C = llvm::dyn_cast<llvm::ConstantInt>(L);
+        Next = R;
+      }
+      if (C == nullptr || C->getType()->getIntegerBitWidth() > 64) {
+        return false;
+      }
+      Off += C->getSExtValue();
+      Cur = Next;
+      continue;
+    }
+    if (BO->getOpcode() == llvm::Instruction::Sub) {
+      auto *C = llvm::dyn_cast<llvm::ConstantInt>(R);
+      if (C == nullptr || C->getType()->getIntegerBitWidth() > 64) {
+        return false;
+      }
+      Off -= C->getSExtValue();
+      Cur = L;
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+// Collect the field origins an indirect callee resolves to, following the
+// SSA-preserving casts and phi/select merges the lifted IR uses for a merged
+// function pointer.
+void collectCalleeFields(
+    const llvm::Value *Value,
+    const std::map<const llvm::Value *, TrackedFieldOrigin> &Origins,
+    llvm::SmallVectorImpl<TrackedFieldOrigin> &Out,
+    llvm::SmallPtrSetImpl<const llvm::Value *> &Seen, unsigned &Budget) {
+  if (Value == nullptr || Budget-- == 0 || !Seen.insert(Value).second) {
+    return;
+  }
+  if (llvm::isa<llvm::Argument>(Value)) {
+    return;
+  }
+  if (auto *L = llvm::dyn_cast<llvm::LoadInst>(Value)) {
+    auto It = Origins.find(L->getPointerOperand());
+    if (It != Origins.end()) {
+      Out.push_back(It->second);
+    }
+    return;
+  }
+  if (auto *ITP = llvm::dyn_cast<llvm::IntToPtrInst>(Value)) {
+    collectCalleeFields(ITP->getOperand(0), Origins, Out, Seen, Budget);
+    return;
+  }
+  if (auto *BC = llvm::dyn_cast<llvm::BitCastInst>(Value)) {
+    collectCalleeFields(BC->getOperand(0), Origins, Out, Seen, Budget);
+    return;
+  }
+  if (auto *ASC = llvm::dyn_cast<llvm::AddrSpaceCastInst>(Value)) {
+    collectCalleeFields(ASC->getOperand(0), Origins, Out, Seen, Budget);
+    return;
+  }
+  if (auto *FI = llvm::dyn_cast<llvm::FreezeInst>(Value)) {
+    collectCalleeFields(FI->getOperand(0), Origins, Out, Seen, Budget);
+    return;
+  }
+  if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(Value)) {
+    for (const llvm::Value *In : PHI->incoming_values()) {
+      collectCalleeFields(In, Origins, Out, Seen, Budget);
+    }
+    return;
+  }
+  if (auto *Sel = llvm::dyn_cast<llvm::SelectInst>(Value)) {
+    collectCalleeFields(Sel->getTrueValue(), Origins, Out, Seen, Budget);
+    collectCalleeFields(Sel->getFalseValue(), Origins, Out, Seen, Budget);
+    return;
+  }
+}
+
+// A value that came from outside the function (a parameter, possibly through a
+// cast or a phi merge).  A parameter stored into a callback slot is how an
+// initialiser installs the hasher/comparator.
+bool isParameterDerived(const llvm::Value *Value) {
+  llvm::SmallVector<const llvm::Value *, 8> Worklist{Value};
+  llvm::SmallPtrSet<const llvm::Value *, 16> Seen;
+  unsigned Budget = 32;
+  while (!Worklist.empty() && Budget-- > 0) {
+    const llvm::Value *V = Worklist.pop_back_val();
+    if (V == nullptr || !Seen.insert(V).second) {
+      continue;
+    }
+    if (llvm::isa<llvm::Argument>(V)) {
+      return true;
+    }
+    if (llvm::isa<llvm::IntToPtrInst, llvm::BitCastInst,
+                  llvm::AddrSpaceCastInst, llvm::FreezeInst>(V)) {
+      Worklist.push_back(llvm::cast<llvm::Instruction>(V)->getOperand(0));
+      continue;
+    }
+    if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(V)) {
+      for (const llvm::Value *In : PHI->incoming_values()) {
+        Worklist.push_back(In);
+      }
+      continue;
+    }
+    if (auto *Sel = llvm::dyn_cast<llvm::SelectInst>(V)) {
+      Worklist.push_back(Sel->getTrueValue());
+      Worklist.push_back(Sel->getFalseValue());
+      continue;
+    }
+  }
+  return false;
+}
+
+// 64-bit constant store that equals the address of a lifted function.
+bool isLiftedFunctionAddress(
+    const llvm::Value *Value,
+    const std::map<std::uint64_t, const llvm::Function *> &FunctionByAddress) {
+  if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(Value)) {
+    if (CI->getType()->getIntegerBitWidth() != 64) {
+      return false;
+    }
+    return FunctionByAddress.count(CI->getZExtValue()) != 0;
+  }
+  if (auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(Value)) {
+    if (CE->getOpcode() == llvm::Instruction::PtrToInt) {
+      return llvm::isa<llvm::Function>(CE->getOperand(0));
+    }
+  }
+  return false;
+}
+
+int containerScoreThreshold() {
+  if (auto *Value = std::getenv("NOTDEC_POLY_CONTAINER_SCORE_MIN")) {
+    if (*Value != '\0') {
+      return std::atoi(Value);
+    }
+  }
+  return 3;
+}
+
+} // namespace
+
+std::vector<ContainerBoundaryEvidence>
+analyzeContainerBoundaries(const llvm::Module &M) {
+  const llvm::DataLayout &DL = M.getDataLayout();
+  std::map<const llvm::Function *, unsigned> FunctionIndices;
+  unsigned FunctionIndex = 0;
+  for (const llvm::Function &F : M) {
+    FunctionIndices.emplace(&F, FunctionIndex++);
+  }
+
+  // The lifted function addresses, from the !microsub2.func metadata.  They
+  // separate a stored function pointer from an ordinary data pointer (a stored
+  // tuning/global address must not count as a callback).
+  std::map<std::uint64_t, const llvm::Function *> FunctionByAddress;
+  for (const llvm::Function &F : M) {
+    const llvm::MDNode *MD = F.getMetadata("microsub2.func");
+    if (MD == nullptr || MD->getNumOperands() != 1) {
+      continue;
+    }
+    auto *C = llvm::dyn_cast<llvm::ConstantAsMetadata>(MD->getOperand(0));
+    if (C == nullptr) {
+      continue;
+    }
+    if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(C->getValue())) {
+      if (CI->getType()->getIntegerBitWidth() <= 64) {
+        FunctionByAddress.emplace(CI->getZExtValue(), &F);
+      }
+    }
+  }
+
+  std::map<const llvm::Function *, std::vector<const llvm::CallBase *>>
+      DirectCalls;
+  for (const llvm::Function &Caller : M) {
+    for (const llvm::BasicBlock &BB : Caller) {
+      for (const llvm::Instruction &I : BB) {
+        auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+        if (CB != nullptr && CB->getCalledFunction() != nullptr) {
+          DirectCalls[CB->getCalledFunction()].push_back(CB);
+        }
+      }
+    }
+  }
+
+  // ---- sweep 1: per-function facts -----------------------------------------
+  std::vector<ContainerFunctionFacts> Facts;
+  for (const llvm::Function &F : M) {
+    if (F.isDeclaration() || F.isIntrinsic()) {
+      continue;
+    }
+    ContainerFunctionFacts FF;
+    FF.Function = &F;
+    FF.FunctionIndex = FunctionIndices.at(&F);
+    auto CallIt = DirectCalls.find(&F);
+    if (CallIt != DirectCalls.end()) {
+      FF.DirectCallSites = static_cast<unsigned>(CallIt->second.size());
+      std::set<const llvm::Function *> Callers;
+      for (const llvm::CallBase *CB : CallIt->second) {
+        Callers.insert(CB->getFunction());
+      }
+      FF.DistinctCallers = static_cast<unsigned>(Callers.size());
+    }
+
+    // Field addresses: inttoptr(base +/- K).
+    std::map<const llvm::Value *, TrackedFieldOrigin> Origins;
+    for (const llvm::BasicBlock &BB : F) {
+      for (const llvm::Instruction &I : BB) {
+        auto *ITP = llvm::dyn_cast<llvm::IntToPtrInst>(&I);
+        if (ITP == nullptr) {
+          continue;
+        }
+        const llvm::Value *Base = nullptr;
+        std::int64_t Offset = 0;
+        if (resolveObjectAddress(ITP->getOperand(0), Base, Offset)) {
+          Origins[ITP] = {Base, Offset, llvm::isa<llvm::Argument>(Base)};
+        }
+      }
+    }
+
+    for (const llvm::BasicBlock &BB : F) {
+      for (const llvm::Instruction &I : BB) {
+        if (auto *L = llvm::dyn_cast<llvm::LoadInst>(&I)) {
+          auto It = Origins.find(L->getPointerOperand());
+          if (It == Origins.end()) {
+            continue;
+          }
+          const std::int64_t Offset = It->second.Offset;
+          const std::uint64_t Width = getStoreSizeBits(DL, L->getType());
+          FF.ObjectOffsets[It->second.Base][Offset].insert(Width);
+          FF.ObjectBases.insert(It->second.Base);
+          if (Offset != 0) {
+            FF.FieldLoadOffsets.push_back(Offset);
+          }
+          continue;
+        }
+        if (auto *S = llvm::dyn_cast<llvm::StoreInst>(&I)) {
+          auto It = Origins.find(S->getPointerOperand());
+          if (It == Origins.end()) {
+            continue;
+          }
+          const std::int64_t Offset = It->second.Offset;
+          const std::uint64_t Width =
+              getStoreSizeBits(DL, S->getValueOperand()->getType());
+          FF.ObjectOffsets[It->second.Base][Offset].insert(Width);
+          FF.ObjectBases.insert(It->second.Base);
+          if (Offset != 0) {
+            FF.Stores.push_back({Offset, S->getValueOperand()});
+          }
+          continue;
+        }
+        auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+        if (CB == nullptr || CB->getCalledFunction() != nullptr) {
+          continue;
+        }
+        // Indirect call: does the callee come from a parameter's field?
+        const llvm::Value *Callee = CB->getCalledOperand();
+        llvm::SmallVector<TrackedFieldOrigin, 8> Fields;
+        llvm::SmallPtrSet<const llvm::Value *, 16> Seen;
+        unsigned Budget = 32;
+        collectCalleeFields(Callee, Origins, Fields, Seen, Budget);
+        for (const TrackedFieldOrigin &Field : Fields) {
+          if (Field.Offset == 0 || !Field.FromArgument) {
+            continue;
+          }
+          // no-this: the object itself is not handed to the call (excludes the
+          // C++ virtual-call shape).
+          bool PassesObject = false;
+          for (const llvm::Use &A : CB->args()) {
+            if (A.get() == Field.Base) {
+              PassesObject = true;
+            }
+          }
+          if (!PassesObject) {
+            FF.CallOffsets.push_back(Field.Offset);
+          }
+        }
+      }
+    }
+
+    // Constant-stride array walk: a loaded field used with a shl/mul by a
+    // constant >= 2.
+    for (const llvm::BasicBlock &BB : F) {
+      for (const llvm::Instruction &I : BB) {
+        auto *L = llvm::dyn_cast<llvm::LoadInst>(&I);
+        if (L == nullptr) {
+          continue;
+        }
+        for (const llvm::User *U : L->users()) {
+          auto *BO = llvm::dyn_cast<llvm::BinaryOperator>(U);
+          if (BO == nullptr || BO->getOpcode() != llvm::Instruction::Add) {
+            continue;
+          }
+          const llvm::Value *Other =
+              BO->getOperand(0) == L ? BO->getOperand(1) : BO->getOperand(0);
+          auto *SH = llvm::dyn_cast<llvm::BinaryOperator>(Other);
+          if (SH == nullptr ||
+              (SH->getOpcode() != llvm::Instruction::Shl &&
+               SH->getOpcode() != llvm::Instruction::Mul)) {
+            continue;
+          }
+          for (const llvm::Value *Op : {SH->getOperand(0), SH->getOperand(1)}) {
+            if (auto *C = llvm::dyn_cast<llvm::ConstantInt>(Op)) {
+              if (C->getType()->getIntegerBitWidth() <= 64 &&
+                  C->getSExtValue() >= 2) {
+                FF.HasArrayWalk = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Element opacity: values the function never interprets locally but hands
+    // to a call (a parameter or a value loaded from a field).
+    std::set<const llvm::Value *> Counted;
+    for (const llvm::BasicBlock &BB : F) {
+      for (const llvm::Instruction &I : BB) {
+        auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+        if (CB == nullptr) {
+          continue;
+        }
+        if (auto *Callee = CB->getCalledFunction()) {
+          if (Callee->isIntrinsic() || Callee->getName().starts_with("__microsub2")) {
+            continue;
+          }
+        }
+        for (const llvm::Use &A : CB->args()) {
+          const llvm::Value *V = A.get();
+          if (V == nullptr || FF.ObjectBases.count(V) != 0 ||
+              Counted.count(V) != 0) {
+            continue;
+          }
+          bool Forwarded = llvm::isa<llvm::Argument>(V);
+          if (auto *L = llvm::dyn_cast<llvm::LoadInst>(V)) {
+            Forwarded |= Origins.count(L->getPointerOperand()) != 0;
+          }
+          if (Forwarded) {
+            Counted.insert(V);
+          }
+        }
+      }
+    }
+    FF.OpaqueForwarded = static_cast<unsigned>(Counted.size());
+
+    // Own objects (parameters the function itself lays out): the propagation
+    // seeds for "operates on the same container".
+    for (const auto &[Base, Offsets] : FF.ObjectOffsets) {
+      if (llvm::isa<llvm::Argument>(Base) && Offsets.size() >= 2) {
+        FF.OwnObjectBases.insert(Base);
+      }
+    }
+    Facts.push_back(std::move(FF));
+  }
+
+  // ---- module table: offsets the module invokes through a field ------------
+  std::map<std::int64_t, unsigned> ModuleCallbackOffsets;
+  for (const ContainerFunctionFacts &FF : Facts) {
+    for (const std::int64_t Offset : FF.CallOffsets) {
+      ++ModuleCallbackOffsets[Offset];
+    }
+  }
+
+  // ---- sweep 2: rules -------------------------------------------------------
+  std::vector<ContainerBoundaryEvidence> Results;
+  std::map<const llvm::Function *, std::size_t> EvidenceIndex;
+  for (const ContainerFunctionFacts &FF : Facts) {
+    ContainerBoundaryEvidence Entry;
+    Entry.Function = FF.Function;
+    Entry.FunctionIndex = FF.FunctionIndex;
+    Entry.DirectCallSites = FF.DirectCallSites;
+    Entry.DistinctCallers = FF.DistinctCallers;
+
+    for (const auto &[Base, Offsets] : FF.ObjectOffsets) {
+      if (Offsets.size() < 2) {
+        continue;
+      }
+      ContainerObjectEvidence Object;
+      Object.FromArgument = llvm::isa<llvm::Argument>(Base);
+      Object.FromCallResult = llvm::isa<llvm::CallBase>(Base);
+      if (auto *A = llvm::dyn_cast<llvm::Argument>(Base)) {
+        Object.ArgIndex = A->getArgNo();
+      }
+      bool Aligned = true;
+      bool Wide = true;
+      for (const auto &[Offset, Widths] : Offsets) {
+        Object.Offsets.push_back(Offset);
+        Aligned &= (Offset % 8) == 0;
+        Wide &= (Widths.size() == 1 && *Widths.begin() == 64);
+      }
+      Object.PointerSizedFields = Offsets.size() >= 3 && Aligned && Wide;
+      Entry.HasPointerSizedHeader |= Object.PointerSizedFields;
+      Entry.Objects.push_back(std::move(Object));
+    }
+    if (!Entry.Objects.empty()) {
+      const ContainerObjectEvidence *Best = &Entry.Objects.front();
+      for (const ContainerObjectEvidence &Object : Entry.Objects) {
+        if (Object.Offsets.size() > Best->Offsets.size()) {
+          Best = &Object;
+        }
+      }
+      Entry.HeaderOffsets = Best->Offsets;
+      Entry.HeaderArgIndex = Best->ArgIndex;
+      Entry.HeaderFromCallResult = Best->FromCallResult;
+    }
+
+    for (const std::int64_t Offset : FF.CallOffsets) {
+      Entry.CallbackCallOffsets.push_back(Offset);
+    }
+    for (const std::int64_t Offset : FF.FieldLoadOffsets) {
+      if (ModuleCallbackOffsets.count(Offset) != 0) {
+        Entry.CallbackForwardOffsets.push_back(Offset);
+      }
+    }
+    for (const auto &[Offset, Value] : FF.Stores) {
+      if (ModuleCallbackOffsets.count(Offset) != 0 &&
+          isParameterDerived(Value)) {
+        Entry.CallbackStoreOffsets.push_back(Offset);
+      } else if (isLiftedFunctionAddress(Value, FunctionByAddress)) {
+        Entry.FunctionAddressStoreOffsets.push_back(Offset);
+      }
+    }
+    auto SortUnique = [](std::vector<std::int64_t> &Values) {
+      std::sort(Values.begin(), Values.end());
+      Values.erase(std::unique(Values.begin(), Values.end()), Values.end());
+    };
+    SortUnique(Entry.CallbackCallOffsets);
+    SortUnique(Entry.CallbackStoreOffsets);
+    SortUnique(Entry.FunctionAddressStoreOffsets);
+    SortUnique(Entry.CallbackForwardOffsets);
+
+    Entry.HasArrayWalk = FF.HasArrayWalk;
+    Entry.OpaqueForwarded = FF.OpaqueForwarded;
+
+    // Callback boundary and element opacity are independent facts; the score
+    // counts them and the threshold is tuned coverage-first from the report.
+    // The weights are the measured optimum over the 112 annotated coreutils
+    // cases (see RECOGNITION_STRATEGY.md section 10): callback evidence and
+    // object-flow propagation carry the decision (+3 each), the array walk and
+    // the forwarded callback are ranking evidence, and element opacity is
+    // reported but does not qualify a function on its own (it fires on every
+    // function that hands a pointer it does not dereference to a callee).
+    int Score = 0;
+    if (!Entry.CallbackCallOffsets.empty()) {
+      Score += 3;
+    }
+    if (!Entry.CallbackStoreOffsets.empty()) {
+      Score += 3;
+    }
+    if (Entry.HasArrayWalk) {
+      Score += 1;
+    }
+    if (!Entry.CallbackForwardOffsets.empty()) {
+      Score += 1;
+    }
+    // Several callback slots read from a header of pointer-sized fields: the
+    // container's pluggable operations are forwarded rather than invoked here.
+    // This is the O0 form of the hash family (the initialiser inlined), but on
+    // the large C++ binaries it fires on ordinary objects as well, so it is
+    // reported as a separate fact instead of qualifying a function by default:
+    // coreutils +37 annotated functions for +312 candidates, blender +0 for
+    // +347 (RECOGNITION_STRATEGY.md section 10).
+    Entry.HeaderCallbackReads = Entry.CallbackForwardOffsets.size() >= 2 &&
+                                Entry.HasPointerSizedHeader;
+    Entry.Score = Score;
+    if (Entry.CallbackCallOffsets.empty() && Entry.CallbackStoreOffsets.empty()) {
+      // Nothing to propagate from yet; the propagation pass fills this in.
+      Entry.PropagationDepth = -1;
+    } else {
+      Entry.PropagationDepth = 0;
+    }
+
+    bool WorthReporting = !Entry.Objects.empty() || Score > 0 ||
+                          Entry.OpaqueForwarded > 0 ||
+                          !Entry.FunctionAddressStoreOffsets.empty() ||
+                          !Entry.CallbackForwardOffsets.empty();
+    if (WorthReporting) {
+      EvidenceIndex[FF.Function] = Results.size();
+      Results.push_back(std::move(Entry));
+    }
+  }
+
+  // ---- object-flow propagation ---------------------------------------------
+  // A function that hands one of its own objects to a function with callback
+  // evidence operates on the same container; bounded fixpoint.
+  std::map<const llvm::Function *, std::set<const llvm::Value *>> OwnBases;
+  for (const ContainerFunctionFacts &FF : Facts) {
+    if (!FF.OwnObjectBases.empty()) {
+      OwnBases.emplace(FF.Function, FF.OwnObjectBases);
+    }
+  }
+  for (unsigned Round = 0; Round < 8; ++Round) {
+    bool Changed = false;
+    for (const llvm::Function &F : M) {
+      auto SelfIt = EvidenceIndex.find(&F);
+      if (SelfIt == EvidenceIndex.end()) {
+        continue;
+      }
+      if (Results[SelfIt->second].PropagationDepth >= 0) {
+        continue;
+      }
+      auto BaseIt = OwnBases.find(&F);
+      if (BaseIt == OwnBases.end()) {
+        continue;
+      }
+      int Best = -1;
+      for (const llvm::BasicBlock &BB : F) {
+        for (const llvm::Instruction &I : BB) {
+          auto *CB = llvm::dyn_cast<llvm::CallBase>(&I);
+          if (CB == nullptr) {
+            continue;
+          }
+          const llvm::Function *Callee = CB->getCalledFunction();
+          if (Callee == nullptr) {
+            continue;
+          }
+          auto CalleeIt = EvidenceIndex.find(Callee);
+          if (CalleeIt == EvidenceIndex.end()) {
+            continue;
+          }
+          const int CalleeDepth = Results[CalleeIt->second].PropagationDepth;
+          if (CalleeDepth < 0) {
+            continue;
+          }
+          for (const llvm::Use &A : CB->args()) {
+            if (BaseIt->second.count(A.get()) != 0) {
+              if (Best < 0 || CalleeDepth + 1 < Best) {
+                Best = CalleeDepth + 1;
+              }
+            }
+          }
+        }
+      }
+      if (Best >= 0) {
+        Results[SelfIt->second].PropagationDepth = Best;
+        Results[SelfIt->second].Score += 3;
+        Changed = true;
+      }
+    }
+    if (!Changed) {
+      break;
+    }
+  }
+
+  const int Threshold = containerScoreThreshold();
+  for (ContainerBoundaryEvidence &Entry : Results) {
+    Entry.Candidate = Entry.Score >= Threshold;
+  }
+  return Results;
 }
 
 } // namespace notdec::mlsub

@@ -11,9 +11,14 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Alignment.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Transforms/Utils/Local.h>
+#include <algorithm>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -77,50 +82,11 @@ matchOffset(Value *V, std::set<Instruction *> &Visited) {
   return {{V, 0}};
 };
 
-llvm::Value *addOffset(llvm::IRBuilder<> &Builder, const llvm::DataLayout &DL,
-                       llvm::Value *Base, int64_t Offset) {
-  if (Base == nullptr) {
-    Base = Builder.CreateIntToPtr(
-        Builder.getIntN(DL.getPointerSizeInBits(), Offset),
-        PointerType::get(Builder.getContext(), 0));
-    return Base;
-  } else if (Offset == 0) {
-    // do nothing
-  } else {
-    if (Base->getType()->isPointerTy()) {
-      // how to add the offset?
-      // 1 gep
-      // 2 cast to int and add?
-      Base = Builder.CreatePtrToInt(
-          Base,
-          Type::getIntNTy(Builder.getContext(), DL.getPointerSizeInBits()));
-    }
-    Base = Builder.CreateAdd(
-        Base, Builder.getIntN(Base->getType()->getIntegerBitWidth(), Offset));
-  }
-  if (Base->getType()->isIntegerTy()) {
-    Base = Builder.CreateIntToPtr(Base, PointerType::get(Builder.getContext(), 0));
-  }
-  return Base;
-}
-
 PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
   auto PointerSizeInBytes = F.getParent()->getDataLayout().getPointerSize();
   bool LoggedBanner = false;
   auto getTypeSize = [=](llvm::Type *Ty) {
     return llvm2c::getLLVMTypeSize(Ty, PointerSizeInBytes * 8);
-  };
-
-  auto isCyclicConstant = [](int64_t Val) {
-    auto Low = Val & 0xFF;
-    if ((Val & 0xFF00) == (Low << 8)) {
-      if ((Val & 0xFF0000) == (Low << 16)) {
-        if ((Val & 0xFF000000) == (Low << 24)) {
-          return true;
-        }
-      }
-    }
-    return false;
   };
 
   for (auto BB = F.begin(), E = F.end(); BB != E; ++BB) {
@@ -132,7 +98,7 @@ PreservedAnalyses MemsetMatcher::run(Function &F, FunctionAnalysisManager &) {
           continue;
         }
         auto *SetVal = dyn_cast<ConstantInt>(SI->getValueOperand());
-        if (!isCyclicConstant(SetVal->getZExtValue())) {
+        if (!isCyclicConstantValue(SetVal->getZExtValue())) {
           continue;
         }
 

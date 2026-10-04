@@ -26,10 +26,13 @@ add_library(notdec-typerecovery STATIC
 	# Type recovery itself.
 	Passes/DangerousTypePatternScan.cpp
 	Passes/FreePhiSplitPass.cpp
+	# Memory-op cleanup the microsub2 pipeline runs before type recovery.
+	Passes/MemsetStoreFuser.cpp
 	TypeRecovery/LowTy.cpp
 	TypeRecovery/mlsub/HTypeDebug.cpp
 	TypeRecovery/mlsub/HTypeNormalize.cpp
-	TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.cpp
+	TypeRecovery/mlsub/AllocatorBoundaryAnalysis.cpp
+	TypeRecovery/mlsub/PolymorphicMarking.cpp
 	TypeRecovery/mlsub/MergePolicyEval.cpp
 	TypeRecovery/mlsub/MLsubGenerator.cpp
 	TypeRecovery/mlsub/PostConstraintCheckpoint.cpp

@@ -337,6 +337,21 @@ struct ConstraintsGenerator {
   enum class LocalSubtypeMergeMode { StructPointer, Pointer, AllLocal };
   LocalSubtypeMergeMode LocalSubtypeMode = LocalSubtypeMergeMode::StructPointer;
   mutable std::size_t LocalSubtypeHookChecks = 0;
+  // Two-round merge (NOTDEC_TWO_ROUND_MERGE=1).  Round one runs while the
+  // cross-function subtype edges are being added (the visitor plus the
+  // deferred call constraints): a merge is only accepted when both sides
+  // already carry identical field evidence.  Refused pairs are remembered and
+  // re-checked in round two, after every call edge and field access has been
+  // seen, with the ordinary "no conflicting layouts" policy.
+  bool TwoRoundMerge = false;
+  bool TwoRoundMergeDiag = false;
+  // True only while round two re-checks the deferred pairs; the round-one
+  // gate is active everywhere else.
+  bool RoundTwoRecheck = false;
+  mutable std::vector<std::pair<SimpleType, SimpleType>> DeferredRoundOneMerges;
+  mutable std::size_t RoundOneMergeRefused = 0;
+  std::size_t RoundTwoMergeConsidered = 0;
+  std::size_t RoundTwoMergeAccepted = 0;
   mutable std::size_t LocalSubtypeBasicCandidates = 0;
   mutable std::size_t LocalSubtypeSameFunctionCandidates = 0;
   mutable std::size_t LocalSubtypePointerCandidates = 0;
@@ -369,6 +384,56 @@ struct ConstraintsGenerator {
   llvm::Function *getVariableOwningFunction(SimpleType Ty) const;
   binarysub::expected<bool, binarysub::Error>
   shouldMergeSameFunctionStructPtrSubtype(SimpleType LHS, SimpleType RHS) const;
+  // Round-one gate for NOTDEC_TWO_ROUND_MERGE: true when merging is currently
+  // allowed (switch off, or we are in round two, or both sides already carry
+  // identical field slices).  Refused pairs are queued for round two.
+  bool roundOneMergeAllowed(SimpleType LHS, SimpleType RHS) const;
+  void deferRoundOneMergePair(SimpleType LHS, SimpleType RHS) const;
+  // Round two: re-check the pairs round one refused, with full evidence.
+  void recheckDeferredRoundOneMerges();
+  // ---- Stack-region marking (default on) ---------------------------------
+  // A value is frame derived when it addresses the shared "%frame" alloca of a
+  // function, directly or through GEP/cast chains; such a value denotes a
+  // location inside that function stack region.  The mark vetoes type-node
+  // merges that would unify a stack region with something unrelated:
+  //   NOTDEC_FRAME_NO_NONFRAME_MERGE        stack region vs non-stack region
+  //   NOTDEC_FRAME_NO_CROSS_FUNCTION_MERGE  stack region of F vs stack region of G
+  // Both are on by default (they remove the "object grows into a whole stack
+  // frame" false members; see microsub2/logs 38/39/68).  Set either switch to
+  // 0 to restore the pre-guard behaviour for an A/B run.
+  const llvm::AllocaInst *frameOwnerOfValue(const llvm::Value *V) const;
+  // What kind of object a value's address provably is, following the same
+  // transparent chains as frameOwnerOfValue.  Object = a stack slot that is not
+  // the frame, a global, or a parameter: an address we can attribute.  Unknown
+  // = a loaded/returned/computed address, which may point anywhere (including
+  // inside this very frame), so it must not be read as "provably not the frame".
+  enum class AddressOrigin { Unknown, Frame, Object };
+  AddressOrigin addressOriginOfValue(const llvm::Value *V) const;
+  // nullopt: no value bookkeeping for this node, or (with
+  // FrameVetoKnownObjectOnly) some value whose address is of unknown origin;
+  // empty: known to be a non-frame object; non-empty: the stack regions the
+  // node addresses.
+  std::optional<std::set<const llvm::AllocaInst *>>
+  frameOwnersOfNode(SimpleType Ty) const;
+  bool frameMergeVeto(SimpleType LHS, SimpleType RHS,
+                      const char **Why = nullptr) const;
+  // Diagnostic helper for frameMergeVeto (NOTDEC_FRAME_VETO_DIAG).
+  void dumpFrameVetoSide(const char *Tag, SimpleType Ty) const;
+  bool FrameNoNonFrameMerge = true;
+  bool FrameNoCrossFunctionMerge = true;
+  bool FrameMarkIncludesLvars = false;
+  // Only treat a node as "provably not a stack region" when every value behind
+  // it is an attributable object (stack slot / global / parameter).  A loaded
+  // or computed pointer is an unknown address, not evidence of a different
+  // object, and must not block the merge.
+  bool FrameVetoKnownObjectOnly = false;
+  mutable std::map<const llvm::Value *, const llvm::AllocaInst *>
+      FrameOwnerCache;
+  mutable std::size_t FrameVetoNonFrame = 0;
+  mutable std::size_t FrameVetoCrossFunction = 0;
+  // Diagnostic: merges where one side is a stack region and the other side has
+  // no value bookkeeping, so the veto above cannot decide (silent today).
+  mutable std::size_t FrameVetoUnknownSide = 0;
   binarysub::expected<void, binarysub::Error> queueLocalSubtypeMerges(
       SimpleType Var, const binarysub::EnqueueMergeFn &EnqueueMerge) const;
   binarysub::expected<void, binarysub::Error> onVariableNonVarBoundAdded(
@@ -419,9 +484,13 @@ struct ConstraintsGenerator {
   std::size_t applyStructPtrFieldFollowupMergePolicy();
   bool hasNonConflictingStructFieldSlices(SimpleType LHS, SimpleType RHS,
                                           bool RequireEvidence) const;
+  // OverlapMode: -1 = use NOTDEC_LAYOUT_OVERLAP_MODE; 0 = strict (any
+  // overlapping non-identical slice vetoes); 1 = allow nested (containment)
+  // overlaps; 2 = allow every overlap.
   std::optional<std::string>
   explainStructFieldSliceCompatibilityFailure(SimpleType LHS, SimpleType RHS,
-                                              bool RequireEvidence) const;
+                                              bool RequireEvidence,
+                                              int OverlapMode = -1) const;
   bool hasStructPointerEvidenceInBound(SimpleType Bound) const;
   bool hasPointerLikeEvidenceBeforeNonVarBound(
       SimpleType Ty, binarysub::BoundPolarity Polarity) const;
@@ -487,6 +556,29 @@ struct ConstraintsGenerator {
     if (auto *Enabled = std::getenv("NOTDEC_EARLY_CALL_INTERFACE_MERGE")) {
       EnableEarlyCallInterfaceMerge = std::strcmp(Enabled, "1") == 0;
     }
+    // Default on: round one only merges nodes whose field evidence already
+    // agrees, round two re-checks the rest once every call edge and field
+    // access has been seen.  "=0" restores the single-round behaviour.
+    TwoRoundMerge = true;
+    if (auto *Enabled = std::getenv("NOTDEC_TWO_ROUND_MERGE")) {
+      TwoRoundMerge = std::strcmp(Enabled, "0") != 0;
+    }
+    TwoRoundMergeDiag = std::getenv("NOTDEC_TWO_ROUND_DIAG") != nullptr;
+    // Default on.  See frameOwnerOfValue: a stack region must not be unified
+    // with an unrelated region.  "=0" restores the pre-guard behaviour.
+    if (auto *Enabled = std::getenv("NOTDEC_FRAME_NO_NONFRAME_MERGE")) {
+      FrameNoNonFrameMerge = std::strcmp(Enabled, "0") != 0;
+    }
+    if (auto *Enabled = std::getenv("NOTDEC_FRAME_NO_CROSS_FUNCTION_MERGE")) {
+      FrameNoCrossFunctionMerge = std::strcmp(Enabled, "0") != 0;
+    }
+    if (auto *Enabled = std::getenv("NOTDEC_FRAME_MARK_INCLUDES_LVARS")) {
+      FrameMarkIncludesLvars = std::strcmp(Enabled, "1") == 0;
+    }
+    // Relaxation of the veto condition: only an attributable non-frame object
+    // counts as "provably not a stack region"; unknown addresses do not.
+    FrameVetoKnownObjectOnly =
+        std::getenv("NOTDEC_FRAME_VETO_KNOWN_OBJECT_ONLY") != nullptr;
     ConstraintDiagEnabled =
         std::getenv("NOTDEC_CONSTRAINT_DIAG") != nullptr;
   }
@@ -633,11 +725,248 @@ struct ConstraintsGenerator {
 #endif
   };
 
+  // Partially-monomorphic positions create one extruded "shared" node per
+  // (callee, position).  That node replaces the callee's formal in the call
+  // slot, so it must count as a node of the CALLER: the struct-pointer merge
+  // policy only pairs variables owned by one llvm::Function
+  // (shouldMergeSameFunctionStructPtrSubtype), and the caller's other copies of
+  // the same C object are what carry the members no other call path of the
+  // callee touches.  Wrapper because the value->variable handle itself stays a
+  // private detail of the generator.
+  void attachSharedNodeOwner(SimpleType Ty, const ExtValuePtr &Val);
+
+  // Collect the extruded (shared) node together with the other level-0 views of
+  // the same C object inside its caller, so that the same-function
+  // struct-pointer merge policy can unify them BEFORE the summary is extruded
+  // and instantiated again.  The policy is edge-driven (it is consulted from
+  // queueLocalSubtypeMerges for constraint neighbours only) and the extruded
+  // node has no edge to the caller's other copies of the object, so without an
+  // explicit collection the union of the object's members never reaches it.
+  void collectSharedNodeSiblings(SimpleType Shared, llvm::Value *Actual);
+
+
+  // True while an IR instruction is being visited: constraints added in that
+  // window correspond to IR operations.  Everything added outside it comes from
+  // a merge policy or from type-graph bookkeeping and is traced instead.
+  bool InsideIRVisit = false;
+
   void addSubtype(SimpleType lhs, SimpleType rhs) {
     assert(lhs != nullptr);
     assert(rhs != nullptr);
+    const bool IRDerived = InsideIRVisit;
+    if (!IRDerived && std::getenv("NOTDEC_NON_IR_EDGE_TRACE") != nullptr) {
+      auto NonIROwner = [&](SimpleType T) -> std::string {
+        if (auto *O = getVariableOwningFunction(T)) {
+          return O->getName().str();
+        }
+        return "<none>";
+      };
+      llvm::errs() << "[non-ir-edge] " << binarysub::debug_string(lhs)
+                   << " owner=" << NonIROwner(lhs) << "  ->  "
+                   << binarysub::debug_string(rhs) << " owner=" << NonIROwner(rhs)
+                   << "\n";
+    }
     if (MergeEval) {
       MergeEval->observeAddSubtype();
+    }
+    if (const char *Watch = std::getenv("NOTDEC_FATGROW_DIAG")) {
+      // Trace the growth of one node: every constraint that makes some value a
+      // subtype of it (i.e. adds a lower bound), with the origin of the edge.
+      static std::size_t Printed = 0;
+      if (Printed < 400) {
+        auto Match = [&](SimpleType Side) -> bool {
+          auto Root = binarysub::resolve_variable(Side);
+          auto *VS = Root ? Root->getAsVariableState() : nullptr;
+          if (VS == nullptr) {
+            return false;
+          }
+          if (VS->lowerBounds.size() < 20) {
+            return false;
+          }
+          bool Found = false;
+          for (const auto &Ent : V2N.rev()) {
+            if (binarysub::resolve_variable(Ent.first).get() != Root.get()) {
+              continue;
+            }
+            for (const auto &Val : Ent.second) {
+              llvm::Function *Owner = nullptr;
+              if (auto *VP = std::get_if<llvm::Value *>(&Val)) {
+                if (auto *Inst = llvm::dyn_cast<llvm::Instruction>(*VP)) {
+                  Owner = Inst->getFunction();
+                } else if (auto *Arg = llvm::dyn_cast<llvm::Argument>(*VP)) {
+                  Owner = Arg->getParent();
+                }
+              }
+              if (Owner != nullptr && Owner->getName() == Watch) {
+                Found = true;
+                break;
+              }
+            }
+            if (Found) {
+              break;
+            }
+          }
+          return Found;
+        };
+        const bool LhsIsFat = Match(lhs);
+        const bool RhsIsFat = Match(rhs);
+        if (LhsIsFat || RhsIsFat) {
+          ++Printed;
+          SimpleType Other = LhsIsFat ? rhs : lhs;
+          auto OtherRoot = binarysub::resolve_variable(Other);
+          auto *OtherVS = OtherRoot ? OtherRoot->getAsVariableState() : nullptr;
+          llvm::errs() << "[fat-grow] #" << Printed
+                       << (LhsIsFat ? " lhs=fat" : " rhs=fat")
+                       << " other_lb="
+                       << (OtherVS ? OtherVS->lowerBounds.size() : 0)
+                       << " other_ub="
+                       << (OtherVS ? OtherVS->upperBounds.size() : 0)
+                       << " via=" << (InsideIRVisit ? "ir" : "policy");
+          auto It = V2N.rev().find(OtherRoot);
+          if (It != V2N.rev().end()) {
+            for (std::size_t I = 0; I < It->second.size() && I < 2; ++I) {
+              llvm::errs() << " v=" << toStableString(It->second[I]);
+            }
+          } else {
+            llvm::errs() << " v=<none>";
+          }
+          llvm::errs() << "\n";
+        }
+      }
+    }
+    if (std::getenv("NOTDEC_FATNODE_DIAG") != nullptr) {
+      for (SimpleType Side : {lhs, rhs}) {
+        auto Root = binarysub::resolve_variable(Side);
+        auto *VS = Root ? Root->getAsVariableState() : nullptr;
+        static const std::size_t MinBounds = [] {
+          const char *V = std::getenv("NOTDEC_FATNODE_MIN");
+          return V == nullptr ? std::size_t{1000}
+                              : static_cast<std::size_t>(std::atoi(V));
+        }();
+        static const std::string OnlyFunc = [] {
+          const char *V = std::getenv("NOTDEC_FATNODE_FUNC");
+          return std::string(V == nullptr ? "" : V);
+        }();
+        if (VS == nullptr ||
+            VS->upperBounds.size() + VS->lowerBounds.size() < MinBounds) {
+          continue;
+        }
+        static std::size_t PrintedForFunc = 0;
+        std::vector<ExtValuePtr> Members;
+        for (const auto &Ent : V2N.rev()) {
+          if (binarysub::resolve_variable(Ent.first).get() == Root.get()) {
+            Members.insert(Members.end(), Ent.second.begin(), Ent.second.end());
+          }
+        }
+        if (!OnlyFunc.empty()) {
+          if (PrintedForFunc >= 4) {
+            continue;
+          }
+          bool Match = false;
+          for (const auto &Val : Members) {
+            if (auto *O = getExtValueFunction(Val);
+                O != nullptr && O->getName() == OnlyFunc) {
+              Match = true;
+              break;
+            }
+          }
+          if (!Match) {
+            continue;
+          }
+          ++PrintedForFunc;
+        }
+        llvm::errs() << "[fat-node] node=" << binarysub::debug_string(Root)
+                     << " lb=" << VS->lowerBounds.size()
+                     << " ub=" << VS->upperBounds.size()
+                     << " values=" << Members.size() << "\n";
+        for (std::size_t I = 0; I < Members.size() && I < 50; ++I) {
+          llvm::errs() << "    v=" << toStableString(Members[I]);
+          if (auto *O = getExtValueFunction(Members[I])) {
+            llvm::errs() << " in=" << O->getName();
+          }
+          llvm::errs() << "\n";
+        }
+        {
+          // Every bound carries the origin ids that were active when it was
+          // added (parallel vectors maintained by binarysub), so the operation
+          // that generated the copies can be named directly.
+          const auto &Table = boundOriginTable();
+          auto Name = [&](std::uint32_t Id) -> std::string {
+            return Id < Table.Descriptions.size() ? Table.Descriptions[Id]
+                                                  : std::string("?");
+          };
+          std::map<std::string, unsigned> Hist;
+          for (std::size_t I = 0; I < VS->lowerBounds.size(); ++I) {
+            if (I >= VS->lowerBoundOrigins.size()) {
+              ++Hist["<no-origin-slot>"];
+              continue;
+            }
+            const auto &Origins = VS->lowerBoundOrigins[I];
+            if (!Origins || Origins->empty()) {
+              ++Hist["<no-origin>"];
+              continue;
+            }
+            for (std::uint32_t Id : *Origins) {
+              ++Hist[Name(Id)];
+            }
+          }
+          llvm::errs() << "[lb-origin-hist] node="
+                       << binarysub::debug_string(Root)
+                       << " bounds=" << VS->lowerBounds.size()
+                       << " slots=" << VS->lowerBoundOrigins.size()
+                       << "\n";
+          for (const auto &[N, C] : Hist) {
+            llvm::errs() << "    " << C << "\t" << N << "\n";
+          }
+          unsigned Sample = 0;
+          for (std::size_t I = 0;
+               I < VS->lowerBounds.size() && Sample < 12; ++I, ++Sample) {
+            llvm::errs() << "    lb[" << I << "]="
+                         << binarysub::debug_string(VS->lowerBounds[I])
+                         << " origins=[";
+            if (I < VS->lowerBoundOrigins.size() &&
+                VS->lowerBoundOrigins[I]) {
+              unsigned C = 0;
+              for (std::uint32_t Id : *VS->lowerBoundOrigins[I]) {
+                if (C++ >= 3) {
+                  llvm::errs() << ",…";
+                  break;
+                }
+                llvm::errs() << Name(Id) << ";";
+              }
+            }
+            llvm::errs() << "]\n";
+          }
+        }
+        unsigned ShownLb = 0;
+        for (const auto &B : VS->lowerBounds) {
+          if (ShownLb++ >= 40) {
+            break;
+          }
+          llvm::errs() << "    lb: " << binarysub::debug_string(B);
+          if (auto *O = getVariableOwningFunction(B)) {
+            llvm::errs() << " owner=" << O->getName();
+          }
+          auto It = V2N.rev().find(binarysub::resolve_variable(B));
+          if (It != V2N.rev().end()) {
+            for (std::size_t I = 0; I < It->second.size() && I < 2; ++I) {
+              llvm::errs() << " v=" << toStableString(It->second[I]);
+            }
+          }
+          llvm::errs() << "\n";
+        }
+        unsigned Shown = 0;
+        for (const auto &B : VS->upperBounds) {
+          if (Shown++ >= 8) {
+            break;
+          }
+          llvm::errs() << "    ub: " << binarysub::debug_string(B);
+          if (auto *O = getVariableOwningFunction(B)) {
+            llvm::errs() << " owner=" << O->getName();
+          }
+          llvm::errs() << "\n";
+        }
+      }
     }
     binarysub::Cache cache;
     binarysub::ConstraintContext Context;
@@ -646,6 +975,59 @@ struct ConstraintsGenerator {
 #endif
     binarysub::ConstraintContext *ContextPtr =
         configureConstraintContext(Context) ? &Context : nullptr;
+    // Diagnostic: a pair of variables connected in BOTH directions is what the
+    // solver's reverse_edge rule later merges; print the first such pairs so the
+    // cascade's precondition can be traced back to a function/position.
+    if (std::getenv("NOTDEC_BIDIR_DIAG") != nullptr) {
+      auto L = binarysub::resolve_variable(lhs);
+      auto R = binarysub::resolve_variable(rhs);
+      auto *LV = L ? L->getAsVariableState() : nullptr;
+      auto *RV = R ? R->getAsVariableState() : nullptr;
+      if (LV != nullptr && RV != nullptr) {
+        bool Reverse = false;
+        for (const auto &B : RV->upperBounds) {
+          if (binarysub::resolve_variable(B).get() == L.get()) {
+            Reverse = true;
+            break;
+          }
+        }
+        if (!Reverse) {
+          for (const auto &B : LV->lowerBounds) {
+            if (binarysub::resolve_variable(B).get() == R.get()) {
+              Reverse = true;
+              break;
+            }
+          }
+        }
+        if (Reverse) {
+          auto OwnerName = [&](SimpleType T) -> std::string {
+            if (auto *O = getVariableOwningFunction(T)) {
+              return O->getName().str();
+            }
+            return "<none>";
+          };
+          auto Values = [&](SimpleType T) -> std::string {
+            std::string Out;
+            auto It = V2N.rev().find(T);
+            if (It == V2N.rev().end()) {
+              return Out;
+            }
+            for (std::size_t I = 0; I < It->second.size() && I < 4; ++I) {
+              if (I != 0) {
+                Out += ", ";
+              }
+              Out += toStableString(It->second[I]);
+            }
+            return Out;
+          };
+          llvm::errs() << "[bidir-edge] " << binarysub::debug_string(L)
+                       << " owner=" << OwnerName(L) << " values=[" << Values(L)
+                       << "]  <->  " << binarysub::debug_string(R)
+                       << " owner=" << OwnerName(R) << " values=[" << Values(R)
+                       << "] via=" << (IRDerived ? "ir" : "policy") << "\n";
+        }
+      }
+    }
     auto Result = binarysub::constrain(
         lhs, rhs, cache,
         [this](const SimpleType &Lhs, const SimpleType &Rhs) {
@@ -700,11 +1082,28 @@ struct ConstraintsGenerator {
   }
   void recordStore(ExtValuePtr Addr, SimpleType ValueTy, unsigned BitSize,
                    llvm::Instruction *Source);
-  void addConstantMemoryField(ExtValuePtr Addr, SimpleType ValueTy);
+  void addConstantMemoryField(ExtValuePtr Addr);
   SimpleType getOrCreateStorageField(llvm::StringRef FieldName,
                                      unsigned BitSize = 0);
 
   void onUpdatePNType(ExtValuePtr Val) {}
+  // The llvm::Value behind an ExtValuePtr, when the variant carries one.
+  static const llvm::Value *extValueAsValue(const ExtValuePtr &Val) {
+    if (const auto *Plain = std::get_if<llvm::Value *>(&Val)) {
+      return *Plain;
+    }
+    if (const auto *Const = std::get_if<UConstant>(&Val)) {
+      return Const->Val;
+    }
+    if (const auto *Stack = std::get_if<StackObject>(&Val)) {
+      return Stack->Allocator;
+    }
+    if (const auto *Heap = std::get_if<HeapObject>(&Val)) {
+      return Heap->Allocator;
+    }
+    return nullptr;
+  }
+
   void setAsPtrAdd(ExtValuePtr basePtr, ExtValuePtr result, OffsetRange Off,
                    llvm::StringRef Origin = {}) {
     auto BaseNode = getOrInsertNode(basePtr);
@@ -719,6 +1118,39 @@ struct ConstraintsGenerator {
     // padding, not a member of whatever object the frame is later merged into.
     // Keep the P/N relation above; do not emit an object field for it.
     if (isStackCanarySlotValue(result)) {
+      return;
+    }
+    // Experimental (NOTDEC_NO_PTRADD_FIELD_CONSTRAINT=1): an offset that comes
+    // from raw pointer arithmetic on an integer (PNDiff matched a
+    // ptrtoint/add/inttoptr walk, Origin="ptradd:...") is a cursor position in
+    // a byte walk, not evidence that the object has a member there.  Keep the
+    // pointer/number relation above and the object marker below, but do not
+    // create a member field on the base.  GEP-derived offsets ("gep:...") keep
+    // the old behaviour.  See microsub2/logs 11/12 (a layout-side cursor filter
+    // cannot work: the oversized fields have mixed origins) and 68/69.
+    static const bool DropPtrAddFields = [] {
+      const char *Value = std::getenv("NOTDEC_NO_PTRADD_FIELD_CONSTRAINT");
+      return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
+    }();
+    if (DropPtrAddFields && !Origin.starts_with("gep:")) {
+      addSubtype(ResultNode, binarysub::make_record({}));
+      return;
+    }
+    // Experimental (NOTDEC_NO_FRAME_MEMBER_FIELDS=1): the shared "%frame"
+    // alloca is the function's raw stack storage, not a struct.  Today every
+    // "frame + constant" walk emits a member field on it, so the frame becomes
+    // "one record with one member per stack offset" (and the dynamic-index
+    // slices at 920/928/936... add more).  A later merge between that frame and
+    // an object then imports the whole stack slot table.  Skip the field for
+    // frame-relative bases: the named locals keep their own records through
+    // their own slices, and the pointer/number relation above is unchanged.
+    static const bool DropFrameFields = [] {
+      const char *Value = std::getenv("NOTDEC_NO_FRAME_MEMBER_FIELDS");
+      return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
+    }();
+    if (DropFrameFields &&
+        frameOwnerOfValue(extValueAsValue(basePtr)) != nullptr) {
+      addSubtype(ResultNode, binarysub::make_record({}));
       return;
     }
     std::vector<std::pair<std::string, SimpleType>> fields;
@@ -775,6 +1207,20 @@ protected:
 
   public:
     MLsubVisitor(ConstraintsGenerator &cg) : cg(cg) {}
+
+    // Bring the base class's visit(Function&)/visit(BasicBlock&) overloads back
+    // into scope; the derived visit(Instruction&) below would otherwise hide
+    // them.
+    using llvm::InstVisitor<MLsubVisitor>::visit;
+
+    // Every instruction goes through this entry point (InstVisitor CRTP), so it
+    // marks the window in which constraints are IR-derived.
+    void visit(llvm::Instruction &I) {
+      const bool Saved = cg.InsideIRVisit;
+      cg.InsideIRVisit = true;
+      llvm::InstVisitor<MLsubVisitor>::visit(I);
+      cg.InsideIRVisit = Saved;
+    }
 
     static bool isHeapAllocationCall(llvm::CallBase &I);
     static bool shouldIgnoreRuntimeCall(llvm::CallBase &I);
@@ -870,6 +1316,13 @@ class MLsubRecovery {
   // types. Mark them polymorphic before SCC partitioning so each callsite gets
   // fresh argument variables instead of sharing one `read::arg1`-style node.
   std::set<llvm::Function *> DetectedPolymorphicBufferFunctions;
+  // Set by PolymorphicMarkingPass; when true MLsubRecovery::run does not run
+  // the recognition sources again (the pass already did, before the call
+  // graph).
+  bool PolymorphicMarkingDone = false;
+  // Set once the summary/signature override documents and the primitive
+  // semantic lattices are registered.
+  bool OverridesLoaded = false;
   llvm::json::Value SummaryOverrideDoc = nullptr;
   std::set<llvm::Function *> SummaryOverrideFuncs;
   llvm::json::Value SignatureOverrideDoc = nullptr;
@@ -938,6 +1391,12 @@ public:
   const llvm::json::Value &getCheckpointExtraConstraintsDoc() const {
     return ExtraConstraintsDoc;
   }
+  // The level hook (isPolymorphic) is private; the marking pass reports it.
+  bool isLevelPolymorphic(llvm::Function *F) const { return isPolymorphic(F); }
+  bool isPolymorphicMarkingDone() const { return PolymorphicMarkingDone; }
+  void setPolymorphicMarkingDone(bool Value = true) {
+    PolymorphicMarkingDone = Value;
+  }
   const std::set<llvm::Function *> &getCheckpointMallocWrappers() const {
     return DetectedMallocWrappers;
   }
@@ -957,6 +1416,7 @@ public:
   void validateExtraConstraintsFile(llvm::Module &M, const char *Path,
                                     llvm::StringRef ModuleSHA256Hex);
   void emitTRInputArtifacts(llvm::Module &M, llvm::StringRef OutputPath);
+  void loadOverridesAndPrimitives(llvm::Module &M);
   void detectMallocWrappers(llvm::Module &M);
   void markBuiltinPolymorphicBufferFunctions(llvm::Module &M);
   const llvm::json::Value *getExtraConstraintsSpec(
