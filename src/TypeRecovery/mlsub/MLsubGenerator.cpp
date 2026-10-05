@@ -7006,8 +7006,25 @@ ConstraintsGenerator::collectStructPtrSameStoreMergeCandidates() const {
   return collectStructPtrSameAccessKindMergeCandidates(/*CollectLoads=*/false);
 }
 
+// Ablation switch NOTDEC_MEM_NO_STORE_TO_LOAD=1: the library drops the
+// store->load subtype edge at this setting (storeToLoadFlowEnabled in
+// binarysub/src/binarysub-core.cpp).  The same setting must drop the
+// merge-level read/write coupling too, otherwise the load target and the store
+// target of one pointer variable are still unified into one type variable.
+// Only the exact string "1" disables the flow; unset keeps the default.
+static bool storeToLoadFlowDisabled() {
+  static const bool Disabled = [] {
+    const char *Value = std::getenv("NOTDEC_MEM_NO_STORE_TO_LOAD");
+    return Value != nullptr && std::string(Value) == "1";
+  }();
+  return Disabled;
+}
+
 std::vector<ConstraintsGenerator::StructPtrSlotMergeCandidate>
 ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
+  if (storeToLoadFlowDisabled()) {
+    return {};
+  }
   std::vector<StructPtrSlotMergeCandidate> Candidates;
   std::set<std::tuple<const binarysub::TypeNode *, const binarysub::TypeNode *,
                       const binarysub::TypeNode *, unsigned>>
