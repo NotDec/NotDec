@@ -68,6 +68,49 @@ namespace notdec::mlsub {
 
 static bool isEVMModule(const llvm::Module &M);
 
+// Ablation switch NOTDEC_MEM_PTR_SINGLE=covariant|contravariant: keep only a
+// single pointer parameter.  Every memory access then contributes the accessed
+// type to that one slot instead of to a separate read or write half, so the
+// pointer type carries a single variance (see ptrVariance in
+// binarysub/src/binarysub-core.cpp, which propagates the halves accordingly).
+// Unset keeps the read/write split, so the default configuration is untouched.
+enum class PtrSingleMode { Off, Covariant, Contravariant };
+
+static PtrSingleMode ptrSingleMode() {
+  static const PtrSingleMode Mode = [] {
+    const char *Value = std::getenv("NOTDEC_MEM_PTR_SINGLE");
+    if (Value == nullptr) {
+      return PtrSingleMode::Off;
+    }
+    const std::string Text(Value);
+    if (Text == "covariant") {
+      return PtrSingleMode::Covariant;
+    }
+    if (Text == "contravariant") {
+      return PtrSingleMode::Contravariant;
+    }
+    return PtrSingleMode::Off;
+  }();
+  return Mode;
+}
+
+// Store=true for a write access: the split design emits a PtrStore capability,
+// the single-parameter modes emit the one slot they keep for both directions.
+static binarysub::SimpleType ptrAccessCapability(binarysub::SimpleType To,
+                                                 unsigned BitSize,
+                                                 bool Store) {
+  switch (ptrSingleMode()) {
+  case PtrSingleMode::Covariant:
+    return binarysub::make_ptr_load(To, BitSize);
+  case PtrSingleMode::Contravariant:
+    return binarysub::make_ptr_store(To, BitSize);
+  case PtrSingleMode::Off:
+    break;
+  }
+  return Store ? binarysub::make_ptr_store(To, BitSize)
+               : binarysub::make_ptr_load(To, BitSize);
+}
+
 namespace {
 
 static_assert(sizeof(ExtValuePtr) > 2 * sizeof(void *),
@@ -8389,16 +8432,17 @@ MLsubRecovery::buildOverrideType(const llvm::json::Value &Expr,
       appendOverrideConstraints(Recipe, std::move(LoadRecipe));
       auto AccessBits = binarysub::get_size(LoadRecipe.Root);
       Recipe.Constraints.push_back(
-          {Recipe.Root, binarysub::make_ptr_load(LoadRecipe.Root, AccessBits)});
+          {Recipe.Root,
+           ptrAccessCapability(LoadRecipe.Root, AccessBits, /*Store=*/false)});
     }
     if (auto *Store = Obj.get("store")) {
       auto StoreRecipe = buildOverrideType(
           *Store, Ctx, appendJSONPath(Path, "store"), false);
       appendOverrideConstraints(Recipe, std::move(StoreRecipe));
       auto AccessBits = binarysub::get_size(StoreRecipe.Root);
-      Recipe.Constraints.push_back({Recipe.Root,
-                                    binarysub::make_ptr_store(StoreRecipe.Root,
-                                                              AccessBits)});
+      Recipe.Constraints.push_back(
+          {Recipe.Root,
+           ptrAccessCapability(StoreRecipe.Root, AccessBits, /*Store=*/true)});
     }
     if (Obj.get("load") == nullptr && Obj.get("store") == nullptr) {
       failSignatureOverride(Path, "ptr requires at least one of load/store");
@@ -12426,7 +12470,8 @@ void ConstraintsGenerator::MLsubVisitor::visitLoadInst(LoadInst &I) {
     ConstraintsGenerator::BoundOriginScope LoadOrigin(
         cg, "load:" + toStableString(Addr) + "[" + std::to_string(BitSize) +
                 "]");
-    cg.addSubtype(PtrVal, binarysub::make_ptr_load(RetVal, BitSize));
+    cg.addSubtype(PtrVal,
+                  ptrAccessCapability(RetVal, BitSize, /*Store=*/false));
   }
 }
 
@@ -12474,7 +12519,8 @@ void ConstraintsGenerator::MLsubVisitor::visitStoreInst(StoreInst &I) {
     ConstraintsGenerator::BoundOriginScope StoreOrigin(
         cg, "store:" + toStableString(Addr) + "[" + std::to_string(BitSize) +
                 "]");
-    cg.addSubtype(PtrVal, binarysub::make_ptr_store(StoreVal, BitSize));
+    cg.addSubtype(PtrVal,
+                  ptrAccessCapability(StoreVal, BitSize, /*Store=*/true));
   }
 }
 
