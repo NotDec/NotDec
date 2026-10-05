@@ -69,25 +69,6 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
   // thresholds are validated against the annotation.
   auto Evidence = analyzeAllocatorBoundaries(M);
 
-  // 2b. Container boundaries: cross-call-site evidence.  Report-only for now;
-  // NOTDEC_POLY_MARK_CONTAINER_BOUNDARIES=1 marks the candidates.
-  auto ContainerEvidence = analyzeContainerBoundaries(M);
-  std::set<const llvm::Function *> ContainerMarked;
-  if (auto *Value = std::getenv("NOTDEC_POLY_MARK_CONTAINER_BOUNDARIES");
-      Value != nullptr && std::string_view(Value) == "1") {
-    for (const ContainerBoundaryEvidence &Entry : ContainerEvidence) {
-      if (Entry.Candidate && Entry.Function != nullptr) {
-        ContainerMarked.insert(Entry.Function);
-      }
-    }
-    for (const llvm::Function *F : ContainerMarked) {
-      const_cast<llvm::Function *>(F)->setMetadata(
-          KIND_MLSUB_POLYMORPHIC_FUNCTION,
-          llvm::MDNode::get(F->getContext(), {}));
-    }
-    llvm::errs() << "Info: container-boundary marking: " << ContainerMarked.size()
-                 << " functions marked\n";
-  }
   std::set<const llvm::Function *> BoundaryMarked;
   if (polymorphicMarkingMarksAllocatorBoundaries()) {
     for (const AllocatorBoundaryEvidence &Entry : Evidence) {
@@ -234,13 +215,6 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
     return llvm::PreservedAnalyses::all();
   }
 
-  std::map<const llvm::Function *, const ContainerBoundaryEvidence *>
-      ContainerByFn;
-  for (const ContainerBoundaryEvidence &Entry : ContainerEvidence) {
-    if (Entry.Function != nullptr) {
-      ContainerByFn.emplace(Entry.Function, &Entry);
-    }
-  }
   std::map<const llvm::Function *, const AllocatorBoundaryEvidence *> EvidenceByFn;
   for (const AllocatorBoundaryEvidence &Entry : Evidence) {
     if (Entry.Function != nullptr) {
@@ -264,10 +238,6 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
     }
     if (BoundaryMarked.count(&F) != 0) {
       Reasons.push_back("allocator-boundary");
-    }
-    auto ContainerIt = ContainerByFn.find(&F);
-    if (ContainerIt != ContainerByFn.end() && ContainerIt->second->Candidate) {
-      Reasons.push_back("container-evidence");
     }
     if (PolicyNames.count(F.getName().str()) != 0) {
       Reasons.push_back("policy-file");
@@ -312,42 +282,7 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
     if (!Positions.empty()) {
       Out << ",\"monomorphic_positions\":\"" << Positions.str() << "\"";
     }
-    if (ContainerIt != ContainerByFn.end()) {
-      const ContainerBoundaryEvidence &C = *ContainerIt->second;
-      Out << ",\"container_boundary\":{\"candidate\":"
-          << (C.Candidate ? "true" : "false") << ",\"score\":" << C.Score
-          << ",\"propagation_depth\":" << C.PropagationDepth;
-      writeOffsetList(Out, "callback_offsets", C.CallbackCallOffsets);
-      writeOffsetList(Out, "callback_store_offsets", C.CallbackStoreOffsets);
-      writeOffsetList(Out, "function_address_store_offsets",
-                      C.FunctionAddressStoreOffsets);
-      writeOffsetList(Out, "callback_load_offsets", C.CallbackForwardOffsets);
-      Out << ",\"array_walk\":" << (C.HasArrayWalk ? "true" : "false")
-          << ",\"opaque_forwarded\":" << C.OpaqueForwarded
-          << ",\"pointer_sized_header\":"
-          << (C.HasPointerSizedHeader ? "true" : "false")
-          << ",\"header_callback_reads\":"
-          << (C.HeaderCallbackReads ? "true" : "false")
-          << ",\"header_arg\":" << C.HeaderArgIndex
-          << ",\"header_from_call\":"
-          << (C.HeaderFromCallResult ? "true" : "false");
-      writeOffsetList(Out, "header_offsets", C.HeaderOffsets);
-      Out << ",\"objects\":[";
-      for (std::size_t I = 0; I < C.Objects.size(); ++I) {
-        const ContainerObjectEvidence &O = C.Objects[I];
-        Out << (I == 0 ? "" : ",") << "{\"arg\":" << O.ArgIndex
-            << ",\"from_argument\":" << (O.FromArgument ? "true" : "false")
-            << ",\"from_call\":" << (O.FromCallResult ? "true" : "false")
-            << ",\"pointer_sized\":"
-            << (O.PointerSizedFields ? "true" : "false") << ",\"offsets\":[";
-        for (std::size_t J = 0; J < O.Offsets.size(); ++J) {
-          Out << (J == 0 ? "" : ",") << O.Offsets[J];
-        }
-        Out << "]}";
-      }
-      Out << "]}";
-    }
-    auto EvIt = EvidenceByFn.find(&F);
+        auto EvIt = EvidenceByFn.find(&F);
     if (EvIt != EvidenceByFn.end()) {
       const AllocatorBoundaryEvidence &E = *EvIt->second;
       Out << ",\"allocator_boundary\":{\"score\":" << E.AllocatorScore

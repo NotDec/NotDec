@@ -119,52 +119,8 @@ void writeAllocatorBoundaryReport(
 // (it moves values it never interprets).  A derived third fact propagates
 // along the object flow: a function that hands its own object parameter to a
 // function with callback evidence operates on the same container.
-struct ContainerObjectEvidence {
-  unsigned ArgIndex = 0;
-  bool FromArgument = false;
-  bool FromCallResult = false;
-  std::vector<std::int64_t> Offsets;
-  // Every access to the object is a 64-bit access at an 8-byte-aligned offset
-  // (a header of pointer/size fields).
-  bool PointerSizedFields = false;
-};
+;
 
-struct ContainerBoundaryEvidence {
-  const llvm::Function *Function = nullptr;
-  unsigned FunctionIndex = 0;
-  unsigned DirectCallSites = 0;
-  unsigned DistinctCallers = 0;
-
-  std::vector<ContainerObjectEvidence> Objects;
-  std::vector<std::int64_t> HeaderOffsets;
-  unsigned HeaderArgIndex = 0;
-  bool HeaderFromCallResult = false;
-
-  // Callback boundary.  Offsets are recorded so thresholds can be re-ranked
-  // from the report without rebuilding.
-  std::vector<std::int64_t> CallbackCallOffsets;   // loaded from a parameter field, invoked without the object
-  std::vector<std::int64_t> CallbackStoreOffsets;  // a parameter stored at a module callback offset (initialiser)
-  std::vector<std::int64_t> FunctionAddressStoreOffsets; // a lifted function address stored at a constant offset
-  std::vector<std::int64_t> CallbackForwardOffsets;      // a callback field read but not invoked here
-
-  // Element opacity.
-  unsigned OpaqueForwarded = 0;
-  bool HasArrayWalk = false;
-  bool HasPointerSizedHeader = false;
-  // >= 2 callback slots read on a header of pointer-sized fields: the pluggable
-  // operations are forwarded instead of invoked here (see the .cpp for the
-  // measured trade-off; reported, not scored by default).
-  bool HeaderCallbackReads = false;
-
-  // Object-flow propagation: 0 = has callback evidence itself, d = hands its
-  // own object parameter to a function of depth d-1; -1 = none.
-  int PropagationDepth = -1;
-
-  int Score = 0;
-  bool Candidate = false;
-};
-
-std::vector<ContainerBoundaryEvidence>
-analyzeContainerBoundaries(const llvm::Module &M);
+;
 
 } // namespace notdec::mlsub
