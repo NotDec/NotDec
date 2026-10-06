@@ -429,6 +429,15 @@ struct ConstraintsGenerator {
   frameOwnersOfNode(SimpleType Ty) const;
   bool frameMergeVeto(SimpleType LHS, SimpleType RHS,
                       const char **Why = nullptr) const;
+  // Same decision as frameMergeVeto, with the two owner sets already computed
+  // by the caller.  The call-slot precheck compares every pair of an item's
+  // roots, and frameOwnersOfNode walks every value of a node (a giant union can
+  // hold thousands), so recomputing both sides inside the pair loop costs
+  // O(roots^2 * values) instead of O(roots * values).
+  bool frameMergeVetoWithOwners(
+      const std::optional<std::set<const llvm::AllocaInst *>> &Left,
+      const std::optional<std::set<const llvm::AllocaInst *>> &Right,
+      const char **Why = nullptr) const;
   // Diagnostic helper for frameMergeVeto (NOTDEC_FRAME_VETO_DIAG).
   void dumpFrameVetoSide(const char *Tag, SimpleType Ty) const;
   bool FrameNoNonFrameMerge = true;

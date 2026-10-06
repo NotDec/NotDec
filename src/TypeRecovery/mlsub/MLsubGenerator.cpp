@@ -432,6 +432,20 @@ bool polymorphicFunctionMarkingEnabled() {
   return Enabled;
 }
 
+// The call-slot decision log (CallSlotMergeDecisions.txt) is the only reader of
+// the per-slot snapshots.  That file is written only when a work dir is set, and
+// building a snapshot walks every lower/upper bound of the root and formats the
+// field slices into a string, so a benchmark run without a work dir would pay
+// that cost for output nobody reads.  NOTDEC_CALL_SLOT_DECISIONS=1 forces the
+// log on for debugging.
+bool callSlotDecisionLoggingEnabled() {
+  static const bool Enabled = [] {
+    return notdec::getWorkDirOpt().has_value() ||
+           std::getenv("NOTDEC_CALL_SLOT_DECISIONS") != nullptr;
+  }();
+  return Enabled;
+}
+
 bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
   if (!polymorphicFunctionMarkingEnabled()) {
     return false;
@@ -4602,6 +4616,17 @@ bool ConstraintsGenerator::frameMergeVeto(SimpleType LHS, SimpleType RHS,
   }
   auto Left = frameOwnersOfNode(LHS);
   auto Right = frameOwnersOfNode(RHS);
+  return frameMergeVetoWithOwners(Left, Right, Why);
+}
+
+bool ConstraintsGenerator::frameMergeVetoWithOwners(
+    const std::optional<std::set<const llvm::AllocaInst *>> &Left,
+    const std::optional<std::set<const llvm::AllocaInst *>> &Right,
+    const char **Why) const {
+  if (!FrameNoNonFrameMerge && !FrameNoCrossFunctionMerge) {
+    return false;
+  }
+  const bool Diag = frameVetoDiagEnabled();
   if (FrameNoNonFrameMerge) {
     const bool LeftFrame = Left && !Left->empty();
     const bool RightFrame = Right && !Right->empty();
@@ -5933,17 +5958,19 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
     auto &Entry = Entries[EntryOrder];
     auto Formal = binarysub::resolve_variable(Entry.Formal);
     if (!Formal) {
-      CG.CallSlotMergeDecisions.push_back(
-          ConstraintsGenerator::CallSlotMergeDecision{
-              .Target = formatCallMergeTarget(Entry.Target),
-              .Policy = Entry.Policy,
-              .Decision = "precheck-skipped",
-              .Reason = "null-formal",
-              .Formal = "<null>",
-              .Entries = {Entry.Detail + " actual=" +
-                          formatCallSlotRootSnapshot(CG, Entry.Actual)},
-              .Roots = {formatCallSlotRootSnapshot(CG, Entry.Actual) +
-                        " action=skipped"}});
+      if (callSlotDecisionLoggingEnabled()) {
+        CG.CallSlotMergeDecisions.push_back(
+            ConstraintsGenerator::CallSlotMergeDecision{
+                .Target = formatCallMergeTarget(Entry.Target),
+                .Policy = Entry.Policy,
+                .Decision = "precheck-skipped",
+                .Reason = "null-formal",
+                .Formal = "<null>",
+                .Entries = {Entry.Detail + " actual=" +
+                            formatCallSlotRootSnapshot(CG, Entry.Actual)},
+                .Roots = {formatCallSlotRootSnapshot(CG, Entry.Actual) +
+                          " action=skipped"}});
+      }
       CG.emitTypeRecoveryTrace(
           "[merge-policy:" + Entry.Policy +
           ":group-skip] reason=null-formal detail=" + Entry.Detail);
@@ -6086,6 +6113,8 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
       PrecheckStart = startBottomUpPhase(/*Enabled=*/true);
     }
 
+    const bool LogCallSlotDecisions = callSlotDecisionLoggingEnabled();
+
     for (auto &Group : Plan.Groups) {
       PreparedCallSlotMergeGroup Item{.Group = &Group};
       auto Formal = binarysub::resolve_variable(Group.Formal);
@@ -6110,21 +6139,27 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
       AddRoot(Formal, /*MergeWithoutStructEvidence=*/true);
       for (const auto &Entry : Group.Entries) {
         AddRoot(Entry.Actual, !Entry.RequireStructEvidence);
-        Item.EntrySnapshots.push_back(
-            Entry.Detail + " actual=" +
-            formatCallSlotRootSnapshot(CG, Entry.Actual) +
-            " require_struct_evidence=" +
-            (Entry.RequireStructEvidence ? "true" : "false"));
+        if (LogCallSlotDecisions) {
+          Item.EntrySnapshots.push_back(
+              Entry.Detail + " actual=" +
+              formatCallSlotRootSnapshot(CG, Entry.Actual) +
+              " require_struct_evidence=" +
+              (Entry.RequireStructEvidence ? "true" : "false"));
+        }
       }
-      for (const auto &Root : Item.Roots) {
-        Item.RootSnapshots.push_back(
-            formatCallSlotRootSnapshot(CG, Root.Type));
+      if (LogCallSlotDecisions) {
+        for (const auto &Root : Item.Roots) {
+          Item.RootSnapshots.push_back(
+              formatCallSlotRootSnapshot(CG, Root.Type));
+        }
       }
       Item.RootActions.resize(Item.Roots.size(), "pending");
       if (!Item.RootActions.empty()) {
         Item.RootActions.front() = "formal-anchor";
       }
-      Item.FormalSnapshot = formatCallSlotRootSnapshot(CG, Formal);
+      if (LogCallSlotDecisions) {
+        Item.FormalSnapshot = formatCallSlotRootSnapshot(CG, Formal);
+      }
 
       if (Group.Slots.size() > 1) {
         Item.Failure = "formal-root-already-shared-by-slots=" +
@@ -6171,9 +6206,24 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
                               ? ItemOverlapMode
                               : 0;
       }
+      // frameOwnersOfNode walks every value of a node, so compute it once per
+      // root instead of once per pair (the pair loop is O(roots^2)).  With the
+      // veto diagnostic on, keep the per-pair call so its dump stays complete.
+      std::vector<std::optional<std::set<const llvm::AllocaInst *>>> RootOwners;
+      const bool PrecomputeRootOwners = !frameVetoDiagEnabled();
+      if (PrecomputeRootOwners) {
+        RootOwners.reserve(Item.Roots.size());
+        for (const auto &Root : Item.Roots) {
+          RootOwners.push_back(CG.frameOwnersOfNode(Root.Type));
+        }
+      }
       for (std::size_t I = 0; !Item.Failure && I < Item.Roots.size(); ++I) {
         for (std::size_t J = I + 1; J < Item.Roots.size(); ++J) {
-          if (CG.frameMergeVeto(Item.Roots[I].Type, Item.Roots[J].Type)) {
+          const bool Vetoed =
+              PrecomputeRootOwners
+                  ? CG.frameMergeVetoWithOwners(RootOwners[I], RootOwners[J])
+                  : CG.frameMergeVeto(Item.Roots[I].Type, Item.Roots[J].Type);
+          if (Vetoed) {
             Item.Failure = "frame-region-conflict";
             break;
           }
@@ -6232,6 +6282,9 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
                                llvm::StringRef Reason,
                                std::size_t TouchedNodes,
                                const std::vector<std::string> &MergeAttempts) {
+      if (!LogCallSlotDecisions) {
+        return;
+      }
       for (auto &Item : Prepared) {
         std::vector<std::string> Roots = Item.RootSnapshots;
         for (std::size_t I = 0; I < Roots.size(); ++I) {
@@ -6606,16 +6659,18 @@ void ConstraintsGenerator::recordCallArgStructPtrMergeCandidate(
       .ActualArg = ActualArg,
       .FormalArg = FormalArg};
   if (ActualArg == nullptr || FormalArg == nullptr) {
-    CallSlotMergeDecisions.push_back(CallSlotMergeDecision{
-        .Policy = "call-arg-slot-group",
-        .Decision = "skipped",
-        .Reason = "null-actual-or-formal",
-        .Formal = formatCallSlotRootSnapshot(*this, FormalArg),
-        .Entries = {formatCallArgStructPtrMergeCandidateDetail(Candidate) +
-                    " actual=" +
-                    formatCallSlotRootSnapshot(*this, ActualArg)},
-        .Roots = {formatCallSlotRootSnapshot(*this, ActualArg) +
-                  " action=skipped"}});
+    if (callSlotDecisionLoggingEnabled()) {
+      CallSlotMergeDecisions.push_back(CallSlotMergeDecision{
+          .Policy = "call-arg-slot-group",
+          .Decision = "skipped",
+          .Reason = "null-actual-or-formal",
+          .Formal = formatCallSlotRootSnapshot(*this, FormalArg),
+          .Entries = {formatCallArgStructPtrMergeCandidateDetail(Candidate) +
+                      " actual=" +
+                      formatCallSlotRootSnapshot(*this, ActualArg)},
+          .Roots = {formatCallSlotRootSnapshot(*this, ActualArg) +
+                    " action=skipped"}});
+    }
     emitTypeRecoveryTrace(
         "[merge-policy:call-arg-struct-ptr:candidate-skip] " +
         formatCallArgStructPtrMergeCandidateDetail(Candidate) +
