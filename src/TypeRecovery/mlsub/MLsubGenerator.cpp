@@ -5304,20 +5304,35 @@ std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
                                               /*RequireEvidence=*/true)) {
         continue;
       }
-      std::string Detail = "owner-from=";
-      Detail += binarysub::debug_string(
-          binarysub::resolve_variable(Candidate.FromOwner));
-      Detail += " owner-into=";
-      Detail += binarysub::debug_string(
-          binarysub::resolve_variable(Candidate.IntoOwner));
-      Detail += " offset=" + std::to_string(Candidate.Offset);
+      // The detail string is only consumed by the merge-policy trace; the apply
+      // loop revisits every candidate after each successful merge, so rendering
+      // two type graphs per visit is pure cost when no trace is being written.
+      std::string Detail;
+      if (TraceStream != nullptr) {
+        Detail = "owner-from=";
+        Detail += binarysub::debug_string(
+            binarysub::resolve_variable(Candidate.FromOwner));
+        Detail += " owner-into=";
+        Detail += binarysub::debug_string(
+            binarysub::resolve_variable(Candidate.IntoOwner));
+        Detail += " offset=" + std::to_string(Candidate.Offset);
+      }
       if (!tryMergeVariablesForPolicy("struct-field-followup", FromTarget,
                                       IntoTarget, Detail)) {
         continue;
       }
       ++Merged;
       Changed = true;
-      break;
+      // Keep scanning instead of restarting from the first candidate after
+      // every merge.  The candidate list of a large binary holds tens of
+      // thousands of entries and the policy used to merge one pair per pass,
+      // re-running the slice check and the resolution for every candidate each
+      // time (measured on 520.omnetpp_r: 133M candidate visits for 7k merges).
+      // Every visit resolves its two targets again, so a candidate whose
+      // targets were just merged is skipped by the checks above, and the outer
+      // while loop still repeats until a full pass merges nothing.  The
+      // struct-ptr slot policy below uses the same shape for the same reason.
+      continue;
     }
     if (MeasureSubphases) {
       recordBottomUpSubphase(ActiveBottomUpTimingContext,
@@ -7346,9 +7361,12 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
 
       auto From = FirstVar->id <= SecondVar->id ? SecondTarget : FirstTarget;
       auto Into = FirstVar->id <= SecondVar->id ? FirstTarget : SecondTarget;
-      std::string Detail = "ptr=";
-      Detail += binarysub::debug_string(Candidate.Pointer);
-      Detail += " size=" + std::to_string(Candidate.AccessSize);
+      std::string Detail;
+      if (TraceStream != nullptr) {
+        Detail = "ptr=";
+        Detail += binarysub::debug_string(Candidate.Pointer);
+        Detail += " size=" + std::to_string(Candidate.AccessSize);
+      }
       if (!tryMergeVariablesForPolicy(Policy, From, Into, Detail)) {
         continue;
       }
