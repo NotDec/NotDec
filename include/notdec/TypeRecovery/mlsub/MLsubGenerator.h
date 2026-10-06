@@ -369,14 +369,14 @@ struct ConstraintsGenerator {
   std::map<std::string, std::size_t> SubtypeConstraintFailures;
   bool ConstraintDiagEnabled = false;
   binarysub::ConstraintSolverStats CurrentConstraintStats;
-  // NOTDEC_RULE_LOCAL_RETRY=1 diagnostics: how many addSubtype calls hit the
+  // Local-retry mode diagnostics: how many addSubtype calls hit the
   // integer/structured coexistence conflict, how many were rolled back and
   // redone without the store->load coupling, and how many were kept because the
   // call merged variables (that fires hooks outside the transaction).
   std::size_t RuleLocalConflicts = 0;
   std::size_t RuleLocalRetries = 0;
   std::size_t RuleLocalSkippedMerged = 0;
-  // NOTDEC_MERGE_LOCAL_RETRY=1 diagnostics (merge-boundary variant): merges that
+  // Local-retry mode diagnostics (merge boundary): merges that
   // let an integer and a structured view coexist, and those redone without the
   // store->load coupling.
   std::size_t MergeLocalConflicts = 0;
@@ -1061,7 +1061,7 @@ struct ConstraintsGenerator {
             binarysub::debug_string(rhs) + " reason=" + Result.error().msg);
       }
     };
-    // Prototype (NOTDEC_RULE_LOCAL_RETRY=1): the addSubtype boundary is a
+    // NOTDEC_NO_INT_STRUCT_COEXIST=no-store-load: the addSubtype boundary is a
     // quiescent point -- constrain()'s worklist and merge queue are local and
     // drained before it returns -- so this single call can be rolled back and
     // redone.  When the store->load coupling lets an integer view and a
@@ -1069,10 +1069,9 @@ struct ConstraintsGenerator {
     // suppressed instead of dropping the rule everywhere
     // (NOTDEC_MEM_NO_STORE_TO_LOAD) or rejecting coexistence globally
     // (NOTDEC_NO_INT_STRUCT_COEXIST).
-    static const bool LocalRetry = [] {
-      const char *Value = std::getenv("NOTDEC_RULE_LOCAL_RETRY");
-      return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
-    }();
+    const bool LocalRetry =
+        binarysub::intStructCoexistPolicy() ==
+        binarysub::IntStructCoexistPolicy::LocalRetry;
     if (LocalRetry && ContextPtr != nullptr) {
       // A merge runs the host hooks (value bookkeeping, audit) outside the
       // transaction, so only calls that merged nothing are redone.

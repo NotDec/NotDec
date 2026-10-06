@@ -4201,15 +4201,14 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
     PNDiffUnifies.push_back({Lhs, Rhs});
   };
   PNDiffUnifies.push_back({From, Into});
-  // Prototype (NOTDEC_MERGE_LOCAL_RETRY=1): a merge boundary has its own
+  // NOTDEC_NO_INT_STRUCT_COEXIST=no-store-load: a merge boundary has its own
   // transaction, so a merge that lets an integer view and a structured view
   // coexist can be rolled back and redone with the store->load coupling
   // suppressed -- without moving the checkpoint to the whole constraint call.
   // The value bookkeeping below runs only for the surviving attempt.
-  static const bool MergeLocalRetry = [] {
-    const char *Value = std::getenv("NOTDEC_MERGE_LOCAL_RETRY");
-    return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
-  }();
+  const bool MergeLocalRetry =
+      binarysub::intStructCoexistPolicy() ==
+      binarysub::IntStructCoexistPolicy::LocalRetry;
   binarysub::expected<void, binarysub::Error> Result;
   if (MergeLocalRetry && ContextPtr != nullptr) {
     bool Coexist = false;
@@ -7779,7 +7778,7 @@ void MLsubRecovery::runImpl() {
   std::cerr << "Constraint generation done! SCC count:" << AG.AllSCCs.size()
             << "\n";
   {
-    // NOTDEC_RULE_LOCAL_RETRY diagnostics: coexistence conflicts seen, calls
+    // Local-retry mode diagnostics: coexistence conflicts seen, calls
     // rolled back and redone without the store->load coupling, and calls kept
     // because they merged variables (those run host hooks outside the
     // transaction and are therefore not redone).
@@ -7804,7 +7803,7 @@ void MLsubRecovery::runImpl() {
         MergeConflicts += Data.Generator->MergeLocalConflicts;
         MergeRedone += Data.Generator->MergeLocalRetries;
       }
-      std::cerr << "[rule-local-retry] conflicts=" << Conflicts
+      std::cerr << "[coexist-local-retry] conflicts=" << Conflicts
                 << " redone=" << Redone << " kept-because-merged="
                 << SkippedMerged << " merge-conflicts=" << MergeConflicts
                 << " merge-redone=" << MergeRedone
