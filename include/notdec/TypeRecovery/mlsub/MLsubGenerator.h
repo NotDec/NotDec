@@ -369,6 +369,13 @@ struct ConstraintsGenerator {
   std::map<std::string, std::size_t> SubtypeConstraintFailures;
   bool ConstraintDiagEnabled = false;
   binarysub::ConstraintSolverStats CurrentConstraintStats;
+  // NOTDEC_RULE_LOCAL_RETRY=1 diagnostics: how many addSubtype calls hit the
+  // integer/structured coexistence conflict, how many were rolled back and
+  // redone without the store->load coupling, and how many were kept because the
+  // call merged variables (that fires hooks outside the transaction).
+  std::size_t RuleLocalConflicts = 0;
+  std::size_t RuleLocalRetries = 0;
+  std::size_t RuleLocalSkippedMerged = 0;
 
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
@@ -1028,20 +1035,74 @@ struct ConstraintsGenerator {
         }
       }
     }
-    auto Result = binarysub::constrain(
-        lhs, rhs, cache,
-        [this](const SimpleType &Lhs, const SimpleType &Rhs) {
-          maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
-        },
-        ContextPtr);
-    if (!Result) {
+    auto RunConstrain = [&](binarysub::ConstraintContext *Ctx,
+                            binarysub::Cache &Seen) {
+      return binarysub::constrain(
+          lhs, rhs, Seen,
+          [this](const SimpleType &Lhs, const SimpleType &Rhs) {
+            maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
+          },
+          Ctx);
+    };
+    auto ReportFailure = [&](const binarysub::expected<void, binarysub::Error>
+                                 &Result) {
+      if (Result) {
+        return;
+      }
       ++SubtypeConstraintFailures[Result.error().msg];
       if (TraceStream != nullptr) {
         emitTypeRecoveryTrace(
             "[subtype:rejected] lhs=" + binarysub::debug_string(lhs) + " rhs=" +
             binarysub::debug_string(rhs) + " reason=" + Result.error().msg);
       }
+    };
+    // Prototype (NOTDEC_RULE_LOCAL_RETRY=1): the addSubtype boundary is a
+    // quiescent point -- constrain()'s worklist and merge queue are local and
+    // drained before it returns -- so this single call can be rolled back and
+    // redone.  When the store->load coupling lets an integer view and a
+    // structured view coexist on one value, redo the call with that coupling
+    // suppressed instead of dropping the rule everywhere
+    // (NOTDEC_MEM_NO_STORE_TO_LOAD) or rejecting coexistence globally
+    // (NOTDEC_NO_INT_STRUCT_COEXIST).
+    static const bool LocalRetry = [] {
+      const char *Value = std::getenv("NOTDEC_RULE_LOCAL_RETRY");
+      return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
+    }();
+    if (LocalRetry && ContextPtr != nullptr) {
+      // A merge runs the host hooks (value bookkeeping, audit) outside the
+      // transaction, so only calls that merged nothing are redone.
+      const std::uint64_t MergesBefore =
+          CurrentConstraintStats.mergeVariableCalls;
+      const auto FailuresBefore = SubtypeConstraintFailures;
+      bool Coexist = false;
+      Context.onIntStructCoexist = [&Coexist](const SimpleType &,
+                                              const SimpleType &) {
+        Coexist = true;
+      };
+      Context.stats = &CurrentConstraintStats;
+      binarysub::SimpleTypeTransaction Tx;
+      auto Result = RunConstrain(ContextPtr, cache);
+      if (Coexist && CurrentConstraintStats.mergeVariableCalls ==
+                         MergesBefore) {
+        Tx.rollback();
+        SubtypeConstraintFailures = FailuresBefore;
+        ++RuleLocalConflicts;
+        ++RuleLocalRetries;
+        binarysub::Cache RetryCache;
+        Context.suppressStoreToLoad = true;
+        Result = RunConstrain(&Context, RetryCache);
+      } else {
+        if (Coexist) {
+          ++RuleLocalConflicts;
+          ++RuleLocalSkippedMerged;
+        }
+        Tx.commit();
+      }
+      ReportFailure(Result);
+      return;
     }
+    auto Result = RunConstrain(ContextPtr, cache);
+    ReportFailure(Result);
   }
 
   SimpleType addVarSubtype(llvm::Value *Val, SimpleType dtv) {

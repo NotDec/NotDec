@@ -7736,6 +7736,30 @@ void MLsubRecovery::runImpl() {
 
   std::cerr << "Constraint generation done! SCC count:" << AG.AllSCCs.size()
             << "\n";
+  {
+    // NOTDEC_RULE_LOCAL_RETRY diagnostics: coexistence conflicts seen, calls
+    // rolled back and redone without the store->load coupling, and calls kept
+    // because they merged variables (those run host hooks outside the
+    // transaction and are therefore not redone).
+    std::size_t Conflicts = 0;
+    std::size_t Redone = 0;
+    std::size_t SkippedMerged = 0;
+    for (const auto &Data : AG.AllSCCs) {
+      if (Data.Generator == nullptr) {
+        continue;
+      }
+      Conflicts += Data.Generator->RuleLocalConflicts;
+      Redone += Data.Generator->RuleLocalRetries;
+      SkippedMerged += Data.Generator->RuleLocalSkippedMerged;
+    }
+    if (Conflicts != 0 || Redone != 0 || SkippedMerged != 0) {
+      std::cerr << "[rule-local-retry] conflicts=" << Conflicts
+                << " redone=" << Redone << " kept-because-merged="
+                << SkippedMerged << " coexist-events-total="
+                << binarysub::ConstraintContext::intStructCoexistEventCount()
+                << "\n";
+    }
+  }
 
   binarysub::binarysub_set_trace_stream(nullptr);
   if (BinarysubTraceFile) {
