@@ -4188,16 +4188,55 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
   if (FromVar->level != IntoVar->level || FromVar->size != IntoVar->size) {
     return false;
   }
-  maybeUnifyPNDiffTypeVariablePair(From, Into);
   binarysub::ConstraintContext Context;
   binarysub::ConstraintContext *ContextPtr =
       configureConstraintContext(Context) ? &Context : nullptr;
-  auto Result = binarysub::merge_variable_into(
-      From, Into,
-      [this](const SimpleType &Lhs, const SimpleType &Rhs) {
-        maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
-      },
-      ContextPtr);
+  // PNDiff unifications are deferred: they are not part of the SimpleType
+  // transaction, so applying them before a speculative merge is known to
+  // survive leaves the PNDiff graph claiming merges that the rollback undid
+  // (the transactional call-slot path defers them the same way, in
+  // Effects.PNDiffUnifies).  They are applied once, after the surviving try.
+  std::vector<std::pair<SimpleType, SimpleType>> PNDiffUnifies;
+  auto MergeObserver = [&](const SimpleType &Lhs, const SimpleType &Rhs) {
+    PNDiffUnifies.push_back({Lhs, Rhs});
+  };
+  PNDiffUnifies.push_back({From, Into});
+  // Prototype (NOTDEC_MERGE_LOCAL_RETRY=1): a merge boundary has its own
+  // transaction, so a merge that lets an integer view and a structured view
+  // coexist can be rolled back and redone with the store->load coupling
+  // suppressed -- without moving the checkpoint to the whole constraint call.
+  // The value bookkeeping below runs only for the surviving attempt.
+  static const bool MergeLocalRetry = [] {
+    const char *Value = std::getenv("NOTDEC_MERGE_LOCAL_RETRY");
+    return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
+  }();
+  binarysub::expected<void, binarysub::Error> Result;
+  if (MergeLocalRetry && ContextPtr != nullptr) {
+    bool Coexist = false;
+    Context.onIntStructCoexist = [&Coexist](const SimpleType &,
+                                            const SimpleType &) {
+      Coexist = true;
+    };
+    Context.stats = &CurrentConstraintStats;
+    binarysub::SimpleTypeTransaction Tx;
+    Result = binarysub::merge_variable_into(From, Into, MergeObserver,
+                                            ContextPtr);
+    if (Result && Coexist) {
+      Tx.rollback();
+      ++MergeLocalConflicts;
+      ++MergeLocalRetries;
+      // The merged variables are restored by the rollback; redo the same merge
+      // with the store->load coupling suppressed for this attempt.
+      Context.suppressStoreToLoad = true;
+      Result = binarysub::merge_variable_into(From, Into, MergeObserver,
+                                              &Context);
+    } else {
+      Tx.commit();
+    }
+  } else {
+    Result = binarysub::merge_variable_into(From, Into, MergeObserver,
+                                            ContextPtr);
+  }
   if (!Result) {
     emitTypeRecoveryTrace("[merge-policy:" + Policy.str() +
                           ":skip] from=" + binarysub::debug_string(From) +
@@ -4205,6 +4244,9 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
                           " reason=" + Result.error().msg +
                           " detail=" + TraceDetail);
     return false;
+  }
+  for (const auto &[Lhs, Rhs] : PNDiffUnifies) {
+    maybeUnifyPNDiffTypeVariablePair(Lhs, Rhs);
   }
 
   std::vector<std::pair<SimpleType, std::vector<ExtValuePtr>>> RootsToMove;
@@ -7753,10 +7795,23 @@ void MLsubRecovery::runImpl() {
       SkippedMerged += Data.Generator->RuleLocalSkippedMerged;
     }
     if (Conflicts != 0 || Redone != 0 || SkippedMerged != 0) {
+      std::size_t MergeConflicts = 0;
+      std::size_t MergeRedone = 0;
+      for (const auto &Data : AG.AllSCCs) {
+        if (Data.Generator == nullptr) {
+          continue;
+        }
+        MergeConflicts += Data.Generator->MergeLocalConflicts;
+        MergeRedone += Data.Generator->MergeLocalRetries;
+      }
       std::cerr << "[rule-local-retry] conflicts=" << Conflicts
                 << " redone=" << Redone << " kept-because-merged="
-                << SkippedMerged << " coexist-events-total="
+                << SkippedMerged << " merge-conflicts=" << MergeConflicts
+                << " merge-redone=" << MergeRedone
+                << " coexist-events-total="
                 << binarysub::ConstraintContext::intStructCoexistEventCount()
+                << " coexist-events-in-merge="
+                << binarysub::ConstraintContext::intStructCoexistEventInMergeCount()
                 << "\n";
     }
   }

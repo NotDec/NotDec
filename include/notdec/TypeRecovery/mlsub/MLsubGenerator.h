@@ -376,6 +376,11 @@ struct ConstraintsGenerator {
   std::size_t RuleLocalConflicts = 0;
   std::size_t RuleLocalRetries = 0;
   std::size_t RuleLocalSkippedMerged = 0;
+  // NOTDEC_MERGE_LOCAL_RETRY=1 diagnostics (merge-boundary variant): merges that
+  // let an integer and a structured view coexist, and those redone without the
+  // store->load coupling.
+  std::size_t MergeLocalConflicts = 0;
+  std::size_t MergeLocalRetries = 0;
 
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
