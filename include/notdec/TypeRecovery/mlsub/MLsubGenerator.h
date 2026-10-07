@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <execinfo.h>
+#include <sstream>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -770,11 +772,45 @@ struct ConstraintsGenerator {
   // window correspond to IR operations.  Everything added outside it comes from
   // a merge policy or from type-graph bookkeeping and is traced instead.
   bool InsideIRVisit = false;
+  // The instruction currently being visited (set by MLsubVisitor::visit), so a
+  // diagnostic can attribute an edge to the IR operation that produced it.
+  llvm::Instruction *CurrentVisitedInstruction = nullptr;
 
   void addSubtype(SimpleType lhs, SimpleType rhs) {
     assert(lhs != nullptr);
     assert(rhs != nullptr);
     const bool IRDerived = InsideIRVisit;
+    // Diagnostic: NOTDEC_ADDSUBTYPE_WATCH=<id>[,<id>...] prints every edge
+    // between two watched variable ids together with the IR instruction being
+    // visited and a short backtrace.
+    if (const char *Watch = std::getenv("NOTDEC_ADDSUBTYPE_WATCH")) {
+      auto *LV = lhs->getAsVariableState();
+      auto *RV = rhs->getAsVariableState();
+      if (LV != nullptr && RV != nullptr) {
+        std::set<std::uint32_t> Wanted;
+        std::stringstream WS(Watch);
+        std::string Item;
+        while (std::getline(WS, Item, ',')) {
+          if (!Item.empty()) {
+            Wanted.insert(static_cast<std::uint32_t>(std::stoul(Item)));
+          }
+        }
+        if (Wanted.count(LV->id) != 0 && Wanted.count(RV->id) != 0) {
+          llvm::errs() << "[addsubtype-watch] lhs=vs#" << LV->id << " rhs=vs#"
+                       << RV->id << " ir_derived=" << (IRDerived ? 1 : 0)
+                       << " inst=";
+          if (CurrentVisitedInstruction != nullptr) {
+            CurrentVisitedInstruction->print(llvm::errs());
+          } else {
+            llvm::errs() << "<none>";
+          }
+          llvm::errs() << "\n";
+          void *Frames[32];
+          const int Count = backtrace(Frames, 32);
+          backtrace_symbols_fd(Frames, Count, 2);
+        }
+      }
+    }
     if (!IRDerived && std::getenv("NOTDEC_NON_IR_EDGE_TRACE") != nullptr) {
       auto NonIROwner = [&](SimpleType T) -> std::string {
         if (auto *O = getVariableOwningFunction(T)) {
@@ -1291,8 +1327,11 @@ protected:
     // marks the window in which constraints are IR-derived.
     void visit(llvm::Instruction &I) {
       const bool Saved = cg.InsideIRVisit;
+      llvm::Instruction *SavedInst = cg.CurrentVisitedInstruction;
       cg.InsideIRVisit = true;
+      cg.CurrentVisitedInstruction = &I;
       llvm::InstVisitor<MLsubVisitor>::visit(I);
+      cg.CurrentVisitedInstruction = SavedInst;
       cg.InsideIRVisit = Saved;
     }
 
