@@ -7174,9 +7174,24 @@ static bool storeToLoadFlowDisabled() {
   return Disabled;
 }
 
+// Experiment switch NOTDEC_STORE_LOAD_NO_TARGET_MERGE=1: keep the library's
+// one-way store->load edge (a stored value constrains a later load of the same
+// pointer) but do not unify the two targets into a single type variable.  The
+// merge is stronger than the rule: it makes the write side and the read side
+// equal, so every value that reaches either side joins one bound set (see
+// logs 149 and the mktime_z example: 70 predicted fields on struct tm* where
+// 67 do not exist in the ground truth).
+static bool storeLoadTargetMergeDisabled() {
+  static const bool Disabled = [] {
+    const char *Value = std::getenv("NOTDEC_STORE_LOAD_NO_TARGET_MERGE");
+    return Value != nullptr && std::string(Value) == "1";
+  }();
+  return Disabled;
+}
+
 std::vector<ConstraintsGenerator::StructPtrSlotMergeCandidate>
 ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
-  if (storeToLoadFlowDisabled()) {
+  if (storeToLoadFlowDisabled() || storeLoadTargetMergeDisabled()) {
     return {};
   }
   std::vector<StructPtrSlotMergeCandidate> Candidates;
