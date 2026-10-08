@@ -780,13 +780,51 @@ struct ConstraintsGenerator {
     assert(lhs != nullptr);
     assert(rhs != nullptr);
     const bool IRDerived = InsideIRVisit;
+    // Provenance logging (diagnostic): NOTDEC_PROV_TRACE_FRONTEND=<path>
+    // records every relation the frontend asks the solver to install, together
+    // with the IR instruction being visited (if any), so a derived relation's
+    // ancestry can be rooted at a frontend site.
+    if (const char *ProvPath = std::getenv("NOTDEC_PROV_TRACE_FRONTEND")) {
+      static FILE *ProvFile = std::fopen(ProvPath, "w");
+      static std::uint64_t ProvSeq = 0;
+      if (ProvFile != nullptr) {
+        auto ProvId = [](SimpleType T) -> long {
+          auto Root = binarysub::resolve_variable(T);
+          auto *VS = Root ? Root->getAsVariableState() : nullptr;
+          return VS != nullptr ? static_cast<long>(VS->id) : -1;
+        };
+        auto Sanitize = [](std::string S) {
+          for (char &C : S) {
+            if (C == '\t' || C == '\n' || C == '\r') {
+              C = ' ';
+            }
+          }
+          return S;
+        };
+        std::string Extra = "ir_derived=" + std::to_string(IRDerived ? 1 : 0);
+        if (CurrentVisitedInstruction != nullptr) {
+          std::string IS;
+          llvm::raw_string_ostream OS(IS);
+          CurrentVisitedInstruction->print(OS);
+          OS.flush();
+          Extra += " inst=" + IS;
+        }
+        std::fprintf(ProvFile, "%llu\tfrontend\t%ld\t%ld\t%s\t%s\t%s\n",
+                     static_cast<unsigned long long>(++ProvSeq), ProvId(lhs),
+                     ProvId(rhs),
+                     Sanitize(binarysub::debug_string(lhs)).c_str(),
+                     Sanitize(binarysub::debug_string(rhs)).c_str(),
+                     Sanitize(Extra).c_str());
+        std::fflush(ProvFile);
+      }
+    }
     // Diagnostic: NOTDEC_ADDSUBTYPE_WATCH=<id>[,<id>...] prints every edge
     // between two watched variable ids together with the IR instruction being
     // visited and a short backtrace.
     if (const char *Watch = std::getenv("NOTDEC_ADDSUBTYPE_WATCH")) {
       auto *LV = lhs->getAsVariableState();
       auto *RV = rhs->getAsVariableState();
-      if (LV != nullptr && RV != nullptr) {
+      {
         std::set<std::uint32_t> Wanted;
         std::stringstream WS(Watch);
         std::string Item;
@@ -795,10 +833,19 @@ struct ConstraintsGenerator {
             Wanted.insert(static_cast<std::uint32_t>(std::stoul(Item)));
           }
         }
-        if (Wanted.count(LV->id) != 0 && Wanted.count(RV->id) != 0) {
-          llvm::errs() << "[addsubtype-watch] lhs=vs#" << LV->id << " rhs=vs#"
-                       << RV->id << " ir_derived=" << (IRDerived ? 1 : 0)
-                       << " inst=";
+        const bool LHit = LV != nullptr && Wanted.count(LV->id) != 0;
+        const bool RHit = RV != nullptr && Wanted.count(RV->id) != 0;
+        if (LHit || RHit) {
+          auto Describe = [](SimpleType T) {
+            std::string S = binarysub::debug_string(T);
+            if (S.size() > 90) {
+              S.resize(90);
+            }
+            return S;
+          };
+          llvm::errs() << "[addsubtype-watch] lhs=" << Describe(lhs)
+                       << " rhs=" << Describe(rhs)
+                       << " ir_derived=" << (IRDerived ? 1 : 0) << " inst=";
           if (CurrentVisitedInstruction != nullptr) {
             CurrentVisitedInstruction->print(llvm::errs());
           } else {
