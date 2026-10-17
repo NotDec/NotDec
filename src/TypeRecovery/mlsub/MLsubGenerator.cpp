@@ -419,12 +419,12 @@ bool hasBottomUpSubphaseTiming(const BottomUpSubphaseTiming &Timing) {
   return Timing.WallUs != 0 || Timing.CpuUs != 0 || Timing.WorkItems != 0;
 }
 
-// Master switch for every external polymorphic-function input: the builtin
-// name list below and the NOTDEC_POLY_FUNCS policy file.  Off by default, so a
-// benchmark run never depends on a hand-curated name list; the general
-// recognition strategy is still being developed.  NOTDEC_POLYMORPHIC_FUNCTIONS=1
-// turns the marking on.
-bool polymorphicFunctionMarkingEnabled() {
+// Switch for the external policy input (NOTDEC_POLY_FUNCS): a JSON file that
+// promotes individual function names of one binary to polymorphic.  The builtin
+// name list below is part of the tool and is always applied (NOTDEC_POLY_NAME_EXCLUDE
+// drops single entries); only the hand-curated per-binary policy stays opt-in.
+// NOTDEC_POLYMORPHIC_FUNCTIONS=1 enables the policy file.
+bool polyPolicyFileEnabled() {
   static const bool Enabled = [] {
     const char *Value = std::getenv("NOTDEC_POLYMORPHIC_FUNCTIONS");
     return Value != nullptr && std::string_view(Value) == "1";
@@ -447,9 +447,6 @@ bool callSlotDecisionLoggingEnabled() {
 }
 
 bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
-  if (!polymorphicFunctionMarkingEnabled()) {
-    return false;
-  }
   // Benchmark knob: drop individual builtin names again (comma separated,
   // compared with leading underscores stripped like the list below).  The
   // libc buffer/IO entries (memcpy/memset/fwrite/read/...) are called from
@@ -950,10 +947,16 @@ PolyPolicyConfig loadPolyPolicyConfig() {
   if (PolicyFile == nullptr) {
     return Config;
   }
-  if (!polymorphicFunctionMarkingEnabled()) {
-    llvm::errs() << "Info: ignoring NOTDEC_POLY_FUNCS=" << PolicyFile
-                 << " (polymorphic function marking is off; set "
-                    "NOTDEC_POLYMORPHIC_FUNCTIONS=1 to enable)\n";
+  if (!polyPolicyFileEnabled()) {
+    // The accessor is queried once per function and per SCC decision, so warn
+    // only once instead of once per query.
+    static bool WarnedOnce = false;
+    if (!WarnedOnce) {
+      WarnedOnce = true;
+      llvm::errs() << "Info: ignoring NOTDEC_POLY_FUNCS=" << PolicyFile
+                   << " (the per-binary policy input is opt-in; set "
+                      "NOTDEC_POLYMORPHIC_FUNCTIONS=1 to enable)\n";
+    }
     return Config;
   }
 
@@ -8063,11 +8066,6 @@ void MLsubRecovery::detectMallocWrappers(llvm::Module &M) {
 void MLsubRecovery::markBuiltinPolymorphicBufferFunctions(llvm::Module &M) {
   DetectedPolymorphicBufferFunctions.clear();
   std::vector<std::string> Rows;
-  if (!polymorphicFunctionMarkingEnabled()) {
-    llvm::errs() << "Info: polymorphic function marking disabled "
-                    "(NOTDEC_POLYMORPHIC_FUNCTIONS is not 1)\n";
-    return;
-  }
 
   for (auto &F : M) {
     if (!F.hasName()) {
