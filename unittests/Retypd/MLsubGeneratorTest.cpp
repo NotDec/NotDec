@@ -4,6 +4,7 @@
 #include "notdec/TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.h"
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cstdlib>
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -17,6 +18,16 @@
 #include <vector>
 
 namespace {
+
+// Several tests assert on ConstraintsGenerator::CallSlotMergeDecisions, which
+// is only filled when a work dir is known or NOTDEC_CALL_SLOT_DECISIONS is set
+// (MLsubGenerator.cpp, callSlotDecisionLoggingEnabled).  Set the flag before
+// main so the accessor's cached answer is true; recording does not change the
+// merge behaviour, it only keeps the per-slot snapshots.
+[[maybe_unused]] const bool kSlotDecisionLoggingEnabled = [] {
+  ::setenv("NOTDEC_CALL_SLOT_DECISIONS", "1", /*overwrite=*/1);
+  return true;
+}();
 
 notdec::mlsub::ConstraintsGenerator
 makeMLsubGeneratorForFunctionArgs(llvm::LLVMContext &Ctx,
@@ -472,6 +483,13 @@ TEST(MLsub, RecursiveCrossFormalMergeRollsBackWholeFunction) {
   auto CG = makeMLsubGeneratorForFunctionArgs(Ctx, M, Arg0, Arg1);
   auto *Target = Arg0->getParent();
 
+  // This test encodes single-round semantics: the recursive merge that the
+  // formal-slot validator must reject is deferred in round one when the two
+  // formals' field slices differ, and only the bottom-up phase's round-two
+  // recheck would retry it.  The test calls applyCallInterfaceMergePolicy
+  // directly, so turn the deferral off.
+  CG.TwoRoundMerge = false;
+
   auto Formal0 = CG.createNode(Arg0);
   auto Formal1 = CG.createNode(Arg1);
   auto Actual0 = binarysub::make_variable(0, 32);
@@ -562,6 +580,11 @@ TEST(MLsub, RecursiveMergeKeepsFormalLabelsFromOtherTargets) {
   notdec::mlsub::ConstraintsGenerator CG(
       "cross-target-call-merge-test", 32, SCCs,
       binarysub::make_variable(0, 32));
+
+  // Same as RecursiveCrossFormalMergeRollsBackWholeFunction: the test checks
+  // the transaction rollback, not the round-one deferral of a recursive merge
+  // whose two sides have no matching field slices yet.
+  CG.TwoRoundMerge = false;
 
   auto SourceFormal0 = CG.createNode(SourceArg0);
   auto SourceFormal1 = CG.createNode(SourceArg1);
