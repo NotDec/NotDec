@@ -442,7 +442,7 @@ bool polyPolicyFileEnabled() {
 bool callSlotDecisionLoggingEnabled() {
   static const bool Enabled = [] {
     return notdec::getWorkDirOpt().has_value() ||
-           std::getenv("NOTDEC_CALL_SLOT_DECISIONS") != nullptr;
+           binarysub::env_flag("NOTDEC_CALL_SLOT_DECISIONS");
   }();
   return Enabled;
 }
@@ -544,8 +544,9 @@ bool isBuiltinPolymorphicBufferFunctionName(llvm::StringRef Name) {
 }
 
 bool envFlagEnabled(llvm::StringRef Name) {
-  auto *Value = std::getenv(Name.data());
-  return Value != nullptr && llvm::StringRef(Value) == "1";
+  // Same convention as binarysub::env_flag: unset = off, "0"/"off"/"false"/"no"
+  // = off, anything else = on.
+  return binarysub::env_flag(Name.data());
 }
 
 llvm::Value *getPNDiffLLVMValue(const ExtValuePtr &Val) {
@@ -3465,7 +3466,7 @@ struct MallocWrapperUseChecker {
   // value.
   llvm::SmallPtrSet<const llvm::CallBase *, 4> Allocs;
   const llvm::Function *AllocFn = nullptr;
-  const bool Debug = std::getenv("NOTDEC_MALLOC_WRAPPER_DEBUG") != nullptr;
+  const bool Debug = binarysub::env_flag("NOTDEC_MALLOC_WRAPPER_DEBUG");
 
   bool Fail(const char *Why, const llvm::Value *V) {
     if (Debug) {
@@ -3780,7 +3781,7 @@ struct MallocWrapperUseChecker {
 };
 
 llvm::CallBase *getGenericMallocWrapperAllocator(llvm::Function &F) {
-  static const bool DebugWrapper = std::getenv("NOTDEC_MALLOC_WRAPPER_DEBUG") != nullptr;
+  static const bool DebugWrapper = binarysub::env_flag("NOTDEC_MALLOC_WRAPPER_DEBUG");
   auto Reject = [&](const char *Why) -> llvm::CallBase * {
     if (DebugWrapper && F.getName().starts_with("sub_")) {
       llvm::errs() << "[malloc-wrapper] reject " << F.getName() << ": " << Why
@@ -4108,7 +4109,7 @@ MergeAuditMode parseMergeAuditMode() {
     return MergeAuditMode::Off;
   }
   if (Mode == "eventlog") {
-    if (std::getenv("NOTDEC_EVENT_LOG") == nullptr) {
+    if (!binarysub::env_flag("NOTDEC_EVENT_LOG")) {
       llvm::errs() << "Warning: NOTDEC_MERGE_AUDIT=eventlog needs "
                       "NOTDEC_EVENT_LOG=<path>; falling back to stderr.\n";
       return MergeAuditMode::Stderr;
@@ -4148,7 +4149,7 @@ bool ConstraintsGenerator::configureConstraintContext(
     // Control arm (NOTDEC_NO_REVERSE_EDGE_MERGE=1, log 159): refuse every
     // reverse-edge auto merge, frame or not.  Tells whether the frame pairs
     // are special or the reverse-edge rule is load-bearing in general.
-    if (std::getenv("NOTDEC_NO_REVERSE_EDGE_MERGE") != nullptr) {
+    if (binarysub::env_flag("NOTDEC_NO_REVERSE_EDGE_MERGE")) {
       return false;
     }
     if (FrameNoReverseMerge || FrameReverseMergeDiag) {
@@ -4303,7 +4304,7 @@ bool ConstraintsGenerator::configureConstraintContext(
         }
         return Text + " values=[" + DescribeValues(Ty) + "]";
       };
-      if (std::getenv("NOTDEC_BIGCLASS_DIAG") != nullptr) {
+      if (binarysub::env_flag("NOTDEC_BIGCLASS_DIAG")) {
         auto Root = binarysub::resolve_variable(Event.into);
         auto *VS = Root ? Root->getAsVariableState() : nullptr;
         if (VS != nullptr && VS->upperBounds.size() >= 1000) {
@@ -4967,7 +4968,7 @@ bool ConstraintsGenerator::frameMergeVetoWithOwners(
 void ConstraintsGenerator::attachSharedNodeOwner(SimpleType Ty,
                                                 const ExtValuePtr &Val) {
   attachExternalValueHandle(Ty, Val);
-  if (std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_POLY_MONO_DIAG")) {
     auto *Owner = getVariableOwningFunction(Ty);
     llvm::errs() << "[poly-mono-owner] shared node owned by "
                  << (Owner != nullptr ? Owner->getName().str()
@@ -5036,7 +5037,7 @@ void ConstraintsGenerator::collectSharedNodeSiblings(SimpleType Shared,
       }
     }
   }
-  if (std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_POLY_MONO_DIAG")) {
     llvm::errs() << "[poly-mono-collect] " << Caller->getName()
                  << " base=" << Base << " same_object_operands=" << SameObject
                  << " no_node=" << NoNode << " candidates=" << Cands
@@ -6157,7 +6158,7 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
       }
     }
   }
-  if (std::getenv("NOTDEC_GRAPH_SIZE_DIAG") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_GRAPH_SIZE_DIAG")) {
     binarysub::emit_type_graph_summary("pre-policy");
     llvm::errs() << "[graph-size] v2n=" << CG.V2N.rev().size()
                  << " decisions=" << CG.CallSlotMergeDecisions.size() << "\n";
@@ -6899,7 +6900,7 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
         // atomic; NOTDEC_ALLOW_SHALLOW_MERGE_CONFLICT=1 restores the
         // non-transactional "skip this merge and continue" behaviour.
         Context.rejectShallowMergeConflict =
-            std::getenv("NOTDEC_ALLOW_SHALLOW_MERGE_CONFLICT") == nullptr;
+            !binarysub::env_flag("NOTDEC_ALLOW_SHALLOW_MERGE_CONFLICT");
         int RootOverlapMode = layoutOverlapMode();
         if (RootOverlapMode == 3 || RootOverlapMode == 4) {
           RootOverlapMode =
@@ -7073,7 +7074,7 @@ void ConstraintsGenerator::recordCallArgStructPtrMergeCandidate(
         " formal=" + formatSimpleTypeForTrace(FormalArg));
     return;
   }
-  if (std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr &&
+  if (binarysub::env_flag("NOTDEC_POLY_MONO_DIAG") &&
       !resolvePolymorphicPositionSpec(Target).empty()) {
     llvm::errs() << "[poly-mono-mergecand] target=" << Target.getName()
                  << " arg=" << ArgIndex
@@ -7151,7 +7152,7 @@ SimpleType sharedPositionType(const llvm::Function &F, unsigned Position,
   SimpleType Shared =
       binarysub::extrude(Original, Polarity, Level, ExtrudeCache);
   Cache.emplace(Key, Shared);
-  if (std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_POLY_MONO_DIAG")) {
     llvm::errs() << "[poly-mono-extrude] " << F.getName()
                  << " pos=" << Position << " level=" << Level
                  << " pol=" << Polarity
@@ -7470,7 +7471,7 @@ std::size_t ConstraintsGenerator::applyCallInterfaceMergePolicy() {
   CallArgStructPtrMergeCandidates.clear();
   // Debug switch: isolate the cost/behaviour of the transactional call-slot
   // merge policy (NOTDEC_DISABLE_CALLSLOT_MERGE=1 makes it a no-op).
-  if (std::getenv("NOTDEC_DISABLE_CALLSLOT_MERGE") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_DISABLE_CALLSLOT_MERGE")) {
     return 0;
   }
   // 20261010-155 隐式子类型消融：in-SCC0 的调用槽候选不再要求 struct 证据
@@ -7494,7 +7495,7 @@ std::size_t ConstraintsGenerator::applyReturnValueMergePolicy() {
   ReturnValueMergeCandidates.clear();
   // Debug switch: isolate the cost/behaviour of the transactional call-slot
   // merge policy (NOTDEC_DISABLE_CALLSLOT_MERGE=1 makes it a no-op).
-  if (std::getenv("NOTDEC_DISABLE_CALLSLOT_MERGE") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_DISABLE_CALLSLOT_MERGE")) {
     return 0;
   }
   return applyTransactionalCallSlotMergePolicy(*this, std::move(Entries));
@@ -7506,7 +7507,7 @@ std::size_t ConstraintsGenerator::applyCallArgStructPtrMergePolicy() {
   CallArgStructPtrMergeCandidates.clear();
   // Debug switch: isolate the cost/behaviour of the transactional call-slot
   // merge policy (NOTDEC_DISABLE_CALLSLOT_MERGE=1 makes it a no-op).
-  if (std::getenv("NOTDEC_DISABLE_CALLSLOT_MERGE") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_DISABLE_CALLSLOT_MERGE")) {
     return 0;
   }
   return applyTransactionalCallSlotMergePolicy(*this, std::move(Entries));
@@ -7790,7 +7791,7 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
       CollectStart = startBottomUpPhase(/*Enabled=*/true);
     }
     bool Changed = false;
-    const bool SlotMergeDiag = std::getenv("NOTDEC_SLOT_MERGE_DIAG") != nullptr;
+    const bool SlotMergeDiag = binarysub::env_flag("NOTDEC_SLOT_MERGE_DIAG");
     auto SlotMergeDiagStart = std::chrono::steady_clock::now();
     auto SlotMergeDiagCollect = SlotMergeDiagStart;
     auto SlotMergeDiagElapsedMs = [](std::chrono::steady_clock::time_point From) {
@@ -8912,7 +8913,7 @@ monomorphicPositionOverrides() {
 PolymorphicPositionSpec
 resolvePolymorphicPositionSpec(const llvm::Function &F) {
   if (auto Spec = getPolymorphicPositionSpec(F)) {
-    if (std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr) {
+    if (binarysub::env_flag("NOTDEC_POLY_MONO_DIAG")) {
       llvm::errs() << "[poly-mono-resolve] " << F.getName()
                    << " from metadata: " << Spec->str() << "\n";
     }
@@ -8921,7 +8922,7 @@ resolvePolymorphicPositionSpec(const llvm::Function &F) {
   const std::string Name = F.getName().str();
   const auto &Overrides = monomorphicPositionOverrides();
   if (auto It = Overrides.find(Name); It != Overrides.end()) {
-    if (std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr) {
+    if (binarysub::env_flag("NOTDEC_POLY_MONO_DIAG")) {
       llvm::errs() << "[poly-mono-resolve] " << Name
                    << " from env: " << It->second.str() << "\n";
     }
@@ -8931,7 +8932,7 @@ resolvePolymorphicPositionSpec(const llvm::Function &F) {
   static const std::map<std::string, PolymorphicPositionSpec> Policy =
       loadPolyPolicyConfig().MonomorphicPositions;
   if (auto It = Policy.find(Name); It != Policy.end()) {
-    if (std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr) {
+    if (binarysub::env_flag("NOTDEC_POLY_MONO_DIAG")) {
       llvm::errs() << "[poly-mono-resolve] " << Name
                    << " from policy: " << It->second.str() << "\n";
     }
@@ -9285,7 +9286,7 @@ void MLsubRecovery::applyExtraConstraints(ConstraintsGenerator &G,
 
 void MLsubRecovery::bottomUpPhase() {
   const bool ConstraintDiag =
-      std::getenv("NOTDEC_CONSTRAINT_DIAG") != nullptr;
+      binarysub::env_flag("NOTDEC_CONSTRAINT_DIAG");
   std::optional<BottomUpTiming> TotalTiming;
   static constexpr const char *StageNames[] = {
       "function_nodes",
@@ -9392,7 +9393,7 @@ void MLsubRecovery::bottomUpPhase() {
 
     // 函数内部约束生成完、跨函数调用边未连接：按函数统计约束图规模，
     // 用于评估哪些函数把图撑大。NOTDEC_CONSTRAINT_STATS=1 开启。
-    if (std::getenv("NOTDEC_CONSTRAINT_STATS") != nullptr) {
+    if (binarysub::env_flag("NOTDEC_CONSTRAINT_STATS")) {
       G->emitFunctionConstraintStats();
     }
 
@@ -9485,7 +9486,7 @@ void MLsubRecovery::bottomUpPhase() {
         // paper-level PolymorphicType(TData.level - 1, TargetFTy), without an
         // unsigned underflow or a misleading cutoff conversion.
         static const bool InstantiationDiag =
-            std::getenv("NOTDEC_DEFERRED_DIAG") != nullptr;
+            binarysub::env_flag("NOTDEC_DEFERRED_DIAG");
         if (InstantiationDiag) {
           std::string Label = "instantiate-before:" + F->getName().str();
           binarysub::emit_type_graph_summary(Label.c_str());
@@ -9513,7 +9514,7 @@ void MLsubRecovery::bottomUpPhase() {
               findStructuralFunctionType(TargetFTy);
           const binarysub::TFunction *ActualFn =
               findStructuralFunctionType(Ent.second);
-          const bool Diag = std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr;
+          const bool Diag = binarysub::env_flag("NOTDEC_POLY_MONO_DIAG");
           unsigned Linked = 0;
           if (InsFn != nullptr && OrigFn != nullptr) {
             for (unsigned ArgIndex : Positions.MonomorphicArgs) {
@@ -9736,7 +9737,7 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                                unsigned PointerSizeBytes, bool SolveGlobals,
                                ExtValueLabelCache *DebugLabelCache) {
   const bool GenTypesDiag =
-      std::getenv("NOTDEC_SIMPLIFY_DIAG") != nullptr ||
+      binarysub::env_flag("NOTDEC_SIMPLIFY_DIAG") ||
       std::getenv(kSimplifyStopAfterGroupsEnv.data()) != nullptr;
   GenTypesTiming Timing;
   auto PhaseWallStart = GenTypesClock::now();
@@ -9841,7 +9842,7 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   // (BINARYSUB_FILTER_BULK_ORIGIN_FIELDS).  The origins are the per-edge sets
   // the solver keeps on VariableState bounds; reading them on demand keeps
   // this O(#variables).
-  const bool WantOriginTrace = std::getenv("NOTDEC_FIELD_ORIGINS") != nullptr;
+  const bool WantOriginTrace = binarysub::env_flag("NOTDEC_FIELD_ORIGINS");
   const char *BulkPolicyEnv =
       std::getenv("BINARYSUB_FILTER_BULK_ORIGIN_FIELDS");
   const bool WantBulkPolicy =
@@ -9940,7 +9941,7 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
 #ifdef BINARYSUB_ENABLE_FIELD_ORIGINS
   // Field-origin coverage: how many record fields still carry a stamped
   // origin after solving/merging.  Gated so it costs nothing unless asked for.
-  if (std::getenv("NOTDEC_FIELD_ORIGIN_DIAG") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_FIELD_ORIGIN_DIAG")) {
     std::set<const binarysub::TypeNode *> Seen;
     std::size_t Records = 0;
     std::size_t Fields = 0;
@@ -10052,7 +10053,7 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   };
 
   const bool ConvertProgress =
-      std::getenv("NOTDEC_CONVERT_PROGRESS") != nullptr;
+      binarysub::env_flag("NOTDEC_CONVERT_PROGRESS");
   auto convertStart = std::chrono::steady_clock::now();
   auto reportConvertProgress = [&](std::size_t Done, std::size_t Total) {
     if (!ConvertProgress) {
@@ -10182,7 +10183,7 @@ void MLsubRecovery::genASTTypes(llvm::Module &M) {
   // resolve to?  Same representative pointer == same variable, which answers
   // whether the union of members comes from variable merging or from several
   // variables sharing one memory object.
-  if (std::getenv("NOTDEC_POLY_MONO_DIAG") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_POLY_MONO_DIAG")) {
     ConstraintsGenerator *L0 = nullptr;
     for (auto &Group : AG.AllSCCs) {
       if (Group.level == 0 && Group.Generator != nullptr) {
@@ -10326,7 +10327,7 @@ void MLsubRecovery::solveAndLowerTypes() {
   ExtValueLabelCache *DebugLabelCache =
       notdec::getWorkDirOpt() ? &DebugValueLabels : nullptr;
   const bool GenTypesDiag =
-      std::getenv("NOTDEC_SIMPLIFY_DIAG") != nullptr;
+      binarysub::env_flag("NOTDEC_SIMPLIFY_DIAG");
   std::optional<GenTypesTiming> TotalTiming;
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);
@@ -10357,7 +10358,7 @@ void MLsubRecovery::solveAndLowerTypes() {
     ReportTotal("upper", TotalTiming->Upper);
     ReportTotal("debug_output", TotalTiming->DebugOutput);
   }
-  if (std::getenv("NOTDEC_WORKLIST_SNAPSHOT") != nullptr) {
+  if (binarysub::env_flag("NOTDEC_WORKLIST_SNAPSHOT")) {
     binarysub::emit_type_graph_summary("solve-and-lower-types-end");
   }
   if (MergeEval) {
@@ -11187,7 +11188,7 @@ static bool constantHasNoPointerTagMiddleBits(const ConstantInt &CI) {
 // the overflow intrinsics then treat uint like the neutral "int" tag, so the
 // solver never creates a uint <: sint or uint <: record pair from them.
 static bool skipUintPrimitiveConstraints() {
-  static const bool Skip = std::getenv("NOTDEC_NO_UINT_CONSTRAINTS") != nullptr;
+  static const bool Skip = binarysub::env_flag("NOTDEC_NO_UINT_CONSTRAINTS");
   return Skip;
 }
 

@@ -665,10 +665,10 @@ struct ConstraintsGenerator {
     }
     // 20261010-157：策略合并的 frame 守卫（默认关，行为不变）。
     FrameNoPolicyMerge =
-        std::getenv("NOTDEC_FRAME_NO_POLICY_MERGE") != nullptr;
+        binarysub::env_flag("NOTDEC_FRAME_NO_POLICY_MERGE");
     // 20261013-159：solver 侧 reverse_edge 的 frame 守卫（默认关）。
     FrameNoReverseMerge =
-        std::getenv("NOTDEC_FRAME_NO_REVERSE_MERGE") != nullptr;
+        binarysub::env_flag("NOTDEC_FRAME_NO_REVERSE_MERGE");
     auto ParseDiagSink = [](const char *Name, bool &Enabled, bool &ToStderr,
                             bool &ToSink) {
       const char *Value = std::getenv(Name);
@@ -686,11 +686,11 @@ struct ConstraintsGenerator {
     ParseDiagSink("NOTDEC_FRAME_REVERSE_MERGE_DIAG", FrameReverseMergeDiag,
                   FrameReverseStderr, FrameReverseSink);
     FrameReverseMergeBacktrace =
-        std::getenv("NOTDEC_FRAME_REVERSE_MERGE_BACKTRACE") != nullptr;
+        binarysub::env_flag("NOTDEC_FRAME_REVERSE_MERGE_BACKTRACE");
     ParseDiagSink("NOTDEC_FRAME_EDGE_TRACE", FrameEdgeTrace, FrameEdgeStderr,
                   FrameEdgeSink);
     FrameEdgeTraceBacktrace =
-        std::getenv("NOTDEC_FRAME_EDGE_BACKTRACE") != nullptr;
+        binarysub::env_flag("NOTDEC_FRAME_EDGE_BACKTRACE");
     // Default on: round one only merges nodes whose field evidence already
     // agrees, round two re-checks the rest once every call edge and field
     // access has been seen.  "=0" restores the single-round behaviour.
@@ -698,7 +698,7 @@ struct ConstraintsGenerator {
     if (auto *Enabled = std::getenv("NOTDEC_TWO_ROUND_MERGE")) {
       TwoRoundMerge = std::strcmp(Enabled, "0") != 0;
     }
-    TwoRoundMergeDiag = std::getenv("NOTDEC_TWO_ROUND_DIAG") != nullptr;
+    TwoRoundMergeDiag = binarysub::env_flag("NOTDEC_TWO_ROUND_DIAG");
     // Default on.  See frameOwnerOfValue: a stack region must not be unified
     // with an unrelated region.  "=0" restores the pre-guard behaviour.
     if (auto *Enabled = std::getenv("NOTDEC_FRAME_NO_NONFRAME_MERGE")) {
@@ -713,9 +713,9 @@ struct ConstraintsGenerator {
     // Relaxation of the veto condition: only an attributable non-frame object
     // counts as "provably not a stack region"; unknown addresses do not.
     FrameVetoKnownObjectOnly =
-        std::getenv("NOTDEC_FRAME_VETO_KNOWN_OBJECT_ONLY") != nullptr;
+        binarysub::env_flag("NOTDEC_FRAME_VETO_KNOWN_OBJECT_ONLY");
     ConstraintDiagEnabled =
-        std::getenv("NOTDEC_CONSTRAINT_DIAG") != nullptr;
+        binarysub::env_flag("NOTDEC_CONSTRAINT_DIAG");
   }
 
   BottomUpTiming run();
@@ -940,7 +940,7 @@ struct ConstraintsGenerator {
     if (FrameEdgeTrace) {
       traceFrameRelatedEdge("addSubtype", lhs, rhs);
     }
-    if (!IRDerived && std::getenv("NOTDEC_NON_IR_EDGE_TRACE") != nullptr) {
+    if (!IRDerived && binarysub::env_flag("NOTDEC_NON_IR_EDGE_TRACE")) {
       auto NonIROwner = [&](SimpleType T) -> std::string {
         if (auto *O = getVariableOwningFunction(T)) {
           return O->getName().str();
@@ -1020,7 +1020,7 @@ struct ConstraintsGenerator {
         }
       }
     }
-    if (std::getenv("NOTDEC_FATNODE_DIAG") != nullptr) {
+    if (binarysub::env_flag("NOTDEC_FATNODE_DIAG")) {
       for (SimpleType Side : {lhs, rhs}) {
         auto Root = binarysub::resolve_variable(Side);
         auto *VS = Root ? Root->getAsVariableState() : nullptr;
@@ -1164,7 +1164,7 @@ struct ConstraintsGenerator {
     // Diagnostic: a pair of variables connected in BOTH directions is what the
     // solver's reverse_edge rule later merges; print the first such pairs so the
     // cascade's precondition can be traced back to a function/position.
-    if (std::getenv("NOTDEC_BIDIR_DIAG") != nullptr) {
+    if (binarysub::env_flag("NOTDEC_BIDIR_DIAG")) {
       auto L = binarysub::resolve_variable(lhs);
       auto R = binarysub::resolve_variable(rhs);
       auto *LV = L ? L->getAsVariableState() : nullptr;

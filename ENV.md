@@ -2,6 +2,8 @@
 
 类型恢复（mlsub）与相关 pass 的开关。库内部（`external/binarysub`）的开关见 `external/binarysub/ENV.md`；microsub2/cons_gen 自己的开关见 `binarysub-private/ENV.md`。
 
+布尔开关统一语义：未设 = 默认；`=0`/`=off`/`=false`/`=no` = 关；其它值（包括空值）= 开。
+
 ## 合并策略
 
 | 变量 | 作用 |
