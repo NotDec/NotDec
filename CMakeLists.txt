@@ -201,10 +201,14 @@ option(NOTDEC_ENABLE_WASM "Enable wasm decompilation support." ON)
 option(NOTDEC_ENABLE_LLVM2C "Enable notdec llvm2c backend." ON)
 option(NOTDEC_ENABLE_BINARYSUB_PARALLEL
 	"Enable oneTBB based parallel binarysub bulk simplifier." ON)
+option(NOTDEC_ENABLE_BINARYSUB_FIELD_ORIGINS
+	"Enable binarysub per-field origin carriage (field-level provenance)." OFF)
 # TODO add tests
 
 set(BINARYSUB_ENABLE_TBB_PARALLEL ${NOTDEC_ENABLE_BINARYSUB_PARALLEL}
 	CACHE BOOL "Enable oneTBB based parallel bulk simplifier" FORCE)
+set(BINARYSUB_ENABLE_FIELD_ORIGINS ${NOTDEC_ENABLE_BINARYSUB_FIELD_ORIGINS}
+	CACHE BOOL "Enable per-field origin carriage" FORCE)
 add_subdirectory(external/binarysub)
 
 if (NOTDEC_ENABLE_WASM)
