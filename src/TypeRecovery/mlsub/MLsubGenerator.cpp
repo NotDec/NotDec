@@ -4088,6 +4088,10 @@ BottomUpTiming ConstraintsGenerator::run() {
   return Timing;
 }
 
+// Maps a type node to its owning function name for the event log's func=
+// filter; defined next to getExtValueFunction (which it uses).
+static std::string resolveEventOwner(const SimpleType &Ty);
+
 namespace {
 
 // NOTDEC_MERGE_AUDIT: stderr (historical behaviour), the binarysub event sink,
@@ -4127,6 +4131,8 @@ MergeAuditMode mergeAuditMode() {
 bool ConstraintsGenerator::configureConstraintContext(
     binarysub::ConstraintContext &Context) {
   bool HasHook = true;
+  // Host hook for the event log's func= filter (idempotent).
+  binarysub::event_log_set_owner_resolver(&resolveEventOwner);
   Context.shouldMergeSameLevelVarVar =
       [this](const SimpleType &LHS, const SimpleType &RHS)
       -> binarysub::expected<bool, binarysub::Error> {
@@ -4157,7 +4163,7 @@ bool ConstraintsGenerator::configureConstraintContext(
         if (!LFrame && !RFrame) {
           ++FrameReverseMergeUnknown;
         }
-        if (FrameReverseMergeDiag) {
+        if (FrameReverseMergeDiag && FrameReverseStderr) {
           auto Side = [this](const char *Tag, SimpleType Ty) {
             const auto Owners = frameOwnersOfNode(Ty);
             llvm::errs() << "[frame-revmerge] " << Tag << " "
@@ -4195,6 +4201,13 @@ bool ConstraintsGenerator::configureConstraintContext(
             const int Count = backtrace(Frames, 40);
             backtrace_symbols_fd(Frames, Count, 2);
           }
+        }
+        if (FrameReverseMergeDiag && FrameReverseSink) {
+          std::string Extra = "frame_side=";
+          Extra += LFrame ? "L" : (RFrame ? "R" : "none");
+          Extra += FrameNoReverseMerge ? " guard=on" : " guard=off";
+          binarysub::event_log(binarysub::EventSource::Frame,
+                               "reverse-edge-decision", L, R, Extra);
         }
         if ((LFrame || RFrame) && FrameNoReverseMerge) {
           ++FrameReverseMergesRefused;
@@ -4521,8 +4534,7 @@ static llvm::Function *getFunctionFromLLVMValue(llvm::Value *Value) {
   return nullptr;
 }
 
-llvm::Function *ConstraintsGenerator::getExtValueFunction(
-    const ExtValuePtr &Val) const {
+static llvm::Function *extValueFunctionFree(const ExtValuePtr &Val) {
   if (auto *V = std::get_if<llvm::Value *>(&Val)) {
     return getFunctionFromLLVMValue(*V);
   }
@@ -4536,12 +4548,29 @@ llvm::Function *ConstraintsGenerator::getExtValueFunction(
     return Stack->Allocator != nullptr ? Stack->Allocator->getFunction()
                                        : nullptr;
   }
-  if (auto *Heap = std::get_if<HeapObject>(&Val)) {
-    return Heap->Allocator != nullptr ? Heap->Allocator->getFunction()
-                                      : nullptr;
-  }
   return nullptr;
 }
+
+// Owner name for the event log's func= filter: the variable's external handle
+// carries the IR value, so this does not need a generator instance.
+static std::string resolveEventOwner(const SimpleType &Ty) {
+  auto Root = binarysub::resolve_variable(Ty);
+  auto *Var = Root ? Root->getAsVariableState() : nullptr;
+  if (Var == nullptr || Var->externalHandle == nullptr) {
+    return {};
+  }
+  const auto &Val = *static_cast<const ExtValuePtr *>(Var->externalHandle);
+  if (auto *Function = extValueFunctionFree(Val)) {
+    return Function->getName().str();
+  }
+  return {};
+}
+
+llvm::Function *ConstraintsGenerator::getExtValueFunction(
+    const ExtValuePtr &Val) const {
+  return extValueFunctionFree(Val);
+}
+
 
 void ConstraintsGenerator::emitFunctionConstraintStats() const {
   std::map<llvm::Function *, std::pair<size_t, size_t>> NodesEdges;
@@ -4848,30 +4877,48 @@ void ConstraintsGenerator::traceFrameRelatedEdge(const char *Site,
     return;
   }
   ++FrameEdgeTraces;
-  auto Short = [](SimpleType T) {
-    std::string S = T ? binarysub::debug_string(T) : std::string("<null>");
-    if (S.size() > 70) {
-      S.resize(70);
+  if (FrameEdgeStderr) {
+    auto Short = [](SimpleType T) {
+      std::string S = T ? binarysub::debug_string(T) : std::string("<null>");
+      if (S.size() > 70) {
+        S.resize(70);
+      }
+      return S;
+    };
+    llvm::errs() << "[frame-edge] site=" << Site
+                 << " ir_derived=" << (InsideIRVisit ? 1 : 0) << " lvl="
+                 << (LV != nullptr ? LV->level : RV->level)
+                 << " frame-side=" << (LFrame ? "L" : "R") << " lhs=vs#"
+                 << (LV != nullptr ? LV->id : 0) << "(" << Short(LHS)
+                 << ") rhs=vs#" << (RV != nullptr ? RV->id : 0) << "("
+                 << Short(RHS) << ") inst=";
+    if (CurrentVisitedInstruction != nullptr) {
+      CurrentVisitedInstruction->print(llvm::errs());
+    } else {
+      llvm::errs() << "<none>";
     }
-    return S;
-  };
-  llvm::errs() << "[frame-edge] site=" << Site
-               << " ir_derived=" << (InsideIRVisit ? 1 : 0) << " lvl="
-               << (LV != nullptr ? LV->level : RV->level)
-               << " frame-side=" << (LFrame ? "L" : "R") << " lhs=vs#"
-               << (LV != nullptr ? LV->id : 0) << "(" << Short(LHS)
-               << ") rhs=vs#" << (RV != nullptr ? RV->id : 0) << "("
-               << Short(RHS) << ") inst=";
-  if (CurrentVisitedInstruction != nullptr) {
-    CurrentVisitedInstruction->print(llvm::errs());
-  } else {
-    llvm::errs() << "<none>";
+    llvm::errs() << "\n";
+    if (FrameEdgeTraceBacktrace) {
+      void *Frames[32];
+      const int Count = backtrace(Frames, 32);
+      backtrace_symbols_fd(Frames, Count, 2);
+    }
   }
-  llvm::errs() << "\n";
-  if (FrameEdgeTraceBacktrace) {
-    void *Frames[32];
-    const int Count = backtrace(Frames, 32);
-    backtrace_symbols_fd(Frames, Count, 2);
+  if (FrameEdgeSink) {
+    std::string Inst = "<none>";
+    if (CurrentVisitedInstruction != nullptr) {
+      std::string Text;
+      llvm::raw_string_ostream OS(Text);
+      CurrentVisitedInstruction->print(OS);
+      OS.flush();
+      Inst = Text;
+    }
+    std::string Extra =
+        "ir_derived=" + std::to_string(InsideIRVisit ? 1 : 0) + " lvl=" +
+        std::to_string(LV != nullptr ? LV->level : RV->level) +
+        " frame_side=" + (LFrame ? "L" : "R") + " inst=" + Inst;
+    binarysub::event_log(binarysub::EventSource::Frame, "frame-edge", LHS, RHS,
+                         Extra);
   }
 }
 
@@ -6281,11 +6328,32 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
                     Entries.end());
     }
   }
-  if (std::getenv("NOTDEC_SLOT_MERGE_DIAG2") != nullptr) {
-    for (const auto &Entry : Entries) {
-      llvm::errs() << "[slot-merge-entry] target="
-                   << formatCallMergeTarget(Entry.Target)
-                   << " policy=" << Entry.Policy << " " << Entry.Detail << "\n";
+  {
+    // NOTDEC_SLOT_MERGE_DIAG2: unset/0 = off, "eventlog" = sink only,
+    // "both" = sink + stderr, anything else = stderr.
+    const char *Diag2 = std::getenv("NOTDEC_SLOT_MERGE_DIAG2");
+    const std::string Diag2Mode = Diag2 != nullptr ? Diag2 : "";
+    const bool Diag2On =
+        !Diag2Mode.empty() && Diag2Mode != "0" && Diag2Mode != "off";
+    const bool Diag2Sink =
+        Diag2On && (Diag2Mode == "eventlog" || Diag2Mode == "both");
+    const bool Diag2Stderr = Diag2On && Diag2Mode != "eventlog";
+    if (Diag2On) {
+      for (const auto &Entry : Entries) {
+        const std::string Target = formatCallMergeTarget(Entry.Target);
+        if (Diag2Stderr) {
+          llvm::errs() << "[slot-merge-entry] target=" << Target
+                       << " policy=" << Entry.Policy << " " << Entry.Detail
+                       << "\n";
+        }
+        if (Diag2Sink) {
+          std::string Extra = "target=" + Target + " slot=" + Entry.Slot +
+                              " policy=" + Entry.Policy +
+                              " detail=" + Entry.Detail;
+          binarysub::event_log(binarysub::EventSource::Slot, "slot-entry",
+                               Entry.Actual, Entry.Formal, Extra);
+        }
+      }
     }
   }
   std::map<SimpleType, std::vector<ExtValuePtr>> ValuesByRoot;

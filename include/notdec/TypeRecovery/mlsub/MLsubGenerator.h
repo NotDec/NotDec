@@ -396,10 +396,16 @@ struct ConstraintsGenerator {
   bool FrameEdgeTrace = false;
   bool FrameEdgeTraceBacktrace = false;
   mutable std::size_t FrameEdgeTraces = 0;
+  // Same convention as NOTDEC_MERGE_AUDIT: unset/0 = off, "eventlog" = the
+  // binarysub event sink only, "both" = sink + stderr, anything else = stderr.
+  bool FrameEdgeStderr = false;
+  bool FrameEdgeSink = false;
   // Diagnostic (NOTDEC_FRAME_REVERSE_MERGE_DIAG=1): print each frame-involved
   // reverse-edge decision with both sides' values and a backtrace, so the
   // enqueueing dataflow can be attributed (log 159).
   bool FrameReverseMergeDiag = false;
+  bool FrameReverseStderr = false;
+  bool FrameReverseSink = false;
   bool FrameReverseMergeBacktrace = false;
   mutable std::size_t LocalSubtypeHookChecks = 0;
   // Two-round merge (NOTDEC_TWO_ROUND_MERGE=1).  Round one runs while the
@@ -663,11 +669,26 @@ struct ConstraintsGenerator {
     // 20261013-159：solver 侧 reverse_edge 的 frame 守卫（默认关）。
     FrameNoReverseMerge =
         std::getenv("NOTDEC_FRAME_NO_REVERSE_MERGE") != nullptr;
-    FrameReverseMergeDiag =
-        std::getenv("NOTDEC_FRAME_REVERSE_MERGE_DIAG") != nullptr;
+    auto ParseDiagSink = [](const char *Name, bool &Enabled, bool &ToStderr,
+                            bool &ToSink) {
+      const char *Value = std::getenv(Name);
+      if (Value == nullptr) {
+        return;
+      }
+      const std::string Mode(Value);
+      if (Mode.empty() || Mode == "0" || Mode == "off") {
+        return;
+      }
+      Enabled = true;
+      ToSink = Mode == "eventlog" || Mode == "both";
+      ToStderr = Mode != "eventlog";
+    };
+    ParseDiagSink("NOTDEC_FRAME_REVERSE_MERGE_DIAG", FrameReverseMergeDiag,
+                  FrameReverseStderr, FrameReverseSink);
     FrameReverseMergeBacktrace =
         std::getenv("NOTDEC_FRAME_REVERSE_MERGE_BACKTRACE") != nullptr;
-    FrameEdgeTrace = std::getenv("NOTDEC_FRAME_EDGE_TRACE") != nullptr;
+    ParseDiagSink("NOTDEC_FRAME_EDGE_TRACE", FrameEdgeTrace, FrameEdgeStderr,
+                  FrameEdgeSink);
     FrameEdgeTraceBacktrace =
         std::getenv("NOTDEC_FRAME_EDGE_BACKTRACE") != nullptr;
     // Default on: round one only merges nodes whose field evidence already
