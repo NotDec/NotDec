@@ -5147,9 +5147,8 @@ ConstraintsGenerator::queueLocalSubtypeMerges(
   // caller has established that a relevant evidence transition occurred.
   auto TryQueue =
       [&](SimpleType Other) -> binarysub::expected<void, binarysub::Error> {
-    // Diagnostic: NOTDEC_HOOK_WATCH=<id>[,<id>] traces which variable neighbour
+    // Diagnostic: NOTDEC_WATCH ids + site=hook traces which variable neighbour
     // the evidence-upgrade hook merges into which (reason policy_auxiliary).
-    static const char *HookWatch = std::getenv("NOTDEC_HOOK_WATCH");
     // The hook is called for a non-variable bound, but it scans both bound
     // vectors. Reject those entries before root resolution; only variable
     // neighbors can trigger the same-function merge policy.
@@ -5165,23 +5164,12 @@ ConstraintsGenerator::queueLocalSubtypeMerges(
     if (!ShouldMerge) {
       return binarysub::unexpected<binarysub::Error>(ShouldMerge.error());
     }
-    if (HookWatch != nullptr) {
-      std::stringstream WS(HookWatch);
-      std::string Item;
-      bool WatchVar = false, WatchOther = false;
-      while (std::getline(WS, Item, ',')) {
-        if (Item.empty()) {
-          continue;
-        }
-        const auto Id = static_cast<std::uint32_t>(std::stoul(Item));
-        WatchVar |= VarState->id == Id;
-        WatchOther |= OtherState->id == Id;
-      }
-      if (WatchVar || WatchOther) {
-        llvm::errs() << "[hook-watch] var=vs#" << VarState->id
-                     << " other=vs#" << OtherState->id
-                     << " gate=" << (ShouldMerge.value() ? 1 : 0) << "\n";
-      }
+    if (binarysub::event_watch_enabled("hook") &&
+        (binarysub::event_watch_matches(static_cast<long>(VarState->id)) ||
+         binarysub::event_watch_matches(static_cast<long>(OtherState->id)))) {
+      llvm::errs() << "[hook-watch] var=vs#" << VarState->id
+                   << " other=vs#" << OtherState->id
+                   << " gate=" << (ShouldMerge.value() ? 1 : 0) << "\n";
     }
     if (!ShouldMerge.value()) {
       return binarysub::expected<void, binarysub::Error>{};
@@ -5300,30 +5288,19 @@ ConstraintsGenerator::onVariableNonVarBoundAdded(
       Bound == nullptr || Bound->isVariableState()) {
     return binarysub::expected<void, binarysub::Error>{};
   }
-  // Diagnostic: NOTDEC_HOOK_WATCH=<id>[,<id>] also prints the non-variable bound
+  // Diagnostic: NOTDEC_WATCH ids + site=hook also prints the non-variable bound
   // that made this variable's evidence upgrade (the trigger of the merge).
-  static const char *HookBoundWatch = std::getenv("NOTDEC_HOOK_WATCH");
-  if (HookBoundWatch != nullptr) {
-    std::stringstream WS(HookBoundWatch);
-    std::string Item;
-    bool Watch = false;
-    while (std::getline(WS, Item, ',')) {
-      if (!Item.empty() &&
-          VarState->id == static_cast<std::uint32_t>(std::stoul(Item))) {
-        Watch = true;
-      }
+  if (binarysub::event_watch_enabled("hook") &&
+      binarysub::event_watch_matches(static_cast<long>(VarState->id))) {
+    std::string Text = binarysub::debug_string(Bound);
+    if (Text.size() > 160) {
+      Text.resize(160);
     }
-    if (Watch) {
-      std::string Text = binarysub::debug_string(Bound);
-      if (Text.size() > 160) {
-        Text.resize(160);
-      }
-      llvm::errs() << "[hook-trigger] var=vs#" << VarState->id
-                   << " polarity="
-                   << (Polarity == binarysub::BoundPolarity::Upper ? "upper"
-                                                                   : "lower")
-                   << " bound=" << Text << "\n";
-    }
+    llvm::errs() << "[hook-trigger] var=vs#" << VarState->id
+                 << " polarity="
+                 << (Polarity == binarysub::BoundPolarity::Upper ? "upper"
+                                                                 : "lower")
+                 << " bound=" << Text << "\n";
   }
 
   // all-local is an opt-in diagnostic mode whose trigger behavior is kept
@@ -7326,13 +7303,62 @@ void ConstraintsGenerator::applyDeferredCallConstraints() {
   } else {
     // Keep the production ordering exact: every call subtype is added before
     // any candidate is recorded, so the policy sees the completed call graph.
-    static const bool DeferredDiag =
-        std::getenv("NOTDEC_DEFERRED_DIAG") != nullptr;
+    // NOTDEC_DEFERRED_DIAG: "1"/"all" prints every deferred call subtype; a
+    // comma-separated id list prints only the ones touching those variables.
+    // Unset = off.
+    struct DeferredDiagConfig {
+      bool On = false;
+      bool All = true;
+      std::set<long> Ids;
+      bool Matches(const SimpleType &A, const SimpleType &B) const {
+        if (!On) {
+          return false;
+        }
+        if (All) {
+          return true;
+        }
+        auto IdOf = [](const SimpleType &T) -> long {
+          auto Root = binarysub::resolve_variable(T);
+          auto *VS = Root ? Root->getAsVariableState() : nullptr;
+          return VS != nullptr ? static_cast<long>(VS->id) : -1;
+        };
+        return Ids.count(IdOf(A)) != 0 || Ids.count(IdOf(B)) != 0;
+      }
+    };
+    static const DeferredDiagConfig DeferredDiagCfg = [] {
+      DeferredDiagConfig C;
+      const char *Value = std::getenv("NOTDEC_DEFERRED_DIAG");
+      if (Value == nullptr || *Value == '\0') {
+        return C;
+      }
+      C.On = true;
+      const std::string Mode(Value);
+      if (Mode == "1" || Mode == "all") {
+        C.All = true;
+        return C;
+      }
+      C.All = false;
+      std::stringstream WS(Mode);
+      std::string Item;
+      while (std::getline(WS, Item, ',')) {
+        if (Item.empty()) {
+          continue;
+        }
+        try {
+          C.Ids.insert(std::stol(Item));
+        } catch (...) {
+          // Malformed ids are ignored.
+        }
+      }
+      return C;
+    }();
+    static const bool DeferredDiag = DeferredDiagCfg.On;
     RunSubphase(BottomUpSubstage::DeferredCallSubtype,
                 DeferredCallConstraints.size(), [&] {
                   std::size_t DeferredIndex = 0;
                   for (const auto &Deferred : DeferredCallConstraints) {
-                    if (DeferredDiag) {
+                    if (DeferredDiagCfg.Matches(Deferred.SubtypeLHS,
+                                                Deferred.ActualFunc)) {
                       std::string LhsText =
                           binarysub::debug_string(Deferred.SubtypeLHS);
                       std::string RhsText =
@@ -7355,58 +7381,6 @@ void ConstraintsGenerator::applyDeferredCallConstraints() {
                           << " lhs=" << LhsText << " rhs=" << RhsText << "\n";
                     }
                     ++DeferredIndex;
-                    // Diagnostic: NOTDEC_DEFERRED_CALL_WATCH=<id>[,<id>] prints
-                    // the callsite whose deferred call-interface constraint
-                    // touches a watched variable (these constraints currently
-                    // carry no BoundOriginScope, so the origin table cannot name
-                    // them).
-                    if (const char *Watch =
-                            std::getenv("NOTDEC_DEFERRED_CALL_WATCH")) {
-                      auto Watched = [&](SimpleType T) {
-                        auto Root = binarysub::resolve_variable(T);
-                        auto *VS = Root ? Root->getAsVariableState() : nullptr;
-                        if (VS == nullptr) {
-                          return false;
-                        }
-                        std::stringstream WS(Watch);
-                        std::string Item;
-                        while (std::getline(WS, Item, ',')) {
-                          if (!Item.empty() &&
-                              VS->id == static_cast<std::uint32_t>(
-                                           std::stoul(Item))) {
-                            return true;
-                          }
-                        }
-                        return false;
-                      };
-                      auto Mentions = [&](SimpleType T) {
-                        std::string Text = binarysub::debug_string(T);
-                        return Text.find("vs#647") != std::string::npos ||
-                               Text.find("vs#8476") != std::string::npos;
-                      };
-                      if (Watched(Deferred.SubtypeLHS) ||
-                          Watched(Deferred.ActualFunc) ||
-                          Mentions(Deferred.SubtypeLHS) ||
-                          Mentions(Deferred.ActualFunc)) {
-                        llvm::errs() << "[deferred-call-watch] caller="
-                                     << (Deferred.Call && Deferred.Call->getFunction()
-                                             ? Deferred.Call->getFunction()->getName()
-                                             : llvm::StringRef("<none>"))
-                                     << " callee="
-                                     << (Deferred.Target
-                                             ? Deferred.Target->getName()
-                                             : llvm::StringRef("<none>"))
-                                     << " lhs="
-                                     << binarysub::debug_string(Deferred.SubtypeLHS)
-                                     << " actualFunc="
-                                     << binarysub::debug_string(Deferred.ActualFunc)
-                                     << "\n  inst: ";
-                        if (Deferred.Call != nullptr) {
-                          Deferred.Call->print(llvm::errs());
-                        }
-                        llvm::errs() << "\n";
-                      }
-                    }
                     if (ShouldCutCallEdge(Deferred)) {
                       ++AblationCutCallEdges;
                     } else {

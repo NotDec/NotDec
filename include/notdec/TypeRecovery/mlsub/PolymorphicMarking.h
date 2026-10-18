@@ -37,8 +37,7 @@ private:
   MLsubRecovery &TR;
 };
 
-// The report switch: NOTDEC_POLY_MARKING_REPORT, with
-// NOTDEC_POLY_RECOGNITION_REPORT accepted as an alias.
+// The report switch: NOTDEC_POLY_MARKING_REPORT.
 //
 // When it is set the pass writes one JSON object per named function with the
 // decision and the reason(s), and MLsubRecovery::run stops right after the

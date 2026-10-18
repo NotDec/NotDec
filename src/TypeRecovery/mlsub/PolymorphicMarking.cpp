@@ -34,12 +34,9 @@ void writeOffsetList(llvm::raw_ostream &Out, const char *Key,
 } // namespace
 
 std::string polymorphicMarkingReportPath() {
-  for (const char *Name :
-       {"NOTDEC_POLY_MARKING_REPORT", "NOTDEC_POLY_RECOGNITION_REPORT"}) {
-    if (auto *Value = std::getenv(Name)) {
-      if (*Value != '\0') {
-        return Value;
-      }
+  if (auto *Value = std::getenv("NOTDEC_POLY_MARKING_REPORT")) {
+    if (*Value != '\0') {
+      return Value;
     }
   }
   return {};

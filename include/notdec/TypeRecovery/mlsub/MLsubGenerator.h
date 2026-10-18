@@ -911,45 +911,31 @@ struct ConstraintsGenerator {
       binarysub::event_log(binarysub::EventSource::Frontend, "frontend", lhs,
                            rhs, Extra);
     }
-    // Diagnostic: NOTDEC_ADDSUBTYPE_WATCH=<id>[,<id>...] prints every edge
-    // between two watched variable ids together with the IR instruction being
+    // Diagnostic: NOTDEC_WATCH ids + site=addsubtype prints every edge that
+    // touches a watched variable together with the IR instruction being
     // visited and a short backtrace.
-    if (const char *Watch = std::getenv("NOTDEC_ADDSUBTYPE_WATCH")) {
-      auto *LV = lhs->getAsVariableState();
-      auto *RV = rhs->getAsVariableState();
-      {
-        std::set<std::uint32_t> Wanted;
-        std::stringstream WS(Watch);
-        std::string Item;
-        while (std::getline(WS, Item, ',')) {
-          if (!Item.empty()) {
-            Wanted.insert(static_cast<std::uint32_t>(std::stoul(Item)));
-          }
+    if (binarysub::event_watch_enabled("addsubtype") &&
+        (binarysub::event_watch_matches(lhs) ||
+         binarysub::event_watch_matches(rhs))) {
+      auto Describe = [](SimpleType T) {
+        std::string S = binarysub::debug_string(T);
+        if (S.size() > 90) {
+          S.resize(90);
         }
-        const bool LHit = LV != nullptr && Wanted.count(LV->id) != 0;
-        const bool RHit = RV != nullptr && Wanted.count(RV->id) != 0;
-        if (LHit || RHit) {
-          auto Describe = [](SimpleType T) {
-            std::string S = binarysub::debug_string(T);
-            if (S.size() > 90) {
-              S.resize(90);
-            }
-            return S;
-          };
-          llvm::errs() << "[addsubtype-watch] lhs=" << Describe(lhs)
-                       << " rhs=" << Describe(rhs)
-                       << " ir_derived=" << (IRDerived ? 1 : 0) << " inst=";
-          if (CurrentVisitedInstruction != nullptr) {
-            CurrentVisitedInstruction->print(llvm::errs());
-          } else {
-            llvm::errs() << "<none>";
-          }
-          llvm::errs() << "\n";
-          void *Frames[32];
-          const int Count = backtrace(Frames, 32);
-          backtrace_symbols_fd(Frames, Count, 2);
-        }
+        return S;
+      };
+      llvm::errs() << "[addsubtype-watch] lhs=" << Describe(lhs)
+                   << " rhs=" << Describe(rhs)
+                   << " ir_derived=" << (IRDerived ? 1 : 0) << " inst=";
+      if (CurrentVisitedInstruction != nullptr) {
+        CurrentVisitedInstruction->print(llvm::errs());
+      } else {
+        llvm::errs() << "<none>";
       }
+      llvm::errs() << "\n";
+      void *Frames[32];
+      const int Count = backtrace(Frames, 32);
+      backtrace_symbols_fd(Frames, Count, 2);
     }
     if (FrameEdgeTrace) {
       traceFrameRelatedEdge("addSubtype", lhs, rhs);
