@@ -21,6 +21,7 @@
 #include "notdec/Utils/Utils.h"
 
 #include <cassert>
+#include <execinfo.h>
 #include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
@@ -2827,6 +2828,8 @@ localSubtypeMergeModeName(ConstraintsGenerator::LocalSubtypeMergeMode Mode) {
     return "pointer";
   case ConstraintsGenerator::LocalSubtypeMergeMode::AllLocal:
     return "all-local";
+  case ConstraintsGenerator::LocalSubtypeMergeMode::None:
+    return "none";
   }
   llvm_unreachable("unknown local subtype merge mode");
 }
@@ -2845,6 +2848,7 @@ void writeLocalSubtypeMergeStats(llvm::StringRef Path, const AllGraphs &AG) {
   std::size_t SameFunctionCandidates = 0;
   std::size_t PointerCandidates = 0;
   std::size_t Accepted = 0;
+  std::size_t RefusedByNone = 0;
   std::size_t ReplaceBoundMergeEvents = 0;
   std::size_t AuxiliaryMergeEvents = 0;
   std::size_t EarlyCallMerged = 0;
@@ -2859,6 +2863,7 @@ void writeLocalSubtypeMergeStats(llvm::StringRef Path, const AllGraphs &AG) {
         Data.Generator->LocalSubtypeSameFunctionCandidates;
     PointerCandidates += Data.Generator->LocalSubtypePointerCandidates;
     Accepted += Data.Generator->LocalSubtypeAccepted;
+    RefusedByNone += Data.Generator->LocalSubtypeRefusedNoLocalMode;
     ReplaceBoundMergeEvents +=
         Data.Generator->LocalSubtypeReplaceBoundMergeEvents;
     AuxiliaryMergeEvents += Data.Generator->LocalSubtypeAuxiliaryMergeEvents;
@@ -2874,6 +2879,7 @@ void writeLocalSubtypeMergeStats(llvm::StringRef Path, const AllGraphs &AG) {
   Out << "same-level-size-candidates: " << BasicCandidates << "\n";
   Out << "same-function-candidates: " << SameFunctionCandidates << "\n";
   Out << "pointer-candidates: " << PointerCandidates << "\n";
+  Out << "refused-by-mode-none: " << RefusedByNone << "\n";
   Out << "accepted: " << Accepted << "\n";
   Out << "policy-replace-bound-merge-events: " << ReplaceBoundMergeEvents
       << "\n";
@@ -4068,6 +4074,17 @@ BottomUpTiming ConstraintsGenerator::run() {
                  << " cross-function=" << FrameVetoCrossFunction
                  << " unknown-side-silent=" << FrameVetoUnknownSide << "\n";
   }
+  if (FrameNoPolicyMerge) {
+    llvm::errs() << "Info: frame policy merge guard refused="
+                 << FramePolicyMergesRefused << " checked="
+                 << FramePolicyMergeAttempts << "\n";
+  }
+  if (FrameNoReverseMerge || FrameReverseMergeDiag) {
+    llvm::errs() << "Info: frame reverse merge guard refused="
+                 << FrameReverseMergesRefused << " checks="
+                 << FrameReverseMergeChecks << " neither-side-frame="
+                 << FrameReverseMergeUnknown << "\n";
+  }
   return Timing;
 }
 
@@ -4082,6 +4099,73 @@ bool ConstraintsGenerator::configureConstraintContext(
   Context.shouldMergeReverseEdgeVariables =
       [this](const SimpleType &LHS, const SimpleType &RHS)
       -> binarysub::expected<bool, binarysub::Error> {
+    // 20261013-159: solver-side reverse_edge pair.  With the guard on, a pair
+    // with a frame-derived side is not merged; returning false means "keep the
+    // two nodes separate and record the directed bound as usual" (see
+    // constrain_impl: the non-merge fall-through adds upper/lower bounds).
+    // Control arm (NOTDEC_NO_REVERSE_EDGE_MERGE=1, log 159): refuse every
+    // reverse-edge auto merge, frame or not.  Tells whether the frame pairs
+    // are special or the reverse-edge rule is load-bearing in general.
+    if (std::getenv("NOTDEC_NO_REVERSE_EDGE_MERGE") != nullptr) {
+      return false;
+    }
+    if (FrameNoReverseMerge || FrameReverseMergeDiag) {
+      const SimpleType L = binarysub::resolve_variable(LHS);
+      const SimpleType R = binarysub::resolve_variable(RHS);
+      const auto LOwners = frameOwnersOfNode(L);
+      const auto ROwners = frameOwnersOfNode(R);
+      const bool LFrame = LOwners.has_value() && !LOwners->empty();
+      const bool RFrame = ROwners.has_value() && !ROwners->empty();
+      if (LFrame || RFrame || FrameReverseMergeDiag) {
+        ++FrameReverseMergeChecks;
+        if (!LFrame && !RFrame) {
+          ++FrameReverseMergeUnknown;
+        }
+        if (FrameReverseMergeDiag) {
+          auto Side = [this](const char *Tag, SimpleType Ty) {
+            const auto Owners = frameOwnersOfNode(Ty);
+            llvm::errs() << "[frame-revmerge] " << Tag << " "
+                         << binarysub::debug_string(Ty) << " owners=";
+            if (!Owners.has_value()) {
+              llvm::errs() << "unknown";
+            } else if (Owners->empty()) {
+              llvm::errs() << "none";
+            } else {
+              for (const auto *A : *Owners) {
+                llvm::errs() << A->getName() << ",";
+              }
+            }
+            llvm::errs() << " values=";
+            const auto &Rev = V2N.rev();
+            auto It = Ty != nullptr ? Rev.find(Ty) : Rev.end();
+            if (It != Rev.end()) {
+              std::size_t N = 0;
+              for (const auto &Val : It->second) {
+                if (N++ >= 8) {
+                  llvm::errs() << "...";
+                  break;
+                }
+                llvm::errs() << toStableString(Val) << " ";
+              }
+            }
+            llvm::errs() << "\n";
+          };
+          llvm::errs() << "[frame-revmerge] decision frame-side="
+                       << (LFrame ? "L" : (RFrame ? "R" : "none")) << "\n";
+          Side("L", L);
+          Side("R", R);
+          if ((LFrame || RFrame) && FrameReverseMergeBacktrace) {
+            void *Frames[40];
+            const int Count = backtrace(Frames, 40);
+            backtrace_symbols_fd(Frames, Count, 2);
+          }
+        }
+        if ((LFrame || RFrame) && FrameNoReverseMerge) {
+          ++FrameReverseMergesRefused;
+          return false;
+        }
+      }
+    }
     return roundOneMergeAllowed(LHS, RHS);
   };
   // The bound-added and nested-rewrite hooks below rescan direct variable
@@ -4226,17 +4310,46 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
   const bool MergeLocalRetry =
       binarysub::intStructCoexistPolicy() ==
       binarysub::IntStructCoexistPolicy::LocalRetry;
+  // 20261010-157：策略合并的 frame 守卫复用同一个事务边界。整次策略合并尝试
+  // 在事务里执行；只要尝试过程中出现 frame 与其它节点的合并（显式或递归），
+  // 就整体回滚并按“未合并”返回。不做新事务、不嵌套。
+  const bool FrameGuard = FrameNoPolicyMerge && ContextPtr != nullptr;
+  bool FrameRefused = false;
   binarysub::expected<void, binarysub::Error> Result;
-  if (MergeLocalRetry && ContextPtr != nullptr) {
+  if ((MergeLocalRetry || FrameGuard) && ContextPtr != nullptr) {
     bool Coexist = false;
-    Context.onIntStructCoexist = [&Coexist](const SimpleType &,
-                                            const SimpleType &) {
-      Coexist = true;
-    };
+    if (MergeLocalRetry) {
+      Context.onIntStructCoexist = [&Coexist](const SimpleType &,
+                                              const SimpleType &) {
+        Coexist = true;
+      };
+    }
     Context.stats = &CurrentConstraintStats;
+    if (FrameGuard) {
+      Context.validateVariableMerge =
+          [this, &FrameRefused](const binarysub::MergeEvent &Event)
+          -> binarysub::expected<void, binarysub::Error> {
+        if (isFrameCrossMerge(Event)) {
+          FrameRefused = true;
+          return binarysub::unexpected<binarysub::Error>(
+              binarysub::Error::make("frame policy merge refused"));
+        }
+        return binarysub::expected<void, binarysub::Error>{};
+      };
+    }
     binarysub::SimpleTypeTransaction Tx;
     Result = binarysub::merge_variable_into(From, Into, MergeObserver,
                                             ContextPtr);
+    if (FrameRefused) {
+      Tx.rollback();
+      ++FramePolicyMergesRefused;
+      emitTypeRecoveryTrace("[merge-policy:" + Policy.str() +
+                            ":frame-refused] from=" +
+                            binarysub::debug_string(From) + " into=" +
+                            binarysub::debug_string(Into) +
+                            " detail=" + TraceDetail);
+      return false;
+    }
     if (Result && Coexist) {
       Tx.rollback();
       ++MergeLocalConflicts;
@@ -4622,6 +4735,67 @@ bool ConstraintsGenerator::frameMergeVeto(SimpleType LHS, SimpleType RHS,
   return frameMergeVetoWithOwners(Left, Right, Why);
 }
 
+// 20261010-157：策略合并的 frame 守卫判据。事件两侧恰好一侧是 frame 派生
+// 时返回 true；没有值记录的节点按“非 frame”处理。
+bool ConstraintsGenerator::isFrameCrossMerge(
+    const binarysub::MergeEvent &Event) const {
+  ++FramePolicyMergeAttempts;
+  auto IsFrame = [this](const SimpleType &Ty) {
+    auto Owners = frameOwnersOfNode(Ty);
+    return Owners.has_value() && !Owners->empty();
+  };
+  return IsFrame(Event.from) != IsFrame(Event.into);
+}
+
+// 20261013-159: "provably addresses a stack region" for one solver node.
+bool ConstraintsGenerator::isFrameDerivedNode(SimpleType Ty) const {
+  auto Owners = frameOwnersOfNode(Ty);
+  return Owners.has_value() && !Owners->empty();
+}
+
+// 20261013-159 诊断：前端每装一条与 frame 派生节点相关的约束就打印一次，
+// 带上被访问的 IR 指令，用来看“frame 与参数之间的关系是谁装的”。
+void ConstraintsGenerator::traceFrameRelatedEdge(const char *Site,
+                                                 SimpleType LHS,
+                                                 SimpleType RHS) const {
+  auto *LV = LHS ? LHS->getAsVariableState() : nullptr;
+  auto *RV = RHS ? RHS->getAsVariableState() : nullptr;
+  if (LV == nullptr && RV == nullptr) {
+    return;
+  }
+  const bool LFrame = LV != nullptr && isFrameDerivedNode(LHS);
+  const bool RFrame = RV != nullptr && isFrameDerivedNode(RHS);
+  if (!LFrame && !RFrame) {
+    return;
+  }
+  ++FrameEdgeTraces;
+  auto Short = [](SimpleType T) {
+    std::string S = T ? binarysub::debug_string(T) : std::string("<null>");
+    if (S.size() > 70) {
+      S.resize(70);
+    }
+    return S;
+  };
+  llvm::errs() << "[frame-edge] site=" << Site
+               << " ir_derived=" << (InsideIRVisit ? 1 : 0) << " lvl="
+               << (LV != nullptr ? LV->level : RV->level)
+               << " frame-side=" << (LFrame ? "L" : "R") << " lhs=vs#"
+               << (LV != nullptr ? LV->id : 0) << "(" << Short(LHS)
+               << ") rhs=vs#" << (RV != nullptr ? RV->id : 0) << "("
+               << Short(RHS) << ") inst=";
+  if (CurrentVisitedInstruction != nullptr) {
+    CurrentVisitedInstruction->print(llvm::errs());
+  } else {
+    llvm::errs() << "<none>";
+  }
+  llvm::errs() << "\n";
+  if (FrameEdgeTraceBacktrace) {
+    void *Frames[32];
+    const int Count = backtrace(Frames, 32);
+    backtrace_symbols_fd(Frames, Count, 2);
+  }
+}
+
 bool ConstraintsGenerator::frameMergeVetoWithOwners(
     const std::optional<std::set<const llvm::AllocaInst *>> &Left,
     const std::optional<std::set<const llvm::AllocaInst *>> &Right,
@@ -4772,11 +4946,29 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
     return false;
   }
   ++LocalSubtypeBasicCandidates;
+
+  // 20261010-155 隐式子类型消融（只对 SCC0/lvl==0 生效）：数据流关系本身
+  // 就是合并判据。同 level/同 size 且两端 owner 都在本 generator 的 SCC
+  // 集合内就合并，不再要求同函数，也不再要求 pointer-like / struct 证据。
+  // 没有 owner 的节点（全局、实例化摘要副本、常量）保持 baseline 的
+  // 子类型路径。frame veto 与 level/size 检查仍然在上方生效。开关关闭时
+  // 这一分支不执行，下面的路径与顺序与 baseline 完全一致。
+  if (implicitSubtypeAblationActive()) {
+    auto *AblationLHSFunc = getVariableOwningFunction(LHS);
+    auto *AblationRHSFunc = getVariableOwningFunction(RHS);
+    if (AblationLHSFunc == nullptr || AblationRHSFunc == nullptr ||
+        SCCs.count(AblationLHSFunc) == 0 ||
+        SCCs.count(AblationRHSFunc) == 0) {
+      return false;
+    }
+    ++LocalSubtypeAccepted;
+    return true;
+  }
+
   if (LocalSubtypeMode != LocalSubtypeMergeMode::AllLocal &&
       LHSVar->size != PointerSize) {
     return false;
   }
-
   // Most variable edges connect values owned by different functions. Reject
   // those before walking record fields, which can be large after propagation.
   auto *LHSFunc = getVariableOwningFunction(LHS);
@@ -4785,6 +4977,14 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
     return false;
   }
   ++LocalSubtypeSameFunctionCandidates;
+  // 20261017-160：同函数这一维的零点。同函数、同 level、同 size 的对一律不
+  // 走这条合并路径，有向边照旧由 constrain 加上（调用方在钩子返回 false 时
+  // 落回"加 lower/upper bound"）。只作用于这条策略路径：求解器的 reverse_edge
+  // 合并是"两个方向都已经有边"逼出来的等价，属于类型推理规则本身，不受影响。
+  if (LocalSubtypeMode == LocalSubtypeMergeMode::None) {
+    ++LocalSubtypeRefusedNoLocalMode;
+    return false;
+  }
   if (LocalSubtypeMode == LocalSubtypeMergeMode::AllLocal) {
     ++LocalSubtypeAccepted;
     return true;
@@ -4821,6 +5021,9 @@ ConstraintsGenerator::queueLocalSubtypeMerges(
   // caller has established that a relevant evidence transition occurred.
   auto TryQueue =
       [&](SimpleType Other) -> binarysub::expected<void, binarysub::Error> {
+    // Diagnostic: NOTDEC_HOOK_WATCH=<id>[,<id>] traces which variable neighbour
+    // the evidence-upgrade hook merges into which (reason policy_auxiliary).
+    static const char *HookWatch = std::getenv("NOTDEC_HOOK_WATCH");
     // The hook is called for a non-variable bound, but it scans both bound
     // vectors. Reject those entries before root resolution; only variable
     // neighbors can trigger the same-function merge policy.
@@ -4835,6 +5038,24 @@ ConstraintsGenerator::queueLocalSubtypeMerges(
     auto ShouldMerge = shouldMergeSameFunctionStructPtrSubtype(Var, Other);
     if (!ShouldMerge) {
       return binarysub::unexpected<binarysub::Error>(ShouldMerge.error());
+    }
+    if (HookWatch != nullptr) {
+      std::stringstream WS(HookWatch);
+      std::string Item;
+      bool WatchVar = false, WatchOther = false;
+      while (std::getline(WS, Item, ',')) {
+        if (Item.empty()) {
+          continue;
+        }
+        const auto Id = static_cast<std::uint32_t>(std::stoul(Item));
+        WatchVar |= VarState->id == Id;
+        WatchOther |= OtherState->id == Id;
+      }
+      if (WatchVar || WatchOther) {
+        llvm::errs() << "[hook-watch] var=vs#" << VarState->id
+                     << " other=vs#" << OtherState->id
+                     << " gate=" << (ShouldMerge.value() ? 1 : 0) << "\n";
+      }
     }
     if (!ShouldMerge.value()) {
       return binarysub::expected<void, binarysub::Error>{};
@@ -4952,6 +5173,31 @@ ConstraintsGenerator::onVariableNonVarBoundAdded(
   if (VarState == nullptr || VarState->size != PointerSize ||
       Bound == nullptr || Bound->isVariableState()) {
     return binarysub::expected<void, binarysub::Error>{};
+  }
+  // Diagnostic: NOTDEC_HOOK_WATCH=<id>[,<id>] also prints the non-variable bound
+  // that made this variable's evidence upgrade (the trigger of the merge).
+  static const char *HookBoundWatch = std::getenv("NOTDEC_HOOK_WATCH");
+  if (HookBoundWatch != nullptr) {
+    std::stringstream WS(HookBoundWatch);
+    std::string Item;
+    bool Watch = false;
+    while (std::getline(WS, Item, ',')) {
+      if (!Item.empty() &&
+          VarState->id == static_cast<std::uint32_t>(std::stoul(Item))) {
+        Watch = true;
+      }
+    }
+    if (Watch) {
+      std::string Text = binarysub::debug_string(Bound);
+      if (Text.size() > 160) {
+        Text.resize(160);
+      }
+      llvm::errs() << "[hook-trigger] var=vs#" << VarState->id
+                   << " polarity="
+                   << (Polarity == binarysub::BoundPolarity::Upper ? "upper"
+                                                                   : "lower")
+                   << " bound=" << Text << "\n";
+    }
   }
 
   // all-local is an opt-in diagnostic mode whose trigger behavior is kept
@@ -6434,6 +6680,12 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
 
     auto ValidateMerge = [&](const binarysub::MergeEvent &Event)
         -> binarysub::expected<void, binarysub::Error> {
+      // 20261010-157：策略合并的 frame 守卫（复用本组事务整体回退）。
+      if (CG.FrameNoPolicyMerge && CG.isFrameCrossMerge(Event)) {
+        ++CG.FramePolicyMergesRefused;
+        return binarysub::unexpected<binarysub::Error>(
+            binarysub::Error::make("frame policy merge refused"));
+      }
       auto From = binarysub::resolve_variable(Event.from);
       auto Into = binarysub::resolve_variable(Event.into);
       auto FromLabels = FormalLabelsForRoot(From);
@@ -6889,7 +7141,16 @@ void ConstraintsGenerator::applyDeferredCallConstraints() {
     recordBottomUpSubphase(ActiveBottomUpTimingContext, Stage, Start, WorkItems,
                            ActiveBottomUpPostSummaryContext);
   };
-  if (EnableEarlyCallInterfaceMerge) {
+  // 20261010-155 策略 2（merge-or-cut）：in-SCC0 的 deferred call edge 不再
+  // 添加。调用位置要么已被调用槽合并连上（equal roots），要么毫无关系；
+  // 跨 SCC0 的调用保持 baseline（实例化副本 + 子类型边）。因此 cut 模式必须
+  // 先收集候选并合并、再加（跨 SCC 的）边，即走 early 顺序。
+  const bool CutInSccCallEdges = implicitSubtypeAblationCutsCallEdges();
+  auto ShouldCutCallEdge = [&](const DeferredCallConstraint &Deferred) {
+    return CutInSccCallEdges && Deferred.Target != nullptr &&
+           SCCs.count(Deferred.Target) != 0;
+  };
+  if (EnableEarlyCallInterfaceMerge || CutInSccCallEdges) {
     // This is intentionally opt-in. It measures how much work can be avoided by
     // eliminating actual/formal edges before propagation, while exposing the
     // risk that later call edges would have supplied new conflict evidence.
@@ -6908,6 +7169,10 @@ void ConstraintsGenerator::applyDeferredCallConstraints() {
     RunSubphase(BottomUpSubstage::DeferredCallSubtype,
                 DeferredCallConstraints.size(), [&] {
                   for (const auto &Deferred : DeferredCallConstraints) {
+                    if (ShouldCutCallEdge(Deferred)) {
+                      ++AblationCutCallEdges;
+                      continue;
+                    }
                     addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
                   }
                 });
@@ -6943,7 +7208,63 @@ void ConstraintsGenerator::applyDeferredCallConstraints() {
                           << " lhs=" << LhsText << " rhs=" << RhsText << "\n";
                     }
                     ++DeferredIndex;
-                    addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
+                    // Diagnostic: NOTDEC_DEFERRED_CALL_WATCH=<id>[,<id>] prints
+                    // the callsite whose deferred call-interface constraint
+                    // touches a watched variable (these constraints currently
+                    // carry no BoundOriginScope, so the origin table cannot name
+                    // them).
+                    if (const char *Watch =
+                            std::getenv("NOTDEC_DEFERRED_CALL_WATCH")) {
+                      auto Watched = [&](SimpleType T) {
+                        auto Root = binarysub::resolve_variable(T);
+                        auto *VS = Root ? Root->getAsVariableState() : nullptr;
+                        if (VS == nullptr) {
+                          return false;
+                        }
+                        std::stringstream WS(Watch);
+                        std::string Item;
+                        while (std::getline(WS, Item, ',')) {
+                          if (!Item.empty() &&
+                              VS->id == static_cast<std::uint32_t>(
+                                           std::stoul(Item))) {
+                            return true;
+                          }
+                        }
+                        return false;
+                      };
+                      auto Mentions = [&](SimpleType T) {
+                        std::string Text = binarysub::debug_string(T);
+                        return Text.find("vs#647") != std::string::npos ||
+                               Text.find("vs#8476") != std::string::npos;
+                      };
+                      if (Watched(Deferred.SubtypeLHS) ||
+                          Watched(Deferred.ActualFunc) ||
+                          Mentions(Deferred.SubtypeLHS) ||
+                          Mentions(Deferred.ActualFunc)) {
+                        llvm::errs() << "[deferred-call-watch] caller="
+                                     << (Deferred.Call && Deferred.Call->getFunction()
+                                             ? Deferred.Call->getFunction()->getName()
+                                             : llvm::StringRef("<none>"))
+                                     << " callee="
+                                     << (Deferred.Target
+                                             ? Deferred.Target->getName()
+                                             : llvm::StringRef("<none>"))
+                                     << " lhs="
+                                     << binarysub::debug_string(Deferred.SubtypeLHS)
+                                     << " actualFunc="
+                                     << binarysub::debug_string(Deferred.ActualFunc)
+                                     << "\n  inst: ";
+                        if (Deferred.Call != nullptr) {
+                          Deferred.Call->print(llvm::errs());
+                        }
+                        llvm::errs() << "\n";
+                      }
+                    }
+                    if (ShouldCutCallEdge(Deferred)) {
+                      ++AblationCutCallEdges;
+                    } else {
+                      addSubtype(Deferred.SubtypeLHS, Deferred.ActualFunc);
+                    }
                     if (DeferredDiag) {
                       std::string Label =
                           "deferred-after:" +
@@ -6965,6 +7286,19 @@ void ConstraintsGenerator::applyDeferredCallConstraints() {
                         Deferred.FormalFunc);
                   }
                 });
+  }
+  // 20261010-155：消融臂的过程量。cut-call-edges 只在 merge-or-cut 非零；
+  // relaxed-merge-entries 是 in-SCC0 候选里被去掉 struct 证据门槛的条数。
+  if (implicitSubtypeAblationActive()) {
+    llvm::errs() << "Info: implicit-subtype ablation mode="
+                 << (ImplicitSubtypeAblation ==
+                             ImplicitSubtypeAblationMode::MergeOrCut
+                         ? "merge-or-cut"
+                         : "merge-local")
+                 << " scc=" << llvm::StringRef(Name).take_front(80)
+                 << " cut-call-edges=" << AblationCutCallEdges
+                 << " relaxed-merge-entries=" << AblationRelaxedMergeEntries
+                 << "\n";
   }
   DeferredCallConstraints.clear();
 }
@@ -7017,6 +7351,18 @@ std::size_t ConstraintsGenerator::applyCallInterfaceMergePolicy() {
   // merge policy (NOTDEC_DISABLE_CALLSLOT_MERGE=1 makes it a no-op).
   if (std::getenv("NOTDEC_DISABLE_CALLSLOT_MERGE") != nullptr) {
     return 0;
+  }
+  // 20261010-155 隐式子类型消融：in-SCC0 的调用槽候选不再要求 struct 证据
+  // （"有数据流关系就合并"）；布局/frame 预检与事务回滚全部保留。跨 SCC0
+  // 的候选保持 baseline 门槛——消融不应用到跨 SCC0 边界。
+  if (implicitSubtypeAblationActive()) {
+    for (auto &Entry : Entries) {
+      if (Entry.Target != nullptr && SCCs.count(Entry.Target) != 0 &&
+          Entry.RequireStructEvidence) {
+        Entry.RequireStructEvidence = false;
+        ++AblationRelaxedMergeEntries;
+      }
+    }
   }
   return applyTransactionalCallSlotMergePolicy(*this, std::move(Entries));
 }
@@ -12573,11 +12919,39 @@ void ConstraintsGenerator::MLsubVisitor::visitPHINode(PHINode &I) {
 }
 
 void ConstraintsGenerator::MLsubVisitor::handlePHINodes() {
+  static const char *PhiWatch = std::getenv("NOTDEC_PHI_WATCH");
   for (auto I : phiNodes) {
     auto P = cg.getNodeOrNull(I);
     for (long i = 0; i < I->getNumIncomingValues(); i++) {
       auto *Src = I->getIncomingValue(i);
       auto SrcVar = cg.getOrInsertNode(getExtValuePtr(Src, I, i));
+      if (PhiWatch != nullptr) {
+        auto Matches = [&](SimpleType T) {
+          auto Root = binarysub::resolve_variable(T);
+          auto *VS = Root ? Root->getAsVariableState() : nullptr;
+          if (VS == nullptr) {
+            return false;
+          }
+          std::stringstream WS(PhiWatch);
+          std::string Item;
+          while (std::getline(WS, Item, ',')) {
+            if (!Item.empty() &&
+                VS->id == static_cast<std::uint32_t>(std::stoul(Item))) {
+              return true;
+            }
+          }
+          return false;
+        };
+        if (Matches(P) || Matches(SrcVar)) {
+          llvm::errs() << "[phi-watch] fn="
+                       << I->getFunction()->getName()
+                       << " phi=" << toStableString(getExtValuePtr(I, I, -1))
+                       << " incoming[" << i
+                       << "]=" << toStableString(getExtValuePtr(Src, I, i))
+                       << " src=" << binarysub::debug_string(SrcVar)
+                       << " dst=" << binarysub::debug_string(P) << "\n";
+        }
+      }
       cg.addSubtype(SrcVar, P);
     }
   }

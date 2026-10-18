@@ -336,8 +336,70 @@ struct ConstraintsGenerator {
   // by merges before they grow large bound graphs.  The default keeps the
   // current struct-pointer rule; broader modes are opt-in experiments because
   // a merge cannot be split when later constraints reveal a conflict.
-  enum class LocalSubtypeMergeMode { StructPointer, Pointer, AllLocal };
+  //   StructPointer : default; merge only with struct-pointer evidence.
+  //   Pointer       : every pointer-like same-function pair.
+  //   AllLocal      : every same-function same-size same-level pair.
+  //   None          : never merge a same-function pair on this policy path; the
+  //                   directed edge stays.  This is the zero end of the
+  //                   "in-function var-var merge" axis (log 160 §5.6), used to
+  //                   measure what directionality inside one function is worth.
+  //                   reverse_edge merges are rule-forced (both directions
+  //                   already present) and are deliberately NOT affected.
+  enum class LocalSubtypeMergeMode { StructPointer, Pointer, AllLocal, None };
   LocalSubtypeMergeMode LocalSubtypeMode = LocalSubtypeMergeMode::StructPointer;
+  // 20261010-155 隐式子类型消融（只作用于 level-0 / SCC0 这个 generator）：
+  //   Off        : 现状。
+  //   MergeLocal : SCC0 内 var-var 数据流边能合并就合并（不再要求同函数或
+  //                struct 证据），合并不了仍保留原来的有向边；in-SCC0 的
+  //                调用槽候选同样去掉 struct 证据门槛。
+  //   MergeOrCut : 同 MergeLocal，且 in-SCC0 的 deferred call edge 不再添加：
+  //                调用位置要么已经被合并连上，要么毫无关系。跨 SCC0 的调用
+  //                保持 baseline（实例化 + 子类型边）。
+  enum class ImplicitSubtypeAblationMode { Off, MergeLocal, MergeOrCut };
+  ImplicitSubtypeAblationMode ImplicitSubtypeAblation =
+      ImplicitSubtypeAblationMode::Off;
+  bool implicitSubtypeAblationActive() const {
+    return lvl == 0 &&
+           ImplicitSubtypeAblation != ImplicitSubtypeAblationMode::Off;
+  }
+  bool implicitSubtypeAblationCutsCallEdges() const {
+    return implicitSubtypeAblationActive() &&
+           ImplicitSubtypeAblation == ImplicitSubtypeAblationMode::MergeOrCut;
+  }
+  std::size_t AblationCutCallEdges = 0;
+  std::size_t AblationRelaxedMergeEntries = 0;
+  // 20261010-157 策略合并的 frame 守卫：frame 派生的节点不能与其它节点合并。
+  // 只覆盖走事务的前端策略合并（call-slot 组、tryMergeVariablesForPolicy），
+  // solver 侧的 reverse_edge 自动合并不在本守卫范围内。
+  // NOTDEC_FRAME_NO_POLICY_MERGE=1 打开（默认关，行为不变）。
+  bool FrameNoPolicyMerge = false;
+  std::size_t FramePolicyMergesRefused = 0;
+  mutable std::size_t FramePolicyMergeAttempts = 0;
+  bool isFrameCrossMerge(const binarysub::MergeEvent &Event) const;
+  // 20261013-159 solver 侧 reverse_edge 的 frame 守卫：frame 派生的节点不与
+  // 其它节点自动合并（钩子返回 false = 不合并，照常记有向界；不是 error，也
+  // 不需要事务回滚）。这是 log 157 规划的入队钩子版，用来把“H1 链上的 frame
+  // 身份合并”这一条从求解器里摘掉，单独量它对指标的作用。
+  // NOTDEC_FRAME_NO_REVERSE_MERGE=1 打开（默认关，行为不变）。
+  bool FrameNoReverseMerge = false;
+  std::size_t FrameReverseMergesRefused = 0;
+  mutable std::size_t FrameReverseMergeChecks = 0;
+  mutable std::size_t FrameReverseMergeUnknown = 0;
+  bool isFrameDerivedNode(SimpleType Ty) const;
+  // Diagnostic (NOTDEC_FRAME_EDGE_TRACE=1): print every frontend constraint that
+  // touches a frame-derived node, with the IR instruction being visited and an
+  // optional backtrace (NOTDEC_FRAME_EDGE_BACKTRACE=1).  Answers "who installs
+  // the relation between the stack region and an argument/temporary".
+  void traceFrameRelatedEdge(const char *Site, SimpleType LHS,
+                             SimpleType RHS) const;
+  bool FrameEdgeTrace = false;
+  bool FrameEdgeTraceBacktrace = false;
+  mutable std::size_t FrameEdgeTraces = 0;
+  // Diagnostic (NOTDEC_FRAME_REVERSE_MERGE_DIAG=1): print each frame-involved
+  // reverse-edge decision with both sides' values and a backtrace, so the
+  // enqueueing dataflow can be attributed (log 159).
+  bool FrameReverseMergeDiag = false;
+  bool FrameReverseMergeBacktrace = false;
   mutable std::size_t LocalSubtypeHookChecks = 0;
   // Two-round merge (NOTDEC_TWO_ROUND_MERGE=1).  Round one runs while the
   // cross-function subtype edges are being added (the visitor plus the
@@ -358,6 +420,8 @@ struct ConstraintsGenerator {
   mutable std::size_t LocalSubtypeSameFunctionCandidates = 0;
   mutable std::size_t LocalSubtypePointerCandidates = 0;
   mutable std::size_t LocalSubtypeAccepted = 0;
+  // Same-function pairs refused only because the mode is None (log 160 §5.6).
+  mutable std::size_t LocalSubtypeRefusedNoLocalMode = 0;
   std::size_t LocalSubtypeReplaceBoundMergeEvents = 0;
   std::size_t LocalSubtypeAuxiliaryMergeEvents = 0;
   // Experimental ordering: merge complete actual/formal slot groups before
@@ -571,6 +635,8 @@ struct ConstraintsGenerator {
         LocalSubtypeMode = LocalSubtypeMergeMode::Pointer;
       } else if (std::strcmp(Mode, "all-local") == 0) {
         LocalSubtypeMode = LocalSubtypeMergeMode::AllLocal;
+      } else if (std::strcmp(Mode, "none") == 0) {
+        LocalSubtypeMode = LocalSubtypeMergeMode::None;
       } else if (std::strcmp(Mode, "struct-pointer") != 0) {
         llvm::errs() << "Warning: unknown NOTDEC_LOCAL_SUBTYPE_MERGE_MODE='"
                      << Mode << "', using struct-pointer.\n";
@@ -579,6 +645,30 @@ struct ConstraintsGenerator {
     if (auto *Enabled = std::getenv("NOTDEC_EARLY_CALL_INTERFACE_MERGE")) {
       EnableEarlyCallInterfaceMerge = std::strcmp(Enabled, "1") == 0;
     }
+    // 20261010-155 隐式子类型消融（只对 level-0 / SCC0 生效，见 log 155）。
+    if (auto *Mode = std::getenv("NOTDEC_IMPLICIT_SUBTYPE_ABLATION")) {
+      if (std::strcmp(Mode, "merge-local") == 0) {
+        ImplicitSubtypeAblation = ImplicitSubtypeAblationMode::MergeLocal;
+      } else if (std::strcmp(Mode, "merge-or-cut") == 0) {
+        ImplicitSubtypeAblation = ImplicitSubtypeAblationMode::MergeOrCut;
+      } else if (std::strcmp(Mode, "off") != 0 && Mode[0] != '\0') {
+        llvm::errs() << "Warning: unknown NOTDEC_IMPLICIT_SUBTYPE_ABLATION='"
+                     << Mode << "', using off.\n";
+      }
+    }
+    // 20261010-157：策略合并的 frame 守卫（默认关，行为不变）。
+    FrameNoPolicyMerge =
+        std::getenv("NOTDEC_FRAME_NO_POLICY_MERGE") != nullptr;
+    // 20261013-159：solver 侧 reverse_edge 的 frame 守卫（默认关）。
+    FrameNoReverseMerge =
+        std::getenv("NOTDEC_FRAME_NO_REVERSE_MERGE") != nullptr;
+    FrameReverseMergeDiag =
+        std::getenv("NOTDEC_FRAME_REVERSE_MERGE_DIAG") != nullptr;
+    FrameReverseMergeBacktrace =
+        std::getenv("NOTDEC_FRAME_REVERSE_MERGE_BACKTRACE") != nullptr;
+    FrameEdgeTrace = std::getenv("NOTDEC_FRAME_EDGE_TRACE") != nullptr;
+    FrameEdgeTraceBacktrace =
+        std::getenv("NOTDEC_FRAME_EDGE_BACKTRACE") != nullptr;
     // Default on: round one only merges nodes whose field evidence already
     // agrees, round two re-checks the rest once every call edge and field
     // access has been seen.  "=0" restores the single-round behaviour.
@@ -857,6 +947,9 @@ struct ConstraintsGenerator {
           backtrace_symbols_fd(Frames, Count, 2);
         }
       }
+    }
+    if (FrameEdgeTrace) {
+      traceFrameRelatedEdge("addSubtype", lhs, rhs);
     }
     if (!IRDerived && std::getenv("NOTDEC_NON_IR_EDGE_TRACE") != nullptr) {
       auto NonIROwner = [&](SimpleType T) -> std::string {

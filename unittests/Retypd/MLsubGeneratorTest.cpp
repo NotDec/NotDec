@@ -1,7 +1,7 @@
 #include "TypeRecovery/mlsub/MLsubGenerator.h"
 #include "TypeRecovery/mlsub/Metadata.h"
 #include "binarysub/binarysub.h"
-#include "notdec/TypeRecovery/mlsub/AnonymousPolyBoundaryAnalysis.h"
+#include "notdec/TypeRecovery/mlsub/AllocatorBoundaryAnalysis.h"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdlib>
@@ -403,6 +403,141 @@ TEST(MLsub, AllLocalSubtypeModeStillRequiresSameFunction) {
   ASSERT_TRUE(CrossFunction);
   EXPECT_FALSE(CrossFunction.value());
 
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, ImplicitSubtypeAblationMergesAcrossFunctionsWithinSCC) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("mlsub-ablation-test", Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *FTy = llvm::FunctionType::get(I32, {I32}, false);
+  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "f",
+                                   M.get());
+  auto *G = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "g",
+                                   M.get());
+  std::set<llvm::Function *> SCCs{F, G};
+  notdec::mlsub::ConstraintsGenerator CG("mlsub-test", 32, SCCs,
+                                         binarysub::make_variable(0, 32));
+
+  auto LHS = CG.createNode(F->getArg(0));
+  auto RHS = CG.createNode(G->getArg(0));
+
+  // Baseline struct-pointer policy: two functions, no struct evidence -> no
+  // merge.
+  auto Default = CG.shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
+  ASSERT_TRUE(Default);
+  EXPECT_FALSE(Default.value());
+
+  // 20261010-155: inside one SCC (level 0) the dataflow edge itself is the
+  // merge criterion; function ownership and struct evidence are dropped.
+  CG.ImplicitSubtypeAblation =
+      notdec::mlsub::ConstraintsGenerator::ImplicitSubtypeAblationMode::
+          MergeLocal;
+  auto Merged = CG.shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
+  ASSERT_TRUE(Merged);
+  EXPECT_TRUE(Merged.value());
+  EXPECT_FALSE(CG.implicitSubtypeAblationCutsCallEdges());
+
+  CG.ImplicitSubtypeAblation =
+      notdec::mlsub::ConstraintsGenerator::ImplicitSubtypeAblationMode::
+          MergeOrCut;
+  EXPECT_TRUE(CG.implicitSubtypeAblationCutsCallEdges());
+
+  CG.ImplicitSubtypeAblation =
+      notdec::mlsub::ConstraintsGenerator::ImplicitSubtypeAblationMode::Off;
+  auto Off = CG.shouldMergeSameFunctionStructPtrSubtype(LHS, RHS);
+  ASSERT_TRUE(Off);
+  EXPECT_FALSE(Off.value());
+
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, ImplicitSubtypeAblationCutSkipsInSccCallEdge) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("mlsub-ablation-cut-test", Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *FTy = llvm::FunctionType::get(I32, {I32}, false);
+  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "f",
+                                   M.get());
+  auto *G = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "g",
+                                   M.get());
+  auto *BB = llvm::BasicBlock::Create(Ctx, "entry", F);
+  llvm::IRBuilder<> Builder(BB);
+  auto *Call = Builder.CreateCall(G, {F->getArg(0)});
+  Builder.CreateRet(Call);
+  std::set<llvm::Function *> SCCs{F, G};
+  notdec::mlsub::ConstraintsGenerator CG("mlsub-test", 32, SCCs,
+                                         binarysub::make_variable(0, 32));
+
+  auto ActualArg = CG.createNode(F->getArg(0));
+  auto FormalArg = CG.createNode(G->getArg(0));
+  auto Callee = CG.createNode(G);
+  auto ActualFunc = binarysub::make_function({ActualArg}, CG.createNode(Call));
+  auto FormalFunc = binarysub::make_function({FormalArg}, nullptr);
+  CG.deferCallConstraint(*Call, *G, Callee, ActualFunc, FormalFunc);
+
+  CG.ImplicitSubtypeAblation =
+      notdec::mlsub::ConstraintsGenerator::ImplicitSubtypeAblationMode::
+          MergeOrCut;
+  CG.applyDeferredCallConstraints();
+  EXPECT_GT(CG.AblationCutCallEdges, 0u);
+
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, FramePolicyMergeGuardAllowsWhenOff) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("mlsub-frame-guard-off", Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *FTy = llvm::FunctionType::get(llvm::Type::getVoidTy(Ctx), {I32}, false);
+  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "f",
+                                   M.get());
+  auto *BB = llvm::BasicBlock::Create(Ctx, "entry", F);
+  llvm::IRBuilder<> Builder(BB);
+  auto *Frame = Builder.CreateAlloca(
+      llvm::ArrayType::get(llvm::Type::getInt8Ty(Ctx), 64), nullptr, "frame");
+  Builder.CreateRetVoid();
+  std::set<llvm::Function *> SCCs{F};
+  notdec::mlsub::ConstraintsGenerator CG("mlsub-test", 32, SCCs,
+                                         binarysub::make_variable(0, 32));
+
+  auto FrameNode = CG.createNode(Frame);
+  auto ArgNode = CG.createNode(F->getArg(0));
+  CG.FrameNoPolicyMerge = false;
+  EXPECT_TRUE(
+      CG.tryMergeVariablesForPolicy("unit-frame-guard", FrameNode, ArgNode,
+                                    "test"));
+  EXPECT_EQ(binarysub::resolve_variable(FrameNode).get(),
+            binarysub::resolve_variable(ArgNode).get());
+  EXPECT_EQ(CG.FramePolicyMergesRefused, 0u);
+  CG.releaseBinarysubState();
+}
+
+TEST(MLsub, FramePolicyMergeGuardRefusesFrameCrossMerge) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("mlsub-frame-guard-on", Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *FTy = llvm::FunctionType::get(llvm::Type::getVoidTy(Ctx), {I32}, false);
+  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "f",
+                                   M.get());
+  auto *BB = llvm::BasicBlock::Create(Ctx, "entry", F);
+  llvm::IRBuilder<> Builder(BB);
+  auto *Frame = Builder.CreateAlloca(
+      llvm::ArrayType::get(llvm::Type::getInt8Ty(Ctx), 64), nullptr, "frame");
+  Builder.CreateRetVoid();
+  std::set<llvm::Function *> SCCs{F};
+  notdec::mlsub::ConstraintsGenerator CG("mlsub-test", 32, SCCs,
+                                         binarysub::make_variable(0, 32));
+
+  auto FrameNode = CG.createNode(Frame);
+  auto ArgNode = CG.createNode(F->getArg(0));
+  CG.FrameNoPolicyMerge = true;
+  EXPECT_FALSE(
+      CG.tryMergeVariablesForPolicy("unit-frame-guard", FrameNode, ArgNode,
+                                    "test"));
+  EXPECT_NE(binarysub::resolve_variable(FrameNode).get(),
+            binarysub::resolve_variable(ArgNode).get());
+  EXPECT_EQ(CG.FramePolicyMergesRefused, 1u);
   CG.releaseBinarysubState();
 }
 
@@ -838,8 +973,8 @@ TEST(MLsub, AnonymousPolymorphicBoundaryEvidenceIgnoresNames) {
   }
 
   auto Analyze = [&]() {
-    auto Rows = notdec::mlsub::analyzeAnonymousPolymorphicBoundaries(*M);
-    std::map<const llvm::Function *, notdec::mlsub::AnonymousPolyBoundaryEvidence>
+    auto Rows = notdec::mlsub::analyzeAllocatorBoundaries(*M);
+    std::map<const llvm::Function *, notdec::mlsub::AllocatorBoundaryEvidence>
         ByFunction;
     for (auto &Row : Rows) {
       ByFunction.emplace(Row.Function, std::move(Row));
