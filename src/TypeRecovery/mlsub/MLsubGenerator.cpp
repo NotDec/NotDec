@@ -4088,6 +4088,42 @@ BottomUpTiming ConstraintsGenerator::run() {
   return Timing;
 }
 
+namespace {
+
+// NOTDEC_MERGE_AUDIT: stderr (historical behaviour), the binarysub event sink,
+// or both.  Parsed once per process.
+enum class MergeAuditMode { Off, Stderr, EventLog, Both };
+
+MergeAuditMode parseMergeAuditMode() {
+  const char *Value = std::getenv("NOTDEC_MERGE_AUDIT");
+  if (Value == nullptr) {
+    return MergeAuditMode::Off;
+  }
+  const std::string Mode(Value);
+  if (Mode.empty() || Mode == "0" || Mode == "off") {
+    return MergeAuditMode::Off;
+  }
+  if (Mode == "eventlog") {
+    if (std::getenv("NOTDEC_EVENT_LOG") == nullptr) {
+      llvm::errs() << "Warning: NOTDEC_MERGE_AUDIT=eventlog needs "
+                      "NOTDEC_EVENT_LOG=<path>; falling back to stderr.\n";
+      return MergeAuditMode::Stderr;
+    }
+    return MergeAuditMode::EventLog;
+  }
+  if (Mode == "both") {
+    return MergeAuditMode::Both;
+  }
+  return MergeAuditMode::Stderr;
+}
+
+MergeAuditMode mergeAuditMode() {
+  static const MergeAuditMode Mode = parseMergeAuditMode();
+  return Mode;
+}
+
+} // namespace
+
 bool ConstraintsGenerator::configureConstraintContext(
     binarysub::ConstraintContext &Context) {
   bool HasHook = true;
@@ -4205,18 +4241,17 @@ bool ConstraintsGenerator::configureConstraintContext(
     } else if (Event.reason == binarysub::MergeReason::PolicyAuxiliary) {
       ++LocalSubtypeAuxiliaryMergeEvents;
     }
-    // NOTDEC_MERGE_AUDIT=1: log every variable merge with the IR values behind
+    // NOTDEC_MERGE_AUDIT: log every variable merge with the IR values behind
     // both sides.  Answers "which pair of program values did this merge put in
     // one type variable", including solver-driven merges that never go through
     // a frontend policy (see microsub2/logs 68/69).
-    if (std::getenv("NOTDEC_MERGE_AUDIT") != nullptr) {
-      auto Describe = [this](const SimpleType &Ty) {
-        std::string Text =
-            Ty ? binarysub::debug_string(Ty) : std::string("<null>");
-        if (Text.size() > 160) {
-          Text.resize(160);
-          Text += "...";
-        }
+    //   =1 / =stderr / any other value  stderr only (historical behaviour)
+    //   =eventlog                       the binarysub event sink, source=merge
+    //   =both                           both
+    //   =0 / =off                       disabled
+    const MergeAuditMode AuditMode = mergeAuditMode();
+    if (AuditMode != MergeAuditMode::Off) {
+      auto DescribeValues = [this](const SimpleType &Ty) {
         std::string Values;
         if (Ty != nullptr) {
           if (auto It = V2N.rev().find(Ty); It != V2N.rev().end()) {
@@ -4231,12 +4266,29 @@ bool ConstraintsGenerator::configureConstraintContext(
             }
           }
         }
+        return Values;
+      };
+      auto DescribeOwner = [this](const SimpleType &Ty) {
+        std::string Owner;
         if (Ty != nullptr) {
-          if (auto *Owner = getVariableOwningFunction(Ty)) {
-            Text += " owner=" + Owner->getName().str();
+          if (auto *Function = getVariableOwningFunction(Ty)) {
+            Owner = Function->getName().str();
           }
         }
-        return Text + " values=[" + Values + "]";
+        return Owner;
+      };
+      auto Describe = [&](const SimpleType &Ty) {
+        std::string Text =
+            Ty ? binarysub::debug_string(Ty) : std::string("<null>");
+        if (Text.size() > 160) {
+          Text.resize(160);
+          Text += "...";
+        }
+        const std::string Owner = DescribeOwner(Ty);
+        if (!Owner.empty()) {
+          Text += " owner=" + Owner;
+        }
+        return Text + " values=[" + DescribeValues(Ty) + "]";
       };
       if (std::getenv("NOTDEC_BIGCLASS_DIAG") != nullptr) {
         auto Root = binarysub::resolve_variable(Event.into);
@@ -4262,10 +4314,37 @@ bool ConstraintsGenerator::configureConstraintContext(
           }
         }
       }
-      llvm::errs() << "[merge-audit] reason="
-                   << std::string(binarysub::merge_reason_name(Event.reason))
-                   << " from=" << Describe(Event.from)
-                   << " into=" << Describe(Event.into) << "\n";
+      if (AuditMode != MergeAuditMode::EventLog) {
+        llvm::errs() << "[merge-audit] reason="
+                     << std::string(binarysub::merge_reason_name(Event.reason))
+                     << " from=" << Describe(Event.from)
+                     << " into=" << Describe(Event.into) << "\n";
+      }
+      if (AuditMode != MergeAuditMode::Stderr) {
+        // The sink already carries both ids and their full type text; the
+        // extra column adds the IR values behind them and the owners.
+        std::string Extra =
+            "reason=" + std::string(binarysub::merge_reason_name(Event.reason));
+        Extra += " from_values=[" + DescribeValues(Event.from) + "]";
+        Extra += " into_values=[" + DescribeValues(Event.into) + "]";
+        const std::string FromOwner = DescribeOwner(Event.from);
+        const std::string IntoOwner = DescribeOwner(Event.into);
+        if (!FromOwner.empty()) {
+          Extra += " from_owner=" + FromOwner;
+        }
+        if (!IntoOwner.empty()) {
+          Extra += " into_owner=" + IntoOwner;
+        }
+        // The merge already happened, so resolve_variable() would map both
+        // sides to the survivor.  Log the pre-merge ids instead.
+        auto PreMergeId = [](const SimpleType &Ty) -> long {
+          auto *Var = Ty ? Ty->getAsVariableState() : nullptr;
+          return Var != nullptr ? static_cast<long>(Var->id) : -1;
+        };
+        binarysub::event_log_with_identity(
+            binarysub::EventSource::Merge, "merge", PreMergeId(Event.from),
+            PreMergeId(Event.into), Event.from, Event.into, Extra);
+      }
     }
     if (MergeEval) {
       MergeEval->observeVariableMerged(Event);
