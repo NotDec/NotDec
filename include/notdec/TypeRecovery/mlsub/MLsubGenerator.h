@@ -42,6 +42,7 @@
 
 #include "TypeRecovery/mlsub/MLsubGraph.h"
 #include "TypeRecovery/mlsub/MergePolicyEval.h"
+#include "binarysub/EventLog.h"
 #include "binarysub/PNDiff.h"
 #include "binarysub/binarysub-core.h"
 #include "notdec-backends/Core/HTypeResult.h"
@@ -870,43 +871,24 @@ struct ConstraintsGenerator {
     assert(lhs != nullptr);
     assert(rhs != nullptr);
     const bool IRDerived = InsideIRVisit;
-    // Provenance logging (diagnostic): NOTDEC_PROV_TRACE_FRONTEND=<path>
-    // records every relation the frontend asks the solver to install, together
-    // with the IR instruction being visited (if any), so a derived relation's
-    // ancestry can be rooted at a frontend site.
-    if (const char *ProvPath = std::getenv("NOTDEC_PROV_TRACE_FRONTEND")) {
-      static FILE *ProvFile = std::fopen(ProvPath, "w");
-      static std::uint64_t ProvSeq = 0;
-      if (ProvFile != nullptr) {
-        auto ProvId = [](SimpleType T) -> long {
-          auto Root = binarysub::resolve_variable(T);
-          auto *VS = Root ? Root->getAsVariableState() : nullptr;
-          return VS != nullptr ? static_cast<long>(VS->id) : -1;
-        };
-        auto Sanitize = [](std::string S) {
-          for (char &C : S) {
-            if (C == '\t' || C == '\n' || C == '\r') {
-              C = ' ';
-            }
-          }
-          return S;
-        };
-        std::string Extra = "ir_derived=" + std::to_string(IRDerived ? 1 : 0);
-        if (CurrentVisitedInstruction != nullptr) {
-          std::string IS;
-          llvm::raw_string_ostream OS(IS);
-          CurrentVisitedInstruction->print(OS);
-          OS.flush();
-          Extra += " inst=" + IS;
-        }
-        std::fprintf(ProvFile, "%llu\tfrontend\t%ld\t%ld\t%s\t%s\t%s\n",
-                     static_cast<unsigned long long>(++ProvSeq), ProvId(lhs),
-                     ProvId(rhs),
-                     Sanitize(binarysub::debug_string(lhs)).c_str(),
-                     Sanitize(binarysub::debug_string(rhs)).c_str(),
-                     Sanitize(Extra).c_str());
-        std::fflush(ProvFile);
+    // Provenance logging (diagnostic): every relation the frontend asks the
+    // solver to install, together with the IR instruction being visited (if
+    // any), so a derived relation's ancestry can be rooted at a frontend site.
+    // Routed through the shared event sink (binarysub/EventLog.h): both the
+    // legacy NOTDEC_PROV_TRACE_FRONTEND and the unified NOTDEC_EVENT_LOG reach
+    // it; the site name stays "frontend" to keep the legacy column identical.
+    if (binarysub::event_log_enabled(binarysub::EventSource::Frontend,
+                                     "frontend")) {
+      std::string Extra = "ir_derived=" + std::to_string(IRDerived ? 1 : 0);
+      if (CurrentVisitedInstruction != nullptr) {
+        std::string IS;
+        llvm::raw_string_ostream OS(IS);
+        CurrentVisitedInstruction->print(OS);
+        OS.flush();
+        Extra += " inst=" + IS;
       }
+      binarysub::event_log(binarysub::EventSource::Frontend, "frontend", lhs,
+                           rhs, Extra);
     }
     // Diagnostic: NOTDEC_ADDSUBTYPE_WATCH=<id>[,<id>...] prints every edge
     // between two watched variable ids together with the IR instruction being
