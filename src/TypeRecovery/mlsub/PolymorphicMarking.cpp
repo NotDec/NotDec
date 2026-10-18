@@ -43,10 +43,7 @@ std::string polymorphicMarkingReportPath() {
 }
 
 bool polymorphicMarkingMarksAllocatorBoundaries() {
-  if (auto *Value = std::getenv("NOTDEC_POLY_MARK_ALLOCATOR_BOUNDARIES")) {
-    return std::string_view(Value) == "1";
-  }
-  return false;
+  return binarysub::env_flag("NOTDEC_POLY_MARK_ALLOCATOR_BOUNDARIES");
 }
 
 llvm::PreservedAnalyses
@@ -91,10 +88,8 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
   std::size_t WrapperMarked = 0;
   // Debug switch: NOTDEC_POLY_WRAPPER_DETECT=0 disables the generic wrapper
   // recognition (the marking itself is unchanged), so its cost can be isolated.
-  const bool WrapperDetect = [] {
-    const char *V = std::getenv("NOTDEC_POLY_WRAPPER_DETECT");
-    return V == nullptr || std::string_view(V) != "0";
-  }();
+  const bool WrapperDetect =
+      binarysub::env_flag("NOTDEC_POLY_WRAPPER_DETECT", true);
   if (WrapperDetect) {
     auto Strip = [](llvm::Value *V) -> llvm::Value * {
       while (V != nullptr) {

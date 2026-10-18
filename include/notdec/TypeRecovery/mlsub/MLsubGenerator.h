@@ -649,9 +649,8 @@ struct ConstraintsGenerator {
                      << Mode << "', using struct-pointer.\n";
       }
     }
-    if (auto *Enabled = std::getenv("NOTDEC_EARLY_CALL_INTERFACE_MERGE")) {
-      EnableEarlyCallInterfaceMerge = std::strcmp(Enabled, "1") == 0;
-    }
+    EnableEarlyCallInterfaceMerge =
+        binarysub::env_flag("NOTDEC_EARLY_CALL_INTERFACE_MERGE");
     // 20261010-155 隐式子类型消融（只对 level-0 / SCC0 生效，见 log 155）。
     if (auto *Mode = std::getenv("NOTDEC_IMPLICIT_SUBTYPE_ABLATION")) {
       if (std::strcmp(Mode, "merge-local") == 0) {
@@ -694,22 +693,16 @@ struct ConstraintsGenerator {
     // Default on: round one only merges nodes whose field evidence already
     // agrees, round two re-checks the rest once every call edge and field
     // access has been seen.  "=0" restores the single-round behaviour.
-    TwoRoundMerge = true;
-    if (auto *Enabled = std::getenv("NOTDEC_TWO_ROUND_MERGE")) {
-      TwoRoundMerge = std::strcmp(Enabled, "0") != 0;
-    }
+    TwoRoundMerge = binarysub::env_flag("NOTDEC_TWO_ROUND_MERGE", true);
     TwoRoundMergeDiag = binarysub::env_flag("NOTDEC_TWO_ROUND_DIAG");
     // Default on.  See frameOwnerOfValue: a stack region must not be unified
     // with an unrelated region.  "=0" restores the pre-guard behaviour.
-    if (auto *Enabled = std::getenv("NOTDEC_FRAME_NO_NONFRAME_MERGE")) {
-      FrameNoNonFrameMerge = std::strcmp(Enabled, "0") != 0;
-    }
-    if (auto *Enabled = std::getenv("NOTDEC_FRAME_NO_CROSS_FUNCTION_MERGE")) {
-      FrameNoCrossFunctionMerge = std::strcmp(Enabled, "0") != 0;
-    }
-    if (auto *Enabled = std::getenv("NOTDEC_FRAME_MARK_INCLUDES_LVARS")) {
-      FrameMarkIncludesLvars = std::strcmp(Enabled, "1") == 0;
-    }
+    FrameNoNonFrameMerge =
+        binarysub::env_flag("NOTDEC_FRAME_NO_NONFRAME_MERGE", true);
+    FrameNoCrossFunctionMerge =
+        binarysub::env_flag("NOTDEC_FRAME_NO_CROSS_FUNCTION_MERGE", true);
+    FrameMarkIncludesLvars =
+        binarysub::env_flag("NOTDEC_FRAME_MARK_INCLUDES_LVARS");
     // Relaxation of the veto condition: only an attributable non-frame object
     // counts as "provably not a stack region"; unknown addresses do not.
     FrameVetoKnownObjectOnly =

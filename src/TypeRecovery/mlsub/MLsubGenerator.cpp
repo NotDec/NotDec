@@ -426,10 +426,8 @@ bool hasBottomUpSubphaseTiming(const BottomUpSubphaseTiming &Timing) {
 // drops single entries); only the hand-curated per-binary policy stays opt-in.
 // NOTDEC_POLYMORPHIC_FUNCTIONS=1 enables the policy file.
 bool polyPolicyFileEnabled() {
-  static const bool Enabled = [] {
-    const char *Value = std::getenv("NOTDEC_POLYMORPHIC_FUNCTIONS");
-    return Value != nullptr && std::string_view(Value) == "1";
-  }();
+  static const bool Enabled =
+      binarysub::env_flag("NOTDEC_POLYMORPHIC_FUNCTIONS");
   return Enabled;
 }
 
@@ -7638,10 +7636,8 @@ ConstraintsGenerator::collectStructPtrSameStoreMergeCandidates() const {
 // target of one pointer variable are still unified into one type variable.
 // Only the exact string "1" disables the flow; unset keeps the default.
 static bool storeToLoadFlowDisabled() {
-  static const bool Disabled = [] {
-    const char *Value = std::getenv("NOTDEC_MEM_NO_STORE_TO_LOAD");
-    return Value != nullptr && std::string(Value) == "1";
-  }();
+  static const bool Disabled =
+      binarysub::env_flag("NOTDEC_MEM_NO_STORE_TO_LOAD");
   return Disabled;
 }
 
@@ -7653,10 +7649,8 @@ static bool storeToLoadFlowDisabled() {
 // logs 149 and the mktime_z example: 70 predicted fields on struct tm* where
 // 67 do not exist in the ground truth).
 static bool storeLoadTargetMergeDisabled() {
-  static const bool Disabled = [] {
-    const char *Value = std::getenv("NOTDEC_STORE_LOAD_NO_TARGET_MERGE");
-    return Value != nullptr && std::string(Value) == "1";
-  }();
+  static const bool Disabled =
+      binarysub::env_flag("NOTDEC_STORE_LOAD_NO_TARGET_MERGE");
   return Disabled;
 }
 

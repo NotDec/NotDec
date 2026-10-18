@@ -1094,21 +1094,100 @@ resolveValueSelectors(const llvm::Module &module,
   return resolved;
 }
 
+namespace {
+
+enum class RecoveryConfigKind { Flag, Value, File };
+
+struct RecoveryConfigSwitch {
+  const char *Name;
+  RecoveryConfigKind Kind;
+  bool Default; // Flag only: value when the variable is unset
+};
+
+// Every environment switch that can change the constraint graph, hence the
+// saved state.  Diagnostics and performance-only switches stay out on
+// purpose: changing them must not invalidate a checkpoint.  Add an entry here
+// whenever a new switch can change merge decisions or type output.
+const RecoveryConfigSwitch kRecoveryConfigSwitches[] = {
+    // Merge policy.
+    {"NOTDEC_LOCAL_SUBTYPE_MERGE_MODE", RecoveryConfigKind::Value, false},
+    {"NOTDEC_IMPLICIT_SUBTYPE_ABLATION", RecoveryConfigKind::Value, false},
+    {"NOTDEC_EARLY_CALL_INTERFACE_MERGE", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_TWO_ROUND_MERGE", RecoveryConfigKind::Flag, true},
+    {"NOTDEC_NO_REVERSE_EDGE_MERGE", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_ALLOW_SHALLOW_MERGE_CONFLICT", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_DISABLE_CALLSLOT_MERGE", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_SKIP_SLOT_MERGE_SLOTS", RecoveryConfigKind::Value, false},
+    {"NOTDEC_SKIP_SLOT_MERGE_TARGETS", RecoveryConfigKind::Value, false},
+    {"NOTDEC_SLOT_MERGE_IMPORT", RecoveryConfigKind::File, false},
+    // Frame guards.
+    {"NOTDEC_FRAME_NO_NONFRAME_MERGE", RecoveryConfigKind::Flag, true},
+    {"NOTDEC_FRAME_NO_CROSS_FUNCTION_MERGE", RecoveryConfigKind::Flag, true},
+    {"NOTDEC_FRAME_NO_POLICY_MERGE", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_FRAME_NO_REVERSE_MERGE", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_FRAME_VETO_KNOWN_OBJECT_ONLY", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_FRAME_MARK_INCLUDES_LVARS", RecoveryConfigKind::Flag, false},
+    // Evidence and layout.
+    {"NOTDEC_NO_FRAME_MEMBER_FIELDS", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_NO_PTRADD_FIELD_CONSTRAINT", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_NO_UINT_CONSTRAINTS", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_STORE_LOAD_NO_TARGET_MERGE", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_MEM_NO_STORE_TO_LOAD", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_MEM_PTR_SINGLE", RecoveryConfigKind::Value, false},
+    {"NOTDEC_LAYOUT_OVERLAP_MODE", RecoveryConfigKind::Value, false},
+    {"NOTDEC_IMPORT_SEMANTICS", RecoveryConfigKind::Value, false},
+    {"NOTDEC_ARG_ALIAS", RecoveryConfigKind::Value, false},
+    {"NOTDEC_RET_ALIAS", RecoveryConfigKind::Value, false},
+    {"NOTDEC_POINTER_ARGS", RecoveryConfigKind::Value, false},
+    {"NOTDEC_POINTER_RET", RecoveryConfigKind::Value, false},
+    // Polymorphism.  Summary/signature/extra-constraint files are covered by
+    // the parsed document hashes below.
+    {"NOTDEC_POLYMORPHIC_FUNCTIONS", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_POLY_FUNCS", RecoveryConfigKind::File, false},
+    {"NOTDEC_POLY_NAME_EXCLUDE", RecoveryConfigKind::Value, false},
+    {"NOTDEC_POLY_WRAPPER_DETECT", RecoveryConfigKind::Flag, true},
+    {"NOTDEC_DEFAULT_POLY", RecoveryConfigKind::Value, false},
+    {"NOTDEC_POLY_MONOMORPHIC", RecoveryConfigKind::Value, false},
+    {"NOTDEC_POLY_MARK_ALLOCATOR_BOUNDARIES", RecoveryConfigKind::Flag, false},
+    // Inputs.
+    {"NOTDEC_PNDIFF_POLICY_OVERRIDE", RecoveryConfigKind::File, false},
+    // Library constraint semantics.
+    {"NOTDEC_NO_INT_STRUCT_COEXIST", RecoveryConfigKind::Value, false},
+    {"NOTDEC_NO_INT_SIGN_COEXIST", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_NO_INT_VS_OTHER_COEXIST", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_NO_PRIM_PREFER_NONINT", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_STRICT_CONSTRAIN", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_SHALLOW_NO_INT_NAME_RELAX", RecoveryConfigKind::Flag, false},
+    {"BINARYSUB_MERGE_ONEWAY_REPLAY", RecoveryConfigKind::Flag, true},
+    {"BINARYSUB_PTR_WIDTH_VARIANTS", RecoveryConfigKind::Flag, false},
+    {"BINARYSUB_UNION_MEMBER_WIDTH", RecoveryConfigKind::Value, false},
+    {"BINARYSUB_FILTER_BULK_ORIGIN_FIELDS", RecoveryConfigKind::Value, false},
+};
+
+std::string recoveryConfigValue(const RecoveryConfigSwitch &Switch) {
+  switch (Switch.Kind) {
+  case RecoveryConfigKind::Flag:
+    return binarysub::env_flag(Switch.Name, Switch.Default) ? "1" : "0";
+  case RecoveryConfigKind::Value:
+    return environmentValue(Switch.Name);
+  case RecoveryConfigKind::File:
+    return hashOptionalFileEnvironment(Switch.Name);
+  }
+  return {};
+}
+
+} // namespace
+
 std::string checkpointConfigurationDigest(const MLsubRecovery &recovery) {
   std::ostringstream text;
   text << "binarysub_state_abi=" << kBinarysubStateABI << '\n';
   text << "pointer_size=" << recovery.getCheckpointPointerSize() << '\n';
   text << "merge_struct_ptr_load_store="
        << recovery.getCheckpointStructMergeEnabled() << '\n';
-  text << "default_poly=" << environmentValue("NOTDEC_DEFAULT_POLY") << '\n';
-  text << "local_subtype_merge="
-       << environmentValue("NOTDEC_LOCAL_SUBTYPE_MERGE_MODE") << '\n';
-  text << "early_call_interface_merge="
-       << environmentValue("NOTDEC_EARLY_CALL_INTERFACE_MERGE") << '\n';
-  text << "poly_file=" << hashOptionalFileEnvironment("NOTDEC_POLY_FUNCS")
-       << '\n';
-  text << "pndiff_policy="
-       << hashOptionalFileEnvironment("NOTDEC_PNDIFF_POLICY_OVERRIDE") << '\n';
+  for (const auto &Switch : kRecoveryConfigSwitches) {
+    text << "env." << Switch.Name << '=' << recoveryConfigValue(Switch)
+         << '\n';
+  }
   text << "summary_doc="
        << llvm::formatv("{0}", recovery.getCheckpointSummaryDoc()).str() << '\n';
   text << "signature_doc="
