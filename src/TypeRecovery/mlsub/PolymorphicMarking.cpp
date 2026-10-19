@@ -13,6 +13,7 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "binarysub/LogDir.h"
 #include "notdec/TypeRecovery/mlsub/AllocatorBoundaryAnalysis.h"
 #include "notdec/TypeRecovery/mlsub/MLsubGenerator.h"
 #include "notdec/TypeRecovery/mlsub/Metadata.h"
@@ -34,12 +35,14 @@ void writeOffsetList(llvm::raw_ostream &Out, const char *Key,
 } // namespace
 
 std::string polymorphicMarkingReportPath() {
-  if (auto *Value = std::getenv("NOTDEC_POLY_MARKING_REPORT")) {
-    if (*Value != '\0') {
-      return Value;
-    }
+  if (auto Path = binarysub::log_file_path("poly-marking.json")) {
+    return *Path;
   }
   return {};
+}
+
+bool polymorphicMarkingRecognitionOnly() {
+  return binarysub::env_flag("NOTDEC_POLY_MARKING_ONLY");
 }
 
 bool polymorphicMarkingMarksAllocatorBoundaries() {

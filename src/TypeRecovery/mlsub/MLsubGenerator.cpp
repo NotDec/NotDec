@@ -5,6 +5,7 @@
 #include "Passes/evm/SolidityPatternUtils.h"
 #include "notdec/TypeRecovery/mlsub/MLsubGenerator.h"
 #include "Utils/CallGraphDotInfo.h"
+#include "binarysub/LogDir.h"
 #include "binarysub/binarysub-core.h"
 #include "binarysub/binarysub-primitive-semantics.h"
 #include "binarysub/binarysub.h"
@@ -6219,9 +6220,9 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
     }
   }
   // External merge-strategy input.  Every candidate gets a stable key
-  // (target|slot|call-site); NOTDEC_SLOT_MERGE_EXPORT=<path> dumps them and
-  // NOTDEC_SLOT_MERGE_IMPORT=<path> reads "key<TAB>skip|apply" lines, so a merge
-  // set can be edited and replayed without rebuilding.
+  // (target|slot|call-site); NOTDEC_LOG_DIR + slot-merge-export.tsv dumps them
+  // and NOTDEC_SLOT_MERGE_IMPORT=<path> reads "key<TAB>skip|apply" lines, so a
+  // merge set can be edited and replayed without rebuilding.
   auto EntryKey = [](const CallSlotMergeEntry &E) {
     std::string K =
         (E.Target != nullptr && E.Target->hasName()) ? E.Target->getName().str()
@@ -6229,9 +6230,9 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
     K += "|" + E.Slot + "|" + E.Detail;
     return K;
   };
-  if (const char *Path = std::getenv("NOTDEC_SLOT_MERGE_EXPORT")) {
+  if (auto Path = binarysub::log_file_path("slot-merge-export.tsv")) {
     std::error_code EC;
-    llvm::raw_fd_ostream Out(Path, EC, llvm::sys::fs::OF_Append);
+    llvm::raw_fd_ostream Out(*Path, EC, llvm::sys::fs::OF_Append);
     if (!EC) {
       for (const auto &E : Entries) {
         Out << EntryKey(E) << "\tcandidate\t" << E.Policy << "\n";
@@ -8236,9 +8237,9 @@ void MLsubRecovery::runImpl() {
     markBuiltinPolymorphicBufferFunctions(M);
   }
 
-  // Recognition-only mode: PolymorphicMarkingPass has already written the
-  // per-function report, so stop before the call graph and the constraints.
-  if (!polymorphicMarkingReportPath().empty()) {
+  // Recognition-only mode: the report is written by the marking pass, and this
+  // switch stops the run before the call graph and the constraints.
+  if (polymorphicMarkingRecognitionOnly()) {
     return;
   }
 
@@ -9776,13 +9777,13 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   BulkOptions.diagnosticStopAfterGroups = getSimplifyStopAfterGroups();
   // 静态图分析探针：canonicalize 之前 dump roots 可达的引用图，用于
   // 折叠展开爆炸的预检（SCC/路径计数/节点贡献），见 logs/20260731-03。
-  if (const char *DumpPath = std::getenv("NOTDEC_DUMP_TYPE_GRAPH")) {
-    binarysub::dumpTypeGraph(Tys, DumpPath);
+  if (auto DumpPath = binarysub::log_file_path("type-graph.dot")) {
+    binarysub::dumpTypeGraph(Tys, *DumpPath);
   }
   // CompactType 层图探针：go1 构建 merged snapshot 时记录引用边，用于
   // 折叠展开爆炸的预检（见 logs/20260731-03）。
-  if (const char *DumpPath = std::getenv("NOTDEC_DUMP_COMPACT_GRAPH")) {
-    Ts.setCompactGraphDump(DumpPath);
+  if (auto DumpPath = binarysub::log_file_path("compact-graph.txt")) {
+    Ts.setCompactGraphDump(*DumpPath);
   }
   Timing.Prepare = finishGenTypesPhase(PhaseWallStart, PhaseCpuStart);
   reportGenTypesStage("prepare", Timing.Prepare);

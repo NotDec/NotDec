@@ -23,7 +23,6 @@
 | --- | --- |
 | `NOTDEC_SKIP_SLOT_MERGE_SLOTS` | 跳过整类槽：`ret`、`arg` |
 | `NOTDEC_SKIP_SLOT_MERGE_TARGETS` | 跳过指定目标函数（逗号分隔）的调用槽候选 |
-| `NOTDEC_SLOT_MERGE_EXPORT` | 把候选键 `目标函数|槽位|调用点` 导出到文件 |
 | `NOTDEC_SLOT_MERGE_IMPORT` | 读入 `键<TAB>skip|apply` 覆盖候选集 |
 | `NOTDEC_SLOT_MERGE_DIAG` | 打印事务化调用槽的逐条决定 |
 | `NOTDEC_SLOT_MERGE_DIAG2` | 打印每个候选条目；`=eventlog`/`=both` 送事件流（见 `NOTDEC_EVENT_LOG`） |
@@ -66,8 +65,8 @@
 | `NOTDEC_POLY_FUNCS` | 多态函数策略文件 |
 | `NOTDEC_POLY_NAME_EXCLUDE` | 从内置名单里排除的函数名（逗号分隔） |
 | `NOTDEC_POLY_WRAPPER_DETECT` | `=0` 关闭通用 wrapper 识别 |
-| `NOTDEC_POLY_MARKING_REPORT` | 识别报告输出路径；只识别、不做类型恢复 |
 | `NOTDEC_POLY_MARK_ALLOCATOR_BOUNDARIES` | 标记分配器边界 |
+| `NOTDEC_POLY_MARKING_ONLY` | `=1` 只做多态标记就停（不建调用图、不做类型恢复）；报告本身由 `NOTDEC_LOG_DIR` 控制 |
 | `NOTDEC_DEFAULT_POLY` | 默认当作多态的函数名单 |
 | `NOTDEC_POLY_MONOMORPHIC` | 指定多态函数里要按单态处理的位置 |
 | `NOTDEC_POLY_MONO_DIAG` | 打印单态化的判定过程 |
@@ -84,6 +83,7 @@
 | 变量 | 作用 |
 | --- | --- |
 | `NOTDEC_EVENT_LOG` | 统一事件流输出路径（8 列 TSV），配合 `NOTDEC_EVENT_FILTER` |
+| `NOTDEC_LOG_DIR` | 文件 dump 的输出目录；设了才写，文件名固定（见本节末说明） |
 | `NOTDEC_DIAG` | 诊断分类列表，逗号分隔：`stats`/`graph`/`simplify`/`timing`/`field-origins`；`=1`/`=all` 全开，未设/`=0` 关（详见本节末说明） |
 | `NOTDEC_MERGE_AUDIT` | 每次合并打印一行；`=eventlog`/`=both` 送事件流 |
 | `NOTDEC_BINARYSUB_TRACE` | 把库/前端的事件写成整句文本，放进 work-dir 的 `binarysub-trace.log`（给人读，不是 TSV） |
@@ -99,14 +99,14 @@
 | `NOTDEC_PHI_WATCH` | 打印指定 phi 节点的合并/类型信息 |
 | `NOTDEC_MALLOC_WRAPPER_DEBUG` | 打印分配器包装函数的识别过程 |
 | `NOTDEC_FIELD_ORIGINS` | 打印字段级 origin 覆盖（需 `BINARYSUB_ENABLE_FIELD_ORIGINS`） |
-| `NOTDEC_DUMP_TYPE_GRAPH` | 把类型图 dump 到指定路径 |
-| `NOTDEC_DUMP_COMPACT_GRAPH` | 把 CompactType 图 dump 到指定路径 |
 | `NOTDEC_FATNODE_DIAG` | 打印超大类型节点 |
 | `NOTDEC_FATNODE_MIN` | 超大节点的 bound 数阈值 |
 | `NOTDEC_FATNODE_FUNC` | 只在指定函数上做超大节点诊断 |
 | `NOTDEC_FATGROW_DIAG` | 打印节点膨胀的来源 |
 
 `NOTDEC_DIAG` 的分类：`stats`（按函数统计约束图规模）、`graph`（各阶段结束后的类型图规模）、`simplify`（简化/生成阶段的诊断输出，库侧慢路径也受它控制）、`timing`（约束求解阶段计时与计数）、`field-origins`（求解后还带 origin 的字段数，需 `BINARYSUB_ENABLE_FIELD_ORIGINS`）。取值大小写不敏感、可带空格；未列出的名字不生效；只换 gate，各类诊断的文本不变。
+
+`NOTDEC_LOG_DIR` 收拢了原来六个"输出到指定路径"的变量，文件名固定、不用再传路径：`canonical-types.txt`（原 `NOTDEC_DUMP_CANONICAL`）、`closure-stats.txt`（原 `NOTDEC_DUMP_CLOSURE_STATS`）、`compact-graph.txt`（原 `NOTDEC_DUMP_COMPACT_GRAPH`）、`type-graph.dot`（原 `NOTDEC_DUMP_TYPE_GRAPH`）、`poly-marking.json`（原 `NOTDEC_POLY_MARKING_REPORT`；旧变量同时会切到"只识别"模式，现在那一步由 `NOTDEC_POLY_MARKING_ONLY` 单独控制）、`slot-merge-export.tsv`（原 `NOTDEC_SLOT_MERGE_EXPORT`）。目录不存在会自动创建；建不出来只警告一次并跳过 dump，不影响类型恢复。输入类路径（`NOTDEC_SUMMARY_OVERRIDE`、`NOTDEC_SIGNATURE_OVERRIDE`、`NOTDEC_EXTRA_CONSTRAINTS`、`NOTDEC_POLY_FUNCS`、`NOTDEC_PNDIFF_POLICY_OVERRIDE`、`NOTDEC_SLOT_MERGE_IMPORT`）仍是显式路径；`NOTDEC_EVENT_LOG` 作为事件流也仍是显式路径。
 
 ## 其他 pass
 

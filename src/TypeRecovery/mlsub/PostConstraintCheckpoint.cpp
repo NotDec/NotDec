@@ -1145,6 +1145,7 @@ const RecoveryConfigSwitch kRecoveryConfigSwitches[] = {
     {"NOTDEC_DEFAULT_POLY", RecoveryConfigKind::Value, false},
     {"NOTDEC_POLY_MONOMORPHIC", RecoveryConfigKind::Value, false},
     {"NOTDEC_POLY_MARK_ALLOCATOR_BOUNDARIES", RecoveryConfigKind::Flag, false},
+    {"NOTDEC_POLY_MARKING_ONLY", RecoveryConfigKind::Flag, false},
     // Inputs.
     {"NOTDEC_PNDIFF_POLICY_OVERRIDE", RecoveryConfigKind::File, false},
     // Library constraint semantics.

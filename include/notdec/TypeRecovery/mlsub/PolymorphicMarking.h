@@ -37,13 +37,16 @@ private:
   MLsubRecovery &TR;
 };
 
-// The report switch: NOTDEC_POLY_MARKING_REPORT.
+// The report path: NOTDEC_LOG_DIR + poly-marking.json (fixed name).
 //
-// When it is set the pass writes one JSON object per named function with the
-// decision and the reason(s), and MLsubRecovery::run stops right after the
-// marking, so a recognition-only run never builds the call graph or the
-// constraints.
+// The path is empty when NOTDEC_LOG_DIR is unset, so no dump is written.
 std::string polymorphicMarkingReportPath();
+
+// NOTDEC_POLY_MARKING_ONLY=1 stops the recovery right after the marking pass,
+// so a recognition-only run never builds the call graph or the constraints.
+// This is a behaviour switch, not a dump switch: writing the report itself only
+// needs NOTDEC_LOG_DIR.
+bool polymorphicMarkingRecognitionOnly();
 
 // NOTDEC_POLY_MARK_ALLOCATOR_BOUNDARIES=1 additionally marks the functions the
 // allocator/raw-buffer boundary analysis reports with high confidence.
