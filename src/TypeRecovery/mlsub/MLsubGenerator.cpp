@@ -4307,7 +4307,8 @@ bool ConstraintsGenerator::configureConstraintContext(
         }
         return Text + " values=[" + DescribeValues(Ty) + "]";
       };
-      if (binarysub::env_flag("NOTDEC_BIGCLASS_DIAG")) {
+      if (binarysub::event_log_enabled(binarysub::EventSource::Frontend,
+                                       "big-class")) {
         auto Root = binarysub::resolve_variable(Event.into);
         auto *VS = Root ? Root->getAsVariableState() : nullptr;
         if (VS != nullptr && VS->upperBounds.size() >= 1000) {
@@ -4319,16 +4320,27 @@ bool ConstraintsGenerator::configureConstraintContext(
               Members.insert(Members.end(), Ent.second.begin(), Ent.second.end());
             }
           }
-          llvm::errs() << "[big-class] root=" << binarysub::debug_string(Root)
-                       << " ub=" << VS->upperBounds.size()
-                       << " values=" << Members.size() << "\n";
-          for (std::size_t I = 0; I < Members.size() && I < 60; ++I) {
-            llvm::errs() << "    v=" << toStableString(Members[I]);
-            if (auto *O = getExtValueFunction(Members[I])) {
-              llvm::errs() << " in=" << O->getName();
+          // One event per class; the per-value detail is folded into extra and
+          // capped, the overflow is marked "+N".
+          constexpr std::size_t MemberCap = 60;
+          std::string Extra = "ub=" + std::to_string(VS->upperBounds.size()) +
+                              " values=" + std::to_string(Members.size()) +
+                              " members=[";
+          for (std::size_t I = 0; I < Members.size() && I < MemberCap; ++I) {
+            if (I != 0) {
+              Extra += ",";
             }
-            llvm::errs() << "\n";
+            Extra += toStableString(Members[I]);
+            if (auto *O = getExtValueFunction(Members[I])) {
+              Extra += "@" + O->getName().str();
+            }
           }
+          Extra += "]";
+          if (Members.size() > MemberCap) {
+            Extra += " +" + std::to_string(Members.size() - MemberCap);
+          }
+          binarysub::event_log(binarysub::EventSource::Frontend, "big-class",
+                               Root, nullptr, Extra);
         }
       }
       if (AuditMode != MergeAuditMode::EventLog) {
@@ -13008,38 +13020,22 @@ void ConstraintsGenerator::MLsubVisitor::visitPHINode(PHINode &I) {
 }
 
 void ConstraintsGenerator::MLsubVisitor::handlePHINodes() {
-  static const char *PhiWatch = std::getenv("NOTDEC_PHI_WATCH");
   for (auto I : phiNodes) {
     auto P = cg.getNodeOrNull(I);
     for (long i = 0; i < I->getNumIncomingValues(); i++) {
       auto *Src = I->getIncomingValue(i);
       auto SrcVar = cg.getOrInsertNode(getExtValuePtr(Src, I, i));
-      if (PhiWatch != nullptr) {
-        auto Matches = [&](SimpleType T) {
-          auto Root = binarysub::resolve_variable(T);
-          auto *VS = Root ? Root->getAsVariableState() : nullptr;
-          if (VS == nullptr) {
-            return false;
-          }
-          std::stringstream WS(PhiWatch);
-          std::string Item;
-          while (std::getline(WS, Item, ',')) {
-            if (!Item.empty() &&
-                VS->id == static_cast<std::uint32_t>(std::stoul(Item))) {
-              return true;
-            }
-          }
-          return false;
-        };
-        if (Matches(P) || Matches(SrcVar)) {
-          llvm::errs() << "[phi-watch] fn="
-                       << I->getFunction()->getName()
-                       << " phi=" << toStableString(getExtValuePtr(I, I, -1))
-                       << " incoming[" << i
-                       << "]=" << toStableString(getExtValuePtr(Src, I, i))
-                       << " src=" << binarysub::debug_string(SrcVar)
-                       << " dst=" << binarysub::debug_string(P) << "\n";
-        }
+      // One event per incoming value; selecting a phi node is done with the
+      // event filter ("site=phi-watch;id=<vs#>").
+      if (binarysub::event_log_enabled(binarysub::EventSource::Frontend,
+                                       "phi-watch")) {
+        std::string Extra =
+            "fn=" + I->getFunction()->getName().str() +
+            " phi=" + toStableString(getExtValuePtr(I, I, -1)) +
+            " incoming=" + std::to_string(i) +
+            " src_value=" + toStableString(getExtValuePtr(Src, I, i));
+        binarysub::event_log(binarysub::EventSource::Frontend, "phi-watch",
+                             SrcVar, P, Extra);
       }
       cg.addSubtype(SrcVar, P);
     }

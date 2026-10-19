@@ -939,17 +939,18 @@ struct ConstraintsGenerator {
     if (FrameEdgeTrace) {
       traceFrameRelatedEdge("addSubtype", lhs, rhs);
     }
-    if (!IRDerived && binarysub::env_flag("NOTDEC_NON_IR_EDGE_TRACE")) {
+    if (!IRDerived && binarysub::event_log_enabled(
+                          binarysub::EventSource::Frontend, "non-ir-edge")) {
       auto NonIROwner = [&](SimpleType T) -> std::string {
         if (auto *O = getVariableOwningFunction(T)) {
           return O->getName().str();
         }
         return "<none>";
       };
-      llvm::errs() << "[non-ir-edge] " << binarysub::debug_string(lhs)
-                   << " owner=" << NonIROwner(lhs) << "  ->  "
-                   << binarysub::debug_string(rhs) << " owner=" << NonIROwner(rhs)
-                   << "\n";
+      std::string Extra = "lhs_owner=" + NonIROwner(lhs) +
+                          " rhs_owner=" + NonIROwner(rhs) + " ir_derived=0";
+      binarysub::event_log(binarysub::EventSource::Frontend, "non-ir-edge",
+                           lhs, rhs, Extra);
     }
     if (MergeEval) {
       MergeEval->observeAddSubtype();
@@ -1163,7 +1164,8 @@ struct ConstraintsGenerator {
     // Diagnostic: a pair of variables connected in BOTH directions is what the
     // solver's reverse_edge rule later merges; print the first such pairs so the
     // cascade's precondition can be traced back to a function/position.
-    if (binarysub::env_flag("NOTDEC_BIDIR_DIAG")) {
+    if (binarysub::event_log_enabled(binarysub::EventSource::Frontend,
+                                    "bidir-pair")) {
       auto L = binarysub::resolve_variable(lhs);
       auto R = binarysub::resolve_variable(rhs);
       auto *LV = L ? L->getAsVariableState() : nullptr;
@@ -1205,11 +1207,12 @@ struct ConstraintsGenerator {
             }
             return Out;
           };
-          llvm::errs() << "[bidir-edge] " << binarysub::debug_string(L)
-                       << " owner=" << OwnerName(L) << " values=[" << Values(L)
-                       << "]  <->  " << binarysub::debug_string(R)
-                       << " owner=" << OwnerName(R) << " values=[" << Values(R)
-                       << "] via=" << (IRDerived ? "ir" : "policy") << "\n";
+          std::string Extra = "lhs_owner=" + OwnerName(L) + " lhs_values=[" +
+                              Values(L) + "] rhs_owner=" + OwnerName(R) +
+                              " rhs_values=[" + Values(R) + "] via=" +
+                              (IRDerived ? "ir" : "policy");
+          binarysub::event_log(binarysub::EventSource::Frontend, "bidir-pair",
+                               L, R, Extra);
         }
       }
     }
