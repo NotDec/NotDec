@@ -33,7 +33,7 @@ wrapper 链、间接调用、改名的 allocator/deallocator 和剩余 raw memor
 每次运行使用新的 work/eval 目录。固定 8 线程以保持性能口径可比，并用仓库 LLVM 22 验证输出：
 
 ```bash
-NOTDEC_BINARYSUB_THREADS=8 /usr/bin/time -v ./build/bin/notdec \
+NOTDEC_THREADS=8 /usr/bin/time -v ./build/bin/notdec \
   input.ll --tr-level=2 --merge-struct-ptr-load-store \
   -g --fast-work-dir --work-dir=/tmp/notdec-source-project-work \
   --merge-eval-dir=/tmp/notdec-source-project-eval \

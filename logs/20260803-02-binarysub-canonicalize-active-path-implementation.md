@@ -37,7 +37,7 @@
 
 输入固定为 ngIRCd 的
 `/sn640/NotDec-Exp/Bench2/source-ir/ir/ngircd/ngircd.bc`，参数为
-`--tr-level=2 --merge-struct-ptr-load-store`，`NOTDEC_BINARYSUB_THREADS=8`。
+`--tr-level=2 --merge-struct-ptr-load-store`，`NOTDEC_THREADS=8`。
 原生 allocator 的完整 run 输出 SHA-256 前后均为
 `cc9adf69bca00bca6e168911ce690f135f5d6f9b408452400d7199fe21b15733`。
 
@@ -64,7 +64,7 @@ ngIRCd merge-eval 的语义指标保持不变：`typed_target_nodes=490`、
 - `./build-relwithdebinfo-20260731/binarysub`：全部通过，包括新增 active-path 回归。
 - ngIRCd 完整运行、SHA-256 比对，以及
   `llvm-22.1.0.obj/bin/opt -passes=verify -disable-output out.ll`：通过。
-- `NOTDEC_BINARYSUB_THREADS=1 ctest --test-dir build-relwithdebinfo-20260731 -R
+- `NOTDEC_THREADS=1 ctest --test-dir build-relwithdebinfo-20260731 -R
   '^notdec\\.type_recovery\\.llvm_ir\\.tr_level_2$' --output-on-failure`：通过。
 
 未固定线程数的本次 suite run 中，样例 22 的 field-1/field-2 回边与 golden 互换；

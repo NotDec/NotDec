@@ -113,8 +113,8 @@ def parse_extra_env(values: list[str]) -> dict[str, str]:
         name, env_value = value.split("=", 1)
         if not name.startswith("NOTDEC_"):
             raise ValueError(f"--env only accepts NOTDEC_* variables, got {name!r}")
-        if name == "NOTDEC_BINARYSUB_THREADS":
-            raise ValueError("use --threads instead of setting NOTDEC_BINARYSUB_THREADS")
+        if name == "NOTDEC_THREADS":
+            raise ValueError("use --threads instead of setting NOTDEC_THREADS")
         result[name] = env_value
     return result
 
@@ -164,7 +164,7 @@ def validate_baseline_config(
         "timeout_seconds": timeout_seconds,
         "extra_env": extra_env,
         "canonicalize_parallel": extra_env.get(
-            "NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL", "0"
+            "NOTDEC_CANONICALIZE_PARALLEL", "0"
         ),
         "strict_type_artifact_match": threads == 1,
     }
@@ -291,12 +291,12 @@ def run_case(
         key: value for key, value in os.environ.items() if not key.startswith("NOTDEC_")
     }
     environment["LC_ALL"] = "C"
-    environment["NOTDEC_BINARYSUB_THREADS"] = str(threads)
+    environment["NOTDEC_THREADS"] = str(threads)
     # Parallel canonicalization can assign different recursive groups under a
     # different worker schedule even with ASLR disabled. The smoke suite keeps
     # that stage serial so HType text is a useful A/B oracle; simplify still
     # uses --threads and remains representative for the current hotspot.
-    environment["NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL"] = "0"
+    environment["NOTDEC_CANONICALIZE_PARALLEL"] = "0"
     environment.update(extra_env)
 
     eprint(f"[start] {name}")
@@ -598,7 +598,7 @@ def main() -> int:
             "timeout_seconds": args.timeout_seconds,
             "extra_env": extra_env,
             "canonicalize_parallel": extra_env.get(
-                "NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL", "0"
+                "NOTDEC_CANONICALIZE_PARALLEL", "0"
             ),
             # Multi-threaded simplify can produce run-to-run HType text
             # variants even when merge-eval is identical. A single-thread run

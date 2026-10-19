@@ -1,13 +1,13 @@
 # 用户原始 prompt
 
-> 感觉不对，还是不要这样了。先把NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL改成默认开启吧，需要的时候再通过环境变量弄成单线程。同时把这里并行相关的配置记录到AGNENTS.md里面合适位置。我记得好像有一个什么ffplay，这个项目好像更小一些，如果是的话，看看能不能编译出这个项目的IR。
+> 感觉不对，还是不要这样了。先把NOTDEC_CANONICALIZE_PARALLEL改成默认开启吧，需要的时候再通过环境变量弄成单线程。同时把这里并行相关的配置记录到AGNENTS.md里面合适位置。我记得好像有一个什么ffplay，这个项目好像更小一些，如果是的话，看看能不能编译出这个项目的IR。
 >
 > 按这个做一下试试吧。另外ffplay缺依赖的话，能不能直接apt安装？
 
 # 背景
 
 binarysub 的 bulk simplify 已默认允许 oneTBB 并行，但 canonicalize 仍要求显式设置
-`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1`。这个 gate 最初用于隔离递归类型输出不稳定风险；
+`NOTDEC_CANONICALIZE_PARALLEL=1`。这个 gate 最初用于隔离递归类型输出不稳定风险；
 当前代码显式开启 8 线程后，两次 fortune 运行的 LLVM IR 和 HType 文本已经一致，可以重新评估默认值。
 
 现有 Bench2 源码级 IR 只有 fortune、wrk 和 vsftpd。wrk 会因 `x86_fp80` 尚未支持而退出，
@@ -27,8 +27,8 @@ LLVM 22 bitcode 和文本 IR。只收集 ffplay executable 自身的源码对象
 # 技术路线
 
 binarysub 只翻转 canonicalize 环境变量未设置时的默认值，不改变线程数优先级和并行算法。
-`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=0` 只关闭 canonicalize 并行；
-`NOTDEC_BINARYSUB_THREADS=1` 让 bulk simplify 整体使用单线程。评估命令显式设置线程数为 8。
+`NOTDEC_CANONICALIZE_PARALLEL=0` 只关闭 canonicalize 并行；
+`NOTDEC_THREADS=1` 让 bulk simplify 整体使用单线程。评估命令显式设置线程数为 8。
 
 验证同时覆盖默认并行、显式关闭 canonicalize、整体单线程和不带 TBB 的构建路径。对 fortune
 重复运行并比较 LLVM IR、HType 和评估结果，确认旧的递归类型文本不稳定没有重新出现。
@@ -59,7 +59,7 @@ libav 开发头替代源码树内的 6.1.1 头文件。构建成功后用 LLVM 2
 ## canonicalize 默认并行
 
 - `external/binarysub/src/binarysub.cpp:2510` 的 `canonicalize_parallel_enabled()` 改为环境变量
-  未设置或为空时返回 true，`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=0` 仍关闭并行。
+  未设置或为空时返回 true，`NOTDEC_CANONICALIZE_PARALLEL=0` 仍关闭并行。
 - `external/binarysub/src/binarysub-test.cpp:640` 的
   `test_bulk_simplify_parallel_options()` 增加默认开启和显式关闭的 trace 检查。
 - `AGENTS.md:278` 记录两个并行环境变量、bottom-up 串行边界和源码级评估固定 8 线程的命令。

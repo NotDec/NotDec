@@ -2,7 +2,7 @@
 
 ## 背景
 
-notdec 侧（另一个调用 binarysub 的类型推理实现）在 canonicalize 并行（TBB、`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL`）下复现三类问题：
+notdec 侧（另一个调用 binarysub 的类型推理实现）在 canonicalize 并行（TBB、`NOTDEC_CANONICALIZE_PARALLEL`）下复现三类问题：
 
 1. `PersistentSet.h:203` `assert(!isRecycled(released))`：节点被标记 RecycledMask 后又再次 release。
    两线程失败、单线程成功、两线程但关 canonicalize 并行成功。
@@ -71,7 +71,7 @@ builder 析构 `reusableVars`（releaseRoot）、`vars.insert(rhs->vars.begin(),
   剩余的 63 个栈全部为 TBB 调度器内部 + parallel_for 收尾（main 读结果 vs worker 写）形态，
   TSAN 不识别 TBB 的 join 同步，属既有噪声。
 - notdec 主项目（`/sn640/NotDec`）重建后，fortune 复现场景
-  `NOTDEC_BINARYSUB_THREADS=2 ./build/bin/notdec /sn640/NotDec-Exp/Bench2/source-ir/ir/fortune/fortune.ll --tr-level=2 --merge-struct-ptr-load-store -g --fast-work-dir --work-dir=/tmp/fortune-work-N -o /tmp/fortune-out-N.ll`：
+  `NOTDEC_THREADS=2 ./build/bin/notdec /sn640/NotDec-Exp/Bench2/source-ir/ir/fortune/fortune.ll --tr-level=2 --merge-struct-ptr-load-store -g --fast-work-dir --work-dir=/tmp/fortune-work-N -o /tmp/fortune-out-N.ll`：
   连续 5 次 exit=0，无断言，输出 IR 通过 LLVM 22 `llvm-as`。
 - 问题 2（`base->size() <= vars.size()`）未单独修复：按分析视为问题 1 的连带损坏（树节点被
   回收覆写后迭代错乱），修复根因后 fortune/单测均不再触发该断言。

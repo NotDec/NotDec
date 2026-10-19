@@ -65,7 +65,7 @@ final heap 在所有 current-inuse 样本为零时会输出空表，因此直接
 - `cmake --build build-relwithdebinfo-20260731 --target binarysub -j4`
 - `./build-relwithdebinfo-20260731/binarysub`
 - `cmake --build build-relwithdebinfo-20260731 --target notdec -j4`
-- `NOTDEC_BINARYSUB_THREADS=1 ctest --test-dir build-relwithdebinfo-20260731 -R '^notdec\\.type_recovery\\.llvm_ir\\.tr_level_2$' --output-on-failure`
+- `NOTDEC_THREADS=1 ctest --test-dir build-relwithdebinfo-20260731 -R '^notdec\\.type_recovery\\.llvm_ir\\.tr_level_2$' --output-on-failure`
 - ngIRCd 两次完整原生运行、SHA-256 比对、LLVM 22 `opt -passes=verify`
 - `git diff --check` 和 `git -C external/binarysub diff --check`
 

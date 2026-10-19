@@ -46,7 +46,7 @@ memcached 286+get 切片在 canonicalize 折叠展开阶段时间爆炸（>15min
 验证命令（全部 1 线程 frozen，`build/bin/notdec`）：
 
 ```bash
-NOTDEC_BINARYSUB_THREADS=1 NOTDEC_SUMMARY_OVERRIDE=test/type-recovery/realworld/support/memcached.source.summary.json \
+NOTDEC_THREADS=1 NOTDEC_SUMMARY_OVERRIDE=test/type-recovery/realworld/support/memcached.source.summary.json \
 NOTDEC_DUMP_COMPACT_GRAPH=/tmp/cg2-166.txt ./build/bin/notdec /tmp/slice-cum-assoc_init.bc \
   -o /tmp/out.ll --tr-level=2 --merge-struct-ptr-load-store --gen-work-dir --fast-work-dir \
   --work-dir=/tmp/wd --frozen-tr-input-ir

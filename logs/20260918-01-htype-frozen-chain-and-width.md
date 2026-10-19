@@ -33,7 +33,7 @@ freeze 一次约 2-20 s，replay 略快于 direct（省掉约束求解），因�
 ### 验收：frozen replay 必须复现 direct 运行
 
 11 个 coreutils case（O0/cat、O1/arch、O2/ls、O2/cp、Os/printf、O1/chmod、O2/chown、
-O3/dd、Os/csplit、O1/comm、O2/od），`NOTDEC_BINARYSUB_THREADS=1`，`--variants direct,baseline
+O3/dd、Os/csplit、O1/comm、O2/od），`NOTDEC_THREADS=1`，`--variants direct,baseline
 --repeat 2`：
 
 - direct vs frozen replay 平均 ΔF1 = **+0.0000**（11 个里只有 O1/chmod 一个 repeat 差 0.0003）；
@@ -51,7 +51,7 @@ O3/dd、Os/csplit、O1/comm、O2/od），`NOTDEC_BINARYSUB_THREADS=1`，`--varia
   会报 `SCC identity mismatch at index 0`（emit/replay 都带或都不带都可以重放）。
   真实评估链路（run_dataset_flow.py / run_bench2_flow.py）**不带** `--work-dir`，
   本链路同样不带，保持一致。根因未定位，已记录为待查。
-- `NOTDEC_BINARYSUB_THREADS` 影响报告文本但不影响 Eval2 指标（O0/wc 在 1/2/4/8 线程下
+- `NOTDEC_THREADS` 影响报告文本但不影响 Eval2 指标（O0/wc 在 1/2/4/8 线程下
   F1 都是 0.5835）；A/B 统一用 1 线程降低噪声。
 - `results/microsub2-*` 里的历史官方基线是 9/16 用**旧二进制**跑出来的，与当前二进制的
   direct 结果有偏差（181 个 case 平均 +0.0042，最大 +0.15）。A/B 必须用同一二进制现场跑，

@@ -331,9 +331,9 @@ checkpoint：它包含 type-recovery 入口的标量化等输入准备，可能�
 - `NOTDEC_SIGNATURE_OVERRIDE`：函数自身签名 upper-bound override，方向为
   `F <: OverrideTy`。
 - `NOTDEC_EXTRA_CONSTRAINTS`：冻结 stage-B IR 的额外 MLsub/PNDiff 约束。
-- `NOTDEC_BINARYSUB_THREADS`：bulk simplify 线程数；`1` 表示单线程，未设置时用
+- `NOTDEC_THREADS`：bulk simplify 线程数；`1` 表示单线程，未设置时用
   硬件线程数。
-- `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=0`：只关闭 oneTBB
+- `NOTDEC_CANONICALIZE_PARALLEL=0`：只关闭 oneTBB
   canonicalize 并行；更早的 bottom-up 约束生成仍是串行。若要在编译期关闭
   binarysub oneTBB，重新配置 CMake 并传
   `-DNOTDEC_ENABLE_BINARYSUB_PARALLEL=OFF`。

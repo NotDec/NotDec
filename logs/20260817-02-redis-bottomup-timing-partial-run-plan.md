@@ -182,8 +182,8 @@ NOTDEC_CONSTRAINT_DIAG=1 NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=1 \
 ```bash
 setarch x86_64 -R env \
   NOTDEC_SUMMARY_OVERRIDE=/tmp/redis-allocator-summary.json \
-  NOTDEC_BINARYSUB_THREADS=8 \
-  NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1 \
+  NOTDEC_THREADS=8 \
+  NOTDEC_CANONICALIZE_PARALLEL=1 \
   NOTDEC_CONSTRAINT_DIAG=1 \
   NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=100 \
   /usr/bin/time -v ./build-relwithdebinfo-20260731/bin/notdec \
@@ -398,8 +398,8 @@ deferred 阶段只有 `1.051 s`，必须与主 `scc_deferred_calls` 分开看。
 
 - 输入：`/tmp/notdec-source-ir-perf-redis-current-20260817/redis-server/work/02-mlsub-input.ll`，
   allocator override：`/tmp/redis-allocator-summary.json`。
-- `setarch x86_64 -R`、`NOTDEC_BINARYSUB_THREADS=8`、
-  `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1`，没有设置
+- `setarch x86_64 -R`、`NOTDEC_THREADS=8`、
+  `NOTDEC_CANONICALIZE_PARALLEL=1`，没有设置
   `NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS`；开启 `NOTDEC_CONSTRAINT_DIAG=1` 和
   `NOTDEC_SIMPLIFY_DIAG=1`。
 - 可执行文件：`build-relwithdebinfo-20260731/bin/notdec`。运行目录：

@@ -13,7 +13,7 @@
 ```bash
 LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2 \
 MALLOC_CONF='prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_final:true,prof_prefix:/tmp/jeprof.project' \
-NOTDEC_BINARYSUB_THREADS=8 ./build/bin/notdec input.ll -o /tmp/out.ll \
+NOTDEC_THREADS=8 ./build/bin/notdec input.ll -o /tmp/out.ll \
   --tr-level=2 --merge-struct-ptr-load-store -g --fast-work-dir \
   --work-dir=/tmp/notdec-work --merge-eval-dir=/tmp/notdec-eval
 ```
@@ -41,4 +41,4 @@ perf annotate --symbol=<function>
 跑批期间不要重链 `notdec`：运行进程保留旧 inode，perf 会显示 `(deleted)` 且无法解析符号；
 必须在启动前构建。指针键容器顺序受 ASLR 影响，会改变 HType 文本、merge decision、分组和总时间。
 复现 profile 用 `setarch x86_64 -R env ...`；设置
-`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=0` 也能去掉 canonicalize 调度变化，但性能代价要单独测。
+`NOTDEC_CANONICALIZE_PARALLEL=0` 也能去掉 canonicalize 调度变化，但性能代价要单独测。

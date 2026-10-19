@@ -36,7 +36,7 @@
 
 ### 当前 run 状态
 
-- 命令：`NOTDEC_SUMMARY_OVERRIDE=/tmp/redis-allocator-summary.json NOTDEC_BINARYSUB_THREADS=8 ... redis-server.ll --tr-level=2 --merge-struct-ptr-load-store -g --fast-work-dir`
+- 命令：`NOTDEC_SUMMARY_OVERRIDE=/tmp/redis-allocator-summary.json NOTDEC_THREADS=8 ... redis-server.ll --tr-level=2 --merge-struct-ptr-load-store -g --fast-work-dir`
 - **进程 pid 3707891 仍在后台运行**（setsid 隔离，日志 `/tmp/redis-opaque.log`，workdir `/tmp/redis-cons-work`）
 - 58 分钟：RSS 8.5GB 稳定（无 opaque 版同期约 10.5GB，内存略降）；30 个函数确认跳过（"Info: opaque body skipped for ..."）
 - 关键验证点：之前结构共享版在 114 分钟进入内存爬升（11→48GB）——**当前 run 是否避开/缓解**待观察

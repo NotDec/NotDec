@@ -118,7 +118,7 @@ bounds。因而本次没有扩大修改范围。
 
 ## 内存 profiling（阶段性完成）
 
-所有类型恢复采样都固定 `NOTDEC_BINARYSUB_THREADS=1`，使用修复后的
+所有类型恢复采样都固定 `NOTDEC_THREADS=1`，使用修复后的
 `build-relwithdebinfo-20260731/bin/notdec` 和 frozen stage-B bitcode。主动停止的 Heaptrack
 `total memory leaked` 只表示停止时仍存活，不能当作泄漏。
 

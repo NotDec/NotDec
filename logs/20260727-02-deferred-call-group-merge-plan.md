@@ -163,7 +163,7 @@ LLVM 指针直接查询已经改成 opaque handle 的 `PNIGraph`，在本次修�
 
 递增实验按 IR 定义顺序保留前 N 个函数体，并用 `--rglob='.*'` 保留完整模块的 611 个全局定义，
 避免 `llvm-extract` 把全局变成无 initializer 的声明。每档显式设置
-`NOTDEC_BINARYSUB_THREADS=8`，产物在 `/tmp/notdec-ffplay-scale-20260728/n<N>g/`：
+`NOTDEC_THREADS=8`，产物在 `/tmp/notdec-ffplay-scale-20260728/n<N>g/`：
 
 | 函数数 | 最后加入的函数 | 节点数 | 耗时 | 峰值 RSS | bad unions |
 | ---: | --- | ---: | ---: | ---: | ---: |

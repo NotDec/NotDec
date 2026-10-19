@@ -207,7 +207,7 @@ bound 子树，却各自重新遍历和求交。下一步候选是把 recVar bou
 
 ### 16 线程实验：负结果
 
-`NOTDEC_BINARYSUB_THREADS=16` 全量：61 分钟仍在跑（峰值 RSS 12.4GB），被
+`NOTDEC_THREADS=16` 全量：61 分钟仍在跑（峰值 RSS 12.4GB），被
 杀掉。8 线程 38-45 分钟。说明 wall 时间受单线程 coalesce 大 group 关键路径
 限制，加线程只增加并发内存，不缩短墙钟。保持 8 线程。
 

@@ -54,7 +54,7 @@ cmake --build build --target notdec -j4
 ctest --test-dir build -R notdec.type_recovery.llvm_ir.tr_level_2 --output-on-failure
 ./llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-byte-buffer-after.ll -o /tmp/notdec-byte-buffer-after.bc
 ./llvm-22.1.0.obj/bin/llvm-as /tmp/notdec-wide-field-cycle.ll -o /tmp/notdec-wide-field-cycle.bc
-env NOTDEC_BINARYSUB_THREADS=8 /usr/bin/time -v ./build/bin/notdec \
+env NOTDEC_THREADS=8 /usr/bin/time -v ./build/bin/notdec \
   /sn640/NotDec-Exp/Bench2/source-ir/ir/fortune/fortune.ll \
   --tr-level=2 --merge-struct-ptr-load-store -g --fast-work-dir \
   --work-dir=/tmp/notdec-byte-buffer-fortune.7DG5SG/work \

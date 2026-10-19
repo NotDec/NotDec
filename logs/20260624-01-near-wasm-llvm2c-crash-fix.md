@@ -25,10 +25,10 @@
 
 - `cmake --build ./build-release --target notdec -j4`
 - frozen MLsub 输入：
-  `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1 ./build-release/bin/notdec test-near/contract.wasm.notdec/02-mlsub-input.ll -o test-near/frozen-after-decl-fix.c --tr-level=2 --frozen-tr-input-ir --gen-work-dir`
+  `NOTDEC_CANONICALIZE_PARALLEL=1 ./build-release/bin/notdec test-near/contract.wasm.notdec/02-mlsub-input.ll -o test-near/frozen-after-decl-fix.c --tr-level=2 --frozen-tr-input-ir --gen-work-dir`
   结果：退出 0，生成 3.2M C，`elapsed=386.45 user=399.62 sys=5.79 maxrss=713272`。
 - 完整 wasm 输入：
-  `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1 ./build-release/bin/notdec test-near/contract.wasm -o test-near/contract.release-after-llvm2c-fix.c --tr-level=2 --gen-work-dir`
+  `NOTDEC_CANONICALIZE_PARALLEL=1 ./build-release/bin/notdec test-near/contract.wasm -o test-near/contract.release-after-llvm2c-fix.c --tr-level=2 --gen-work-dir`
   结果：退出 0，生成 3.2M C，`elapsed=407.23 user=420.26 sys=6.17 maxrss=732344`。
 
 ## 影响

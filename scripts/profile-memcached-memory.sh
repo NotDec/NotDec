@@ -40,7 +40,7 @@ Options:
   --output-dir PATH     Run directory (default: a new /tmp directory)
   --threshold-gib N     Stop at N GiB RSS; use 0 for no RSS limit
                         (default: ${DEFAULT_THRESHOLD_GIB})
-  --threads N           NOTDEC_BINARYSUB_THREADS value (default: ${DEFAULT_THREADS})
+  --threads N           NOTDEC_THREADS value (default: ${DEFAULT_THREADS})
   --native              Use the native allocator instead of jemalloc
   --frozen-tr-input-ir  Treat --input as --emit-tr-input-ir output
   --summary-override PATH
@@ -166,11 +166,11 @@ fi
 env_args=()
 if (( native_allocator )); then
   # Do not let an inherited profiling environment silently change the native run.
-  env_args+=("-u" "MALLOC_CONF" "-u" "LD_PRELOAD" "NOTDEC_BINARYSUB_THREADS=${threads}")
+  env_args+=("-u" "MALLOC_CONF" "-u" "LD_PRELOAD" "NOTDEC_THREADS=${threads}")
 else
   [[ -r "${JEMALLOC_PATH}" ]] || die "jemalloc is unavailable: ${JEMALLOC_PATH} (use --native)"
   env_args+=(
-    "NOTDEC_BINARYSUB_THREADS=${threads}"
+    "NOTDEC_THREADS=${threads}"
     "MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:30,prof_final:true,prof_prefix:${output_dir}/jeprof"
     "LD_PRELOAD=${JEMALLOC_PATH}"
   )

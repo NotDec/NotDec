@@ -26,7 +26,7 @@
 - `external/binarysub/src/binarysub.cpp:1332`：
   `canonicalizeType()` 的 closure、`go0`、`go1` 递归路径定期检查预算。
 - `external/binarysub/src/binarysub.cpp:2690`：
-  新增 `NOTDEC_BINARYSUB_CANONICALIZE_TIMEOUT_MS` 解析。
+  新增 `NOTDEC_CANONICALIZE_TIMEOUT_MS` 解析。
 - `external/binarysub/src/binarysub.cpp:2723`：
   `TypeSimplifier::bulkSimplifyDetailed()` 在 canonicalize 前设置预算；超时后跳过剩余 root。
 
@@ -60,6 +60,6 @@ cmake --build build --target notdec binarysub -j4
 顶层修复只影响 C 输出且关闭类型恢复的路径。
 
 binarysub timeout 默认关闭，正常类型恢复路径不应该改变；只有显式设置
-`NOTDEC_BINARYSUB_CANONICALIZE_TIMEOUT_MS` 时才会用不完整 canonicalize 结果继续后续流程。
+`NOTDEC_CANONICALIZE_TIMEOUT_MS` 时才会用不完整 canonicalize 结果继续后续流程。
 
 性能风险低。fortune 同口径时间没有明显退化。

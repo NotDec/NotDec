@@ -84,7 +84,7 @@ target_compile_definitions(binarysub_lib PUBLIC BINARYSUB_ENABLE_TBB_PARALLEL=1)
 运行层面再加环境变量控制线程数：
 
 ```text
-NOTDEC_BINARYSUB_THREADS=8
+NOTDEC_THREADS=8
 ```
 
 接口层面增加 options：
@@ -106,11 +106,11 @@ std::map<PolarVar, UTypePtr> bulkSimplify(const std::set<PolarVar> &types,
 规则：
 
 - 宏关闭：代码不 include oneTBB，不链接 TBB，永远走单线程。
-- `options.enableParallel=false`：强制单线程，不看 `NOTDEC_BINARYSUB_THREADS`。
+- `options.enableParallel=false`：强制单线程，不看 `NOTDEC_THREADS`。
 - `options.enableParallel=true`：允许并行。
 - `printDebug=true`：强制单线程，避免 debug 输出乱序。
 - 线程数优先级：
-  1. `NOTDEC_BINARYSUB_THREADS`
+  1. `NOTDEC_THREADS`
   2. `options.threadCount`
   3. `std::thread::hardware_concurrency()`
 - 最终线程数 <= 1：走单线程。
@@ -388,8 +388,8 @@ mutex/cv。这样不会把 TBB map 的锁带进递归调用里。
 性能：
 
 - `options.enableParallel=false` 不明显退化。
-- `NOTDEC_BINARYSUB_THREADS=1` 不明显退化。
-- `NOTDEC_BINARYSUB_THREADS=8` 下 fortune Debug 有明确 wall time 下降。
+- `NOTDEC_THREADS=1` 不明显退化。
+- `NOTDEC_THREADS=8` 下 fortune Debug 有明确 wall time 下降。
 - trace 中 `canonicalize_ms` / `struct_merge_ms` / total wall time 能解释变化。
 
 可维护性：
@@ -413,7 +413,7 @@ mutex/cv。这样不会把 TBB map 的锁带进递归调用里。
   - 增加 `BulkSimplifyOptions`。
   - `bulkSimplifyDetailed()` / `bulkSimplify()` 增加 options 参数，默认 `{}`，保持旧调用兼容。
 - `external/binarysub/src/binarysub.cpp`：
-  - 增加 `NOTDEC_BINARYSUB_THREADS` 解析。
+  - 增加 `NOTDEC_THREADS` 解析。
   - 增加 `resolve_bulk_simplify_thread_count()`。
   - `printDebug=true`、宏关闭、`enableParallel=false` 都强制 `threads=1`。
   - trace 的 `[simplify:bulk-begin]` 增加 `threads=` 和 `tbb=`。
@@ -554,7 +554,7 @@ cmake -S external/binarysub -B /tmp/binarysub-parallel-off-build -G Ninja \
   -DBINARYSUB_ENABLE_TBB_PARALLEL=OFF
 cmake --build /tmp/binarysub-parallel-off-build --target binarysub -j4
 /tmp/binarysub-parallel-off-build/binarysub
-NOTDEC_BINARYSUB_TRACE=1 NOTDEC_BINARYSUB_THREADS=8 ./build/bin/notdec \
+NOTDEC_BINARYSUB_TRACE=1 NOTDEC_THREADS=8 ./build/bin/notdec \
   test/type-recovery/realworld/cases/fortune.o3.wasm.ll \
   -o /tmp/notdec-fortune-parallel-trace.ll \
   --tr-level=2 \
@@ -572,7 +572,7 @@ NOTDEC_BINARYSUB_TRACE=1 NOTDEC_BINARYSUB_THREADS=8 ./build/bin/notdec \
 - binarysub standalone 默认并行构建和自测通过。
 - binarysub standalone 显式 `BINARYSUB_ENABLE_TBB_PARALLEL=OFF` 构建和自测通过。
 - fortune 直接运行通过，默认并行耗时 `elapsed=24.50s`，上一轮默认单线程 smoke 是 `28.39s`。
-- fortune 两次 `NOTDEC_BINARYSUB_THREADS=8` 输出稳定，`.ll` 和 `.htypes` 的 `diff -q` 均无差异。
+- fortune 两次 `NOTDEC_THREADS=8` 输出稳定，`.ll` 和 `.htypes` 的 `diff -q` 均无差异。
 - fortune trace 确认默认并行生效：
 
 ```text
@@ -1116,7 +1116,7 @@ Assertion `false && "Recursive entry finalized with a different compact bound"' 
 elapsed=1.57 rss_kb=157856
 ```
 
-`NOTDEC_BINARYSUB_THREADS=1` 也触发同一个 assert：
+`NOTDEC_THREADS=1` 也触发同一个 assert：
 
 ```text
 Assertion `false && "Recursive entry finalized with a different compact bound"' failed.
@@ -1183,12 +1183,12 @@ new bound: { a: u, b: t }
   - `getOrCreateRecursiveVar()` 在共享 `recursive` entry 上记录最小 `ownerIndex`。
   - `finalizeRecursiveVar()` 只有当前 root 是 entry owner 时才写 `entry.bound` 和 `recVars`。
   - `bulkSimplifyDetailed()` 的 canonicalize 阶段改成 vector result slot；只有设置
-    `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1` 时才用 TBB 并行这个阶段。
+    `NOTDEC_CANONICALIZE_PARALLEL=1` 时才用 TBB 并行这个阶段。
   - 默认路径仍串行 canonicalize，只保留已稳定的 bulk 后半段并行。
 
 为什么没有默认打开：
 
-- 设置 `NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1` 后，fortune 能跑通，性能明显更好。
+- 设置 `NOTDEC_CANONICALIZE_PARALLEL=1` 后，fortune 能跑通，性能明显更好。
 - 但 repeated fortune `.htypes` 仍不稳定。即使把 `rec_数字` 归一化，仍能看到递归折叠点不同导致的结构差异。
 - `.ll` 在简单归一化 `rec_数字` 后一致，说明当前更像是递归类型表示差异，不像明显语义错误。
 - 但当前 oracle 依赖文本结果，默认路径不能引入这种不稳定。
@@ -1220,7 +1220,7 @@ default ll repeat identical
 canonicalize 并行实验路径：
 
 ```bash
-NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=1 ./build/bin/notdec ...
+NOTDEC_CANONICALIZE_PARALLEL=1 ./build/bin/notdec ...
 ```
 
 代表性结果：
@@ -1247,8 +1247,8 @@ elapsed=16.13 rss_kb=201808
 ## 后续更新：canonicalize 默认并行
 
 2026-07-27 已在 binarysub `317b95a` 将 canonicalize 改为 oneTBB 构建下默认并行。
-`NOTDEC_BINARYSUB_CANONICALIZE_PARALLEL=0` 保留串行退路；线程数仍由
-`NOTDEC_BINARYSUB_THREADS` 控制。两次固定 8 线程的 fortune 输出一致，具体验证记录见
+`NOTDEC_CANONICALIZE_PARALLEL=0` 保留串行退路；线程数仍由
+`NOTDEC_THREADS` 控制。两次固定 8 线程的 fortune 输出一致，具体验证记录见
 `logs/20260727-01-canonicalize-default-and-ffplay-source-ir-plan.md`。
 
 # 实现记录：canonicalize 状态数 progress trace

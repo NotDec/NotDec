@@ -37,7 +37,7 @@ PNDiff 的 union 接口（`PNINode::unify` / `mergePNINodes(To, From)` / `mergeP
 - ctest `notdec.type_recovery.llvm_ir.tr_level_2`：19 passed / 3 failed
   （06_SimpleRecursive2 / 17_StackArray / 20_PointerAnalysisFieldCycle）；
   失败列表与改动前基线完全一致，为既有失败，非本次引入。
-- tmux 全量跑（4 线程，`NOTDEC_BINARYSUB_THREADS=4`，新 work/eval 目录）：
+- tmux 全量跑（4 线程，`NOTDEC_THREADS=4`，新 work/eval 目录）：
   PNDiff solve 阶段通过（wall 22:14 无崩溃；此前带 union-by-size 实验的
   tmux-fix1 在 8:54 崩溃）；最终 EXIT=137（OOM killer，峰值 62.3GB）——
   内存爆炸在 PNDiff 之后的 binarysub simplify/coalesce 阶段，是已知独立问题

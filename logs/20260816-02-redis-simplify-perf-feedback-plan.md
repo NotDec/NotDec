@@ -411,7 +411,7 @@ HType 文本只出现递归 binder/匿名编号等表示变化，人工检查未
 ### Redis 完整运行
 
 使用 checkpoint `/tmp/notdec-checkpoint-redis.g9ke4Q/state` 跳过 bottom-up/top-down，
-固定 `NOTDEC_BINARYSUB_THREADS=8`、开启 canonicalize 并行、关闭 ASLR，Redis 全部
+固定 `NOTDEC_THREADS=8`、开启 canonicalize 并行、关闭 ASLR，Redis 全部
 35 个 SCC（314,398 graph nodes、201,150 roots、252,955 values）已经完成：
 
 - 总 wall `1:13:40`，退出码 `0`，成功生成 `/tmp/redis-varvec-final-out-fixed.ll`

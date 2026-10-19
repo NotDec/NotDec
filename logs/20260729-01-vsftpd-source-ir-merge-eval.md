@@ -24,7 +24,7 @@
 
 ## 完整 IR
 
-命令固定使用 `NOTDEC_BINARYSUB_THREADS=8`、`--fast-work-dir`、
+命令固定使用 `NOTDEC_THREADS=8`、`--fast-work-dir`、
 `--merge-struct-ptr-load-store` 和 `--merge-eval-dir`。
 
 最终 42 项 override 下的完整重跑在 11 分 00.04 秒后超时：CPU 99%，

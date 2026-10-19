@@ -14,7 +14,7 @@ memcached 全量 401 函数类型推理 3 小时 RSS 线性涨到 41GB 未收敛
 
 ## 关键发现（2026-08-05 实测）
 
-干净机器、1 线程、串行重跑（`NOTDEC_BINARYSUB_THREADS=1`，tr-level=2，frozen stage-B IR，opaque-slabs summary override）：
+干净机器、1 线程、串行重跑（`NOTDEC_THREADS=1`，tr-level=2，frozen stage-B IR，opaque-slabs summary override）：
 
 | 切片 | 内容 | wall | 峰值 RSS | 结果 |
 |---|---|---|---|---|
