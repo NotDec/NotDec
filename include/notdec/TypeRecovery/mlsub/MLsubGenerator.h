@@ -1368,23 +1368,10 @@ struct ConstraintsGenerator {
       addSubtype(ResultNode, binarysub::make_record({}));
       return;
     }
-    // Experimental (NOTDEC_NO_FRAME_MEMBER_FIELDS=1): the shared "%frame"
-    // alloca is the function's raw stack storage, not a struct.  Today every
-    // "frame + constant" walk emits a member field on it, so the frame becomes
-    // "one record with one member per stack offset" (and the dynamic-index
-    // slices at 920/928/936... add more).  A later merge between that frame and
-    // an object then imports the whole stack slot table.  Skip the field for
-    // frame-relative bases: the named locals keep their own records through
-    // their own slices, and the pointer/number relation above is unchanged.
-    static const bool DropFrameFields = [] {
-      const char *Value = std::getenv("NOTDEC_NO_FRAME_MEMBER_FIELDS");
-      return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
-    }();
-    if (DropFrameFields &&
-        frameOwnerOfValue(extValueAsValue(basePtr)) != nullptr) {
-      addSubtype(ResultNode, binarysub::make_record({}));
-      return;
-    }
+    // Every "frame + constant" walk emits its member field: the frame is the
+    // function's stack layout, one member per accessed offset (AGENTS.md).  A
+    // merge between that frame and an object then imports the slot table; that
+    // is the intended modelling, not noise.
     std::vector<std::pair<std::string, SimpleType>> fields;
     fields.emplace_back(Off.str(), ResultNode);
     // The field cell below is this constraint's field evidence; name its

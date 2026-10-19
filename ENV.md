@@ -49,7 +49,6 @@
 
 | 变量 | 作用 |
 | --- | --- |
-| `NOTDEC_NO_FRAME_MEMBER_FIELDS` | `=1` 不为 `frame+偏移` 生成结构体字段（**只作诊断，不能用来降 FP**） |
 | `NOTDEC_NO_PTRADD_FIELD_CONSTRAINT` | `=1` 指针加法不再产生 record 字段约束 |
 | `NOTDEC_NO_UINT_CONSTRAINTS` | `=1` 常量不产生 uint 约束（避免 `uint <: sint`/record） |
 | `NOTDEC_STORE_LOAD_NO_TARGET_MERGE` | `=1` 关闭 store→load 的目标合并 |
