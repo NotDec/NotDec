@@ -85,7 +85,7 @@
 | `NOTDEC_LOG_DIR` | 文件 dump 的输出目录；设了才写，文件名固定（见本节末说明） |
 | `NOTDEC_DIAG` | 诊断分类列表，逗号分隔：`stats`/`graph`/`simplify`/`timing`/`field-origins`；`=1`/`=all` 全开，未设/`=0` 关（详见本节末说明） |
 | `NOTDEC_MERGE_AUDIT` | 每次合并打印一行；`=eventlog`/`=both` 送事件流 |
-| `NOTDEC_BINARYSUB_TRACE` | 把库/前端的事件写成整句文本，放进 work-dir 的 `binarysub-trace.log`（给人读，不是 TSV） |
+| `NOTDEC_TEXT_LOG` | 把库/前端的事件写成整句文本 `NOTDEC_LOG_DIR/binarysub-trace.log`（给人读、格式不保证）；`NOTDEC_TEXT_LOG_IDS=<id>[,<id>]` 只看指定变量 |
 | `NOTDEC_WATCH` / `NOTDEC_WATCH_SITES` | 按 vs# id 定点打印（定义在库侧；前端 hook/addsubtype 两个站点也受它控制），见 `external/binarysub/ENV.md` |
 | `NOTDEC_DEFERRED_DIAG` | 打印被推迟的调用子类型；`=<id>[,<id>]` 只看指定变量 |
 | `NOTDEC_TRACE_VALUE` | 打印名字含该子串的值在求解后挂的界 |

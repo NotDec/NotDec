@@ -207,7 +207,7 @@
 ### `binarysub-trace.log`
 
 - 来源：`external/binarysub`
-- 生成条件：仅当 `NOTDEC_BINARYSUB_TRACE=1` 且启用了 `--gen-work-dir` 时生成
+- 生成条件：`NOTDEC_TEXT_LOG=1` 且设了 `NOTDEC_LOG_DIR`（文本日志，给人读，格式不保证）；`NOTDEC_TEXT_LOG_IDS=<id>[,<id>]` 只看指定变量
 - 作用：记录 binarysub 与 `PNDiff` 的内部事件流，包含约束、extrude、simplify、
   `PNDiff` 加减法求解、unify 等 trace
 - 典型用途：当 `ValueTypes.txt` 只能看到“结果不对”，但还不知道“约束传播过程中哪一步歪了”时，继续往这个文件追
@@ -216,7 +216,7 @@
 
 - 来源：事务化的参数/返回值调用槽整组合并策略
 - 作用：记录每个目标函数的参数和返回槽候选、递归合并过程和最终决定，默认不需要开启
-  `NOTDEC_BINARYSUB_TRACE`
+  `NOTDEC_TEXT_LOG`
 - 生成条件：启用 `--gen-work-dir` 或 `--work-dir`
 - `transaction` / `target`：同一个目标函数的参数和返回槽共用事务编号；其中任一递归合并冲突时，
   该事务已执行的槽会一起回退

@@ -160,7 +160,7 @@ constexpr llvm::StringLiteral kMLsubInputAnchorFile =
     "02-mlsub-input.anchor.json";
 constexpr llvm::StringLiteral kPNDiffAnnotatedFile = "03-pndiff-final.ll";
 constexpr llvm::StringLiteral kBinarysubTraceFile = "binarysub-trace.log";
-constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_BINARYSUB_TRACE";
+constexpr llvm::StringLiteral kBinarysubTraceEnv = "NOTDEC_TEXT_LOG";
 constexpr llvm::StringLiteral kMallocWrappersFile = "MallocWrappers.txt";
 constexpr llvm::StringLiteral kPolymorphicBufferFunctionsFile =
     "PolymorphicBufferFunctions.txt";
@@ -8189,16 +8189,14 @@ void MLsubRecovery::runImpl() {
   WrotePNDiffOverrideWarningHeader = false;
 
   if (envFlagEnabled(kBinarysubTraceEnv)) {
-    if (!WorkDir) {
-      llvm::errs() << "Warning: " << kBinarysubTraceEnv
-                   << "=1 but no workdir is configured; skip "
-                   << kBinarysubTraceFile << ".\n";
-    } else {
-      BinarysubTraceFile = std::make_unique<std::ofstream>(
-          join(*WorkDir, kBinarysubTraceFile.str()), std::ios::trunc);
+    // Human-readable trace: fixed NAME, directory from NOTDEC_LOG_DIR (the same
+    // helper as the other dumps).  Its format is not a contract.
+    if (auto TracePath =
+            binarysub::log_file_path("binarysub-trace.log")) {
+      BinarysubTraceFile =
+          std::make_unique<std::ofstream>(*TracePath, std::ios::trunc);
       if (!*BinarysubTraceFile) {
-        llvm::errs() << "Cannot open " << kBinarysubTraceFile << " in "
-                     << *WorkDir << ".\n";
+        llvm::errs() << "Cannot open " << *TracePath << ".\n";
         std::abort();
       }
       *BinarysubTraceFile << "# binarysub / pndiff trace\n";
@@ -8206,6 +8204,10 @@ void MLsubRecovery::runImpl() {
                           << "=1\n";
       *BinarysubTraceFile << "# value/simple-type bindings use [mapping:*]\n";
       BinarysubTraceFile->flush();
+    } else {
+      llvm::errs() << "Warning: " << kBinarysubTraceEnv
+                   << "=1 but NOTDEC_LOG_DIR is not set; skip "
+                   << kBinarysubTraceFile << ".\n";
     }
   } else {
     BinarysubTraceFile.reset();
