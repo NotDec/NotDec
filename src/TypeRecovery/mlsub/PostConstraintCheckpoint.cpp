@@ -1128,9 +1128,6 @@ const RecoveryConfigSwitch kRecoveryConfigSwitches[] = {
     {"NOTDEC_FRAME_VETO_KNOWN_OBJECT_ONLY", RecoveryConfigKind::Flag, false},
     {"NOTDEC_FRAME_MARK_INCLUDES_LVARS", RecoveryConfigKind::Flag, false},
     // Evidence and layout.
-    {"NOTDEC_NO_PTRADD_FIELD_CONSTRAINT", RecoveryConfigKind::Flag, false},
-    {"NOTDEC_NO_UINT_CONSTRAINTS", RecoveryConfigKind::Flag, false},
-    {"NOTDEC_STORE_LOAD_NO_TARGET_MERGE", RecoveryConfigKind::Flag, false},
     {"NOTDEC_MEM_NO_STORE_TO_LOAD", RecoveryConfigKind::Flag, false},
     {"NOTDEC_MEM_PTR_SINGLE", RecoveryConfigKind::Value, false},
     {"NOTDEC_LAYOUT_OVERLAP_MODE", RecoveryConfigKind::Value, false},

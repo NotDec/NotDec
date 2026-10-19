@@ -7641,22 +7641,9 @@ static bool storeToLoadFlowDisabled() {
   return Disabled;
 }
 
-// Experiment switch NOTDEC_STORE_LOAD_NO_TARGET_MERGE=1: keep the library's
-// one-way store->load edge (a stored value constrains a later load of the same
-// pointer) but do not unify the two targets into a single type variable.  The
-// merge is stronger than the rule: it makes the write side and the read side
-// equal, so every value that reaches either side joins one bound set (see
-// logs 149 and the mktime_z example: 70 predicted fields on struct tm* where
-// 67 do not exist in the ground truth).
-static bool storeLoadTargetMergeDisabled() {
-  static const bool Disabled =
-      binarysub::env_flag("NOTDEC_STORE_LOAD_NO_TARGET_MERGE");
-  return Disabled;
-}
-
 std::vector<ConstraintsGenerator::StructPtrSlotMergeCandidate>
 ConstraintsGenerator::collectStructPtrLoadStoreMergeCandidates() const {
-  if (storeToLoadFlowDisabled() || storeLoadTargetMergeDisabled()) {
+  if (storeToLoadFlowDisabled()) {
     return {};
   }
   std::vector<StructPtrSlotMergeCandidate> Candidates;
@@ -11177,15 +11164,6 @@ static bool constantHasNoPointerTagMiddleBits(const ConstantInt &CI) {
   return !(Val & Mask);
 }
 
-// Experiment switch (NOTDEC_NO_UINT_CONSTRAINTS): stop emitting "uint"
-// primitive bounds at generation time.  Both the pcode-op signature table and
-// the overflow intrinsics then treat uint like the neutral "int" tag, so the
-// solver never creates a uint <: sint or uint <: record pair from them.
-static bool skipUintPrimitiveConstraints() {
-  static const bool Skip = binarysub::env_flag("NOTDEC_NO_UINT_CONSTRAINTS");
-  return Skip;
-}
-
 static std::optional<std::uint64_t> getUInt64Constant(const Value *V) {
   const auto *CI = dyn_cast_or_null<ConstantInt>(V);
   if (CI == nullptr || CI->getValue().getActiveBits() > 64) {
@@ -11235,9 +11213,6 @@ void ConstraintsGenerator::MLsubVisitor::visitExtractValueInst(
             // Overflow intrinsics return {value, overflow}; field 0 is the
             // arithmetic result and should stay a plain number.
             cg.setNonPointer(&I);
-            if (skipUintPrimitiveConstraints()) {
-              return;
-            }
             auto UintNode = binarysub::make_primitive("uint", cg.getSize(&I));
             cg.addSubtype(UintNode, N);
             return;
@@ -13421,9 +13396,6 @@ bool ConstraintsGenerator::PcodeOpType::addRetConstraint(
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(I);
-    if (skipUintPrimitiveConstraints()) {
-      return true;
-    }
     auto UintNode = binarysub::make_primitive("uint", cg.getSize(I));
     cg.addSubtype(UintNode, N);
     return true;
@@ -13459,9 +13431,6 @@ bool ConstraintsGenerator::PcodeOpType::addOpConstraint(
     return true;
   } else if (strEq(ty, "uint")) {
     cg.setNonPointer(getExtValuePtr(Op, I, Index));
-    if (skipUintPrimitiveConstraints()) {
-      return true;
-    }
     auto UintNode = binarysub::make_primitive(
         "uint", cg.getSize(getExtValuePtr(Op, I, Index)));
     cg.addSubtype(N, UintNode);

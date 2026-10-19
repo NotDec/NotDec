@@ -1352,22 +1352,6 @@ struct ConstraintsGenerator {
     if (isStackCanarySlotValue(result)) {
       return;
     }
-    // Experimental (NOTDEC_NO_PTRADD_FIELD_CONSTRAINT=1): an offset that comes
-    // from raw pointer arithmetic on an integer (PNDiff matched a
-    // ptrtoint/add/inttoptr walk, Origin="ptradd:...") is a cursor position in
-    // a byte walk, not evidence that the object has a member there.  Keep the
-    // pointer/number relation above and the object marker below, but do not
-    // create a member field on the base.  GEP-derived offsets ("gep:...") keep
-    // the old behaviour.  See microsub2/logs 11/12 (a layout-side cursor filter
-    // cannot work: the oversized fields have mixed origins) and 68/69.
-    static const bool DropPtrAddFields = [] {
-      const char *Value = std::getenv("NOTDEC_NO_PTRADD_FIELD_CONSTRAINT");
-      return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
-    }();
-    if (DropPtrAddFields && !Origin.starts_with("gep:")) {
-      addSubtype(ResultNode, binarysub::make_record({}));
-      return;
-    }
     // Every "frame + constant" walk emits its member field: the frame is the
     // function's stack layout, one member per accessed offset (AGENTS.md).  A
     // merge between that frame and an object then imports the slot table; that

@@ -49,9 +49,6 @@
 
 | 变量 | 作用 |
 | --- | --- |
-| `NOTDEC_NO_PTRADD_FIELD_CONSTRAINT` | `=1` 指针加法不再产生 record 字段约束 |
-| `NOTDEC_NO_UINT_CONSTRAINTS` | `=1` 常量不产生 uint 约束（避免 `uint <: sint`/record） |
-| `NOTDEC_STORE_LOAD_NO_TARGET_MERGE` | `=1` 关闭 store→load 的目标合并 |
 | `NOTDEC_MEM_NO_STORE_TO_LOAD` | `=1` 关闭 store→load 流动（保留读写拆分） |
 | `NOTDEC_MEM_PTR_SINGLE` | `=covariant|contravariant` 把指针两个半区退化成一个 Ptr |
 | `NOTDEC_LAYOUT_OVERLAP_MODE` | 字段切片重叠的放宽程度（0–4，默认 4） |
