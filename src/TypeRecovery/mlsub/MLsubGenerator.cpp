@@ -4783,10 +4783,7 @@ ConstraintsGenerator::frameOwnersOfNode(SimpleType Ty) const {
 // frame-derived one.  Answers "which merge was refused, and was it a bad value
 // poisoning an otherwise legitimate merge".
 static bool frameVetoDiagEnabled() {
-  static const bool Enabled = [] {
-    const char *Value = std::getenv("NOTDEC_FRAME_VETO_DIAG");
-    return Value != nullptr && Value[0] != '\0' && Value[0] != '0';
-  }();
+  static const bool Enabled = binarysub::env_flag("NOTDEC_FRAME_VETO_DIAG");
   return Enabled;
 }
 
@@ -9824,11 +9821,8 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   // the solver keeps on VariableState bounds; reading them on demand keeps
   // this O(#variables).
   const bool WantOriginTrace = binarysub::env_flag("NOTDEC_FIELD_ORIGINS");
-  const char *BulkPolicyEnv =
-      std::getenv("BINARYSUB_FILTER_BULK_ORIGIN_FIELDS");
   const bool WantBulkPolicy =
-      BulkPolicyEnv != nullptr && BulkPolicyEnv[0] != '\0' &&
-      BulkPolicyEnv[0] != '0';
+      binarysub::env_flag("BINARYSUB_FILTER_BULK_ORIGIN_FIELDS");
   if (WantOriginTrace || WantBulkPolicy) {
     using VarStatePtr = decltype(std::declval<SimpleType>()
                                  ->getAsVariableState());

@@ -1,3 +1,4 @@
+#include "binarysub/Env.h"
 #include "Passes/evm/SolidityPatternUtils.h"
 #include "TypeRecovery/mlsub/Metadata.h"
 
@@ -620,10 +621,8 @@ bool markPolymorphicHelpers(Module &M) {
     // through one of its own formal offsets, with that offset actually varying
     // across call sites, is generic in the let-polymorphism sense.  Everything
     // else stays monomorphic.
-    static const bool StrictPoly = [] {
-      const char *Env = std::getenv("NOTDEC_EVM_POLY_STRICT");
-      return Env != nullptr && Env[0] != '0';
-    }();
+    static const bool StrictPoly =
+        binarysub::env_flag("NOTDEC_EVM_POLY_STRICT");
     if (StrictPoly && !VaryingOffsets) {
       continue;
     }

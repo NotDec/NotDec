@@ -15,6 +15,7 @@
 // calldata view and the calldata.index annotations -- means every later EVM
 // pass sees the flattened shape, so the annotations land on the absolute
 // offsets.
+#include "binarysub/Env.h"
 #include "Passes/evm/SolidityPatternUtils.h"
 
 #include <llvm/ADT/SmallVector.h>
@@ -40,8 +41,7 @@ namespace notdec::passes::evm {
 namespace {
 
 bool helperInliningDiagnosticsEnabled() {
-  const char *Value = std::getenv("NOTDEC_EVM_HELPER_INLINE_DIAG");
-  return Value != nullptr && Value[0] != '\0' && std::strcmp(Value, "0") != 0;
+  return binarysub::env_flag("NOTDEC_EVM_HELPER_INLINE_DIAG");
 }
 
 // Public entries read calldata by definition, so they cannot be the seed of

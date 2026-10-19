@@ -1,6 +1,7 @@
 // MemsetStoreFuser: fold the scalar stores that surround an IDA-recognised
 // memset into that memset.  Rationale and evidence: microsub2/logs 66.
 
+#include "binarysub/Env.h"
 #include "Passes/MemOpMatcher.h"
 
 #include <llvm/ADT/SmallVector.h>
@@ -173,10 +174,8 @@ bool fuseStoresIntoMemset(Function &F, CallInst &MS) {
 
 PreservedAnalyses MemsetStoreFuser::run(Function &F,
                                         FunctionAnalysisManager &) {
-  static const bool Enabled = [] {
-    const char *Value = std::getenv("NOTDEC_DISABLE_MEMSET_STORE_FUSER");
-    return Value == nullptr || Value[0] == '\0' || Value[0] == '0';
-  }();
+  static const bool Enabled =
+      !binarysub::env_flag("NOTDEC_DISABLE_MEMSET_STORE_FUSER");
   if (!Enabled) {
     return PreservedAnalyses::all();
   }
