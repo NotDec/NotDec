@@ -895,9 +895,8 @@ struct ConstraintsGenerator {
     // Provenance logging (diagnostic): every relation the frontend asks the
     // solver to install, together with the IR instruction being visited (if
     // any), so a derived relation's ancestry can be rooted at a frontend site.
-    // Routed through the shared event sink (binarysub/EventLog.h): both the
-    // legacy NOTDEC_PROV_TRACE_FRONTEND and the unified NOTDEC_EVENT_LOG reach
-    // it; the site name stays "frontend" to keep the legacy column identical.
+    // Routed through the shared event sink (binarysub/EventLog.h), which writes
+    // the 8-column NOTDEC_EVENT_LOG stream; the site name stays "frontend".
     if (binarysub::event_log_enabled(binarysub::EventSource::Frontend,
                                      "frontend")) {
       std::string Extra = "ir_derived=" + std::to_string(IRDerived ? 1 : 0);
