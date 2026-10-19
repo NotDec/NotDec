@@ -85,7 +85,7 @@
 | --- | --- |
 | `NOTDEC_EVENT_LOG` | 统一事件流输出路径（8 列 TSV），配合 `NOTDEC_EVENT_FILTER` |
 | `NOTDEC_MERGE_AUDIT` | 每次合并打印一行；`=eventlog`/`=both` 送事件流 |
-| `NOTDEC_BINARYSUB_TRACE` | 把库/前端的散文事件写进 work-dir 的 `binarysub-trace.log` |
+| `NOTDEC_BINARYSUB_TRACE` | 把库/前端的事件写成整句文本，放进 work-dir 的 `binarysub-trace.log`（给人读，不是 TSV） |
 | `NOTDEC_WATCH` / `NOTDEC_WATCH_SITES` | 按 vs# id 定点打印（定义在库侧；前端 hook/addsubtype 两个站点也受它控制），见 `external/binarysub/ENV.md` |
 | `NOTDEC_BIGCLASS_DIAG` | 打印 upper 界 ≥1000 的合并类 |
 | `NOTDEC_DEFERRED_DIAG` | 打印被推迟的调用子类型；`=<id>[,<id>]` 只看指定变量 |
