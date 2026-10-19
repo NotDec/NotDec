@@ -117,7 +117,7 @@ chunk_push_oversized::arg0 等，chunk*）并到了一起——递归 SCC 里按
 
 ## 复验命令
 
-- lighttpd：`NOTDEC_THREADS=8 NOTDEC_SIMPLIFY_DIAG=1
+- lighttpd：`NOTDEC_THREADS=8 NOTDEC_DIAG=simplify
   NOTDEC_CONVERT_PROGRESS=1 ... /tmp/bench2-src/lighttpd.ll -o
   /tmp/out-lighttpd-perroot3.ll --tr-level=2 --merge-struct-ptr-load-store -g
   --fast-work-dir --work-dir=/tmp/tr-lighttpd-perroot3

@@ -98,7 +98,7 @@ allocator boundary、`VarOrigins` 诊断输出和 `PersistentSet` 热点仍作�
   lighttpd 65.41s/916MiB，bad_unions 20→19。
 - Redis 全量（HEAD，21 SCC）：wall 40:50、峰值 RSS 24.0GiB（minlevel 基线 19:16/20.1GiB）。
   HType 产物比 minlevel 更小（合并更密），退出码 0、verifier 通过。
-- 带 `NOTDEC_SIMPLIFY_DIAG` 复跑确认：SCC0（level-0 主 SCC）bulk 阶段 2091.9s，占全部
+- 带 `NOTDEC_DIAG=simplify` 复跑确认：SCC0（level-0 主 SCC）bulk 阶段 2091.9s，占全部
   SCC bulk 的 99.994%；尾部 SCC（含合并出的 SCC3=16 allocator）合计仅 ~131ms。
 
 ### 根因调查（checkpoint 图逐字节解析）

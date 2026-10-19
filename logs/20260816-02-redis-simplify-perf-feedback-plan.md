@@ -120,7 +120,7 @@ simplify 展开计数到 `go_calls=7,000,000`，峰值 RSS 为 `44,479,916 KiB`�
 
 在 `external/binarysub/src/binarysub.cpp` 的 `coalesceCompactType()` 两个跨 arena
 memo 查重点，曾加入仅限单次调用生命周期的 `(memo CompactType*, local CompactType*)`
-精确比较缓存，并用 `NOTDEC_SIMPLIFY_DIAG` 记录命中率。memcached 快速 A/B 结果：
+精确比较缓存，并用 `NOTDEC_DIAG=simplify` 记录命中率。memcached 快速 A/B 结果：
 
 - 8 threads：旧版 `22.13s/396.3 MiB`，实验版 `22.89s/398.2 MiB`，wall `+3.4%`，
   equality lookup 仅 16 次、命中 1 次，merge-eval 一致。
@@ -155,7 +155,7 @@ memo 查重点，曾加入仅限单次调用生命周期的 `(memo CompactType*,
 有 80,111 个 simplify group，适合验证小样例看不到的跨 arena 比较复用。
 
 使用旧版和之前保留的 equality-cache 实验 binary，均固定 `jobs=1`、`threads=8`、
-`NOTDEC_SIMPLIFY_DIAG=1`，结果如下：
+`NOTDEC_DIAG=simplify`，结果如下：
 
 - 首轮旧版 `88.88s/1911.5 MiB`、实验版 `76.70s/1414.9 MiB`，但旧版复跑为
   `78.13s/1355.8 MiB`，说明首轮是运行离群值。
@@ -223,7 +223,7 @@ Redis PathMemo 诊断发现，巨型 group 的单 record 最多有 6K-10K 个变
 实现位于 `external/binarysub/src/binarysub.cpp`：
 
 - `PathMemoDiagnostics` 和 `dumpPathMemoDiagnostics()`（约第 4927-4974 行）在
-  `NOTDEC_PATH_MEMO_DIAG` / `NOTDEC_SIMPLIFY_DIAG` 下记录 record、变体、集合
+  `NOTDEC_PATH_MEMO_DIAG` / `NOTDEC_DIAG=simplify` 下记录 record、变体、集合
   规模与成员查询。
 - `TypeSimplifier::coalesceCompactType()` 的 PathMemo lookup（约第 5183-5345 行）
   每个 record 只计算一次 `Path ∩ SubtreeKeys` 的大小和首键。零/单键

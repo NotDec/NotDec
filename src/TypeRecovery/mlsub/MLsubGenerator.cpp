@@ -69,6 +69,10 @@ namespace notdec::mlsub {
 
 static bool isEVMModule(const llvm::Module &M);
 
+bool diagEnabled(llvm::StringRef Name) {
+  return binarysub::diag_enabled(Name.str().c_str());
+}
+
 // Ablation switch NOTDEC_MEM_PTR_SINGLE=covariant|contravariant: keep only a
 // single pointer parameter.  Every memory access then contributes the accessed
 // type to that one slot instead of to a separate read or write half, so the
@@ -6153,7 +6157,7 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
       }
     }
   }
-  if (binarysub::env_flag("NOTDEC_GRAPH_SIZE_DIAG")) {
+  if (diagEnabled("graph")) {
     binarysub::emit_type_graph_summary("pre-policy");
     llvm::errs() << "[graph-size] v2n=" << CG.V2N.rev().size()
                  << " decisions=" << CG.CallSlotMergeDecisions.size() << "\n";
@@ -9263,8 +9267,7 @@ void MLsubRecovery::applyExtraConstraints(ConstraintsGenerator &G,
 }
 
 void MLsubRecovery::bottomUpPhase() {
-  const bool ConstraintDiag =
-      binarysub::env_flag("NOTDEC_CONSTRAINT_DIAG");
+  const bool ConstraintDiag = diagEnabled("timing");
   std::optional<BottomUpTiming> TotalTiming;
   static constexpr const char *StageNames[] = {
       "function_nodes",
@@ -9370,8 +9373,8 @@ void MLsubRecovery::bottomUpPhase() {
     ActiveBottomUpPostSummaryContext = false;
 
     // 函数内部约束生成完、跨函数调用边未连接：按函数统计约束图规模，
-    // 用于评估哪些函数把图撑大。NOTDEC_CONSTRAINT_STATS=1 开启。
-    if (binarysub::env_flag("NOTDEC_CONSTRAINT_STATS")) {
+    // 用于评估哪些函数把图撑大。NOTDEC_DIAG=stats 开启。
+    if (diagEnabled("stats")) {
       G->emitFunctionConstraintStats();
     }
 
@@ -9715,7 +9718,7 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
                                unsigned PointerSizeBytes, bool SolveGlobals,
                                ExtValueLabelCache *DebugLabelCache) {
   const bool GenTypesDiag =
-      binarysub::env_flag("NOTDEC_SIMPLIFY_DIAG") ||
+      diagEnabled("simplify") ||
       std::getenv(kSimplifyStopAfterGroupsEnv.data()) != nullptr;
   GenTypesTiming Timing;
   auto PhaseWallStart = GenTypesClock::now();
@@ -9916,7 +9919,7 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
 #ifdef BINARYSUB_ENABLE_FIELD_ORIGINS
   // Field-origin coverage: how many record fields still carry a stamped
   // origin after solving/merging.  Gated so it costs nothing unless asked for.
-  if (binarysub::env_flag("NOTDEC_FIELD_ORIGIN_DIAG")) {
+  if (diagEnabled("field-origins")) {
     std::set<const binarysub::TypeNode *> Seen;
     std::size_t Records = 0;
     std::size_t Fields = 0;
@@ -10302,7 +10305,7 @@ void MLsubRecovery::solveAndLowerTypes() {
   ExtValueLabelCache *DebugLabelCache =
       notdec::getWorkDirOpt() ? &DebugValueLabels : nullptr;
   const bool GenTypesDiag =
-      binarysub::env_flag("NOTDEC_SIMPLIFY_DIAG");
+      diagEnabled("simplify");
   std::optional<GenTypesTiming> TotalTiming;
   for (std::size_t Ind = 0; Ind < AG.AllSCCs.size(); ++Ind) {
     auto &Data = AG.AllSCCs.at(Ind);

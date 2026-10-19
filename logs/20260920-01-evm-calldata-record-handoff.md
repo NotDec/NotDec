@@ -179,7 +179,7 @@ bool shouldMarkPolymorphicFunction(Function &F) {
   helper-only 下同 case 约 1 秒、RSS 65MB；
 - 前 50 秒 RSS 519MB→844MB 后**平台化**；
 - 调用图**无环**（25 函数、18 个带 calldata、0 cycle），排除源级递归；
-- `NOTDEC_CONSTRAINT_DIAG=1`：SCC 自底向上阶段正常完成（`bottom_up_done=42/42`，
+- `NOTDEC_DIAG=timing`：SCC 自底向上阶段正常完成（`bottom_up_done=42/42`，
   各子阶段 `wall_ms≈0`），日志停在 post-summary 三条 merge policy 打印之后；
 - perf（`perf record -F 199 -g`）self 占比：
   `binarysub::skip_cached_or_materialized_variable_edge` **62.4%**、
@@ -205,8 +205,8 @@ bool shouldMarkPolymorphicFunction(Function &F) {
    `constraintTasksEnqueued` / `maxConstraintWorklistDepth` / `directVariableEdgeFastPathHits`、
    （d）merge policy 轮次与合并数、（e）`Cache` 大小。
    跑 entry 变体的 24259 2-3 分钟：**数字持续增长 = 实例化/建图不收敛；数字稳定 = 重复传播不收敛**。
-   （现有 env：`NOTDEC_CONSTRAINT_DIAG`、`NOTDEC_CONSTRAINT_STATS`、`NOTDEC_SLOT_MERGE_DIAG`、
-   `NOTDEC_SIMPLIFY_DIAG`、`NOTDEC_CONVERT_PROGRESS`，可先复用。）
+   （现有 env：`NOTDEC_DIAG=timing`、`NOTDEC_DIAG=stats`、`NOTDEC_SLOT_MERGE_DIAG`、
+   `NOTDEC_DIAG=simplify`、`NOTDEC_CONVERT_PROGRESS`，可先复用。）
 2. **按第 1 步结论分支**：
    - 持续增长 → 找"每轮重新实例化/新建变量"的代码路径（SCC 实例化、merge policy 重建、
      `rebuildBoundSets`/transaction rollback 相关），加缓存/记忆化（按 (callee, call site, 轮次) 复用实例）；
@@ -229,7 +229,7 @@ timeout 1500 build-notdec-nothreads/bin/notdec \
   test/evm/solidity-patterns/cases/24259_19755445_aefeec2314_4f43187f4106.ll \
   -o /tmp/24259.sol --tr-level=2
 # 状态快照 / 诊断
-NOTDEC_CONSTRAINT_DIAG=1 ... > /tmp/diag.log 2>&1
+NOTDEC_DIAG=timing ... > /tmp/diag.log 2>&1
 perf record -F 199 -g -o /tmp/perf.data -p <pid> -- sleep 45 && perf report --stdio -i /tmp/perf.data --sort=symbol
 ```
 

@@ -84,16 +84,13 @@
 | 变量 | 作用 |
 | --- | --- |
 | `NOTDEC_EVENT_LOG` | 统一事件流输出路径（8 列 TSV），配合 `NOTDEC_EVENT_FILTER` |
+| `NOTDEC_DIAG` | 诊断分类列表，逗号分隔：`stats`/`graph`/`simplify`/`timing`/`field-origins`；`=1`/`=all` 全开，未设/`=0` 关（详见本节末说明） |
 | `NOTDEC_MERGE_AUDIT` | 每次合并打印一行；`=eventlog`/`=both` 送事件流 |
 | `NOTDEC_BINARYSUB_TRACE` | 把库/前端的事件写成整句文本，放进 work-dir 的 `binarysub-trace.log`（给人读，不是 TSV） |
 | `NOTDEC_WATCH` / `NOTDEC_WATCH_SITES` | 按 vs# id 定点打印（定义在库侧；前端 hook/addsubtype 两个站点也受它控制），见 `external/binarysub/ENV.md` |
 | `NOTDEC_BIGCLASS_DIAG` | 打印 upper 界 ≥1000 的合并类 |
 | `NOTDEC_DEFERRED_DIAG` | 打印被推迟的调用子类型；`=<id>[,<id>]` 只看指定变量 |
 | `NOTDEC_TRACE_VALUE` | 打印名字含该子串的值在求解后挂的界 |
-| `NOTDEC_CONSTRAINT_DIAG` | 约束求解阶段计时与计数 |
-| `NOTDEC_CONSTRAINT_STATS` | 按函数统计约束图规模 |
-| `NOTDEC_GRAPH_SIZE_DIAG` | 各阶段结束后打印类型图规模 |
-| `NOTDEC_SIMPLIFY_DIAG` | 简化/生成阶段的诊断输出 |
 | `NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS` | 简化阶段处理 N 组后停下（调试） |
 | `NOTDEC_CONVERT_PROGRESS` | 转换阶段打印进度 |
 | `NOTDEC_WORKLIST_SNAPSHOT` | 打印 worklist 深度快照 |
@@ -102,13 +99,14 @@
 | `NOTDEC_PHI_WATCH` | 打印指定 phi 节点的合并/类型信息 |
 | `NOTDEC_MALLOC_WRAPPER_DEBUG` | 打印分配器包装函数的识别过程 |
 | `NOTDEC_FIELD_ORIGINS` | 打印字段级 origin 覆盖（需 `BINARYSUB_ENABLE_FIELD_ORIGINS`） |
-| `NOTDEC_FIELD_ORIGIN_DIAG` | 统计还带 origin 的字段数 |
 | `NOTDEC_DUMP_TYPE_GRAPH` | 把类型图 dump 到指定路径 |
 | `NOTDEC_DUMP_COMPACT_GRAPH` | 把 CompactType 图 dump 到指定路径 |
 | `NOTDEC_FATNODE_DIAG` | 打印超大类型节点 |
 | `NOTDEC_FATNODE_MIN` | 超大节点的 bound 数阈值 |
 | `NOTDEC_FATNODE_FUNC` | 只在指定函数上做超大节点诊断 |
 | `NOTDEC_FATGROW_DIAG` | 打印节点膨胀的来源 |
+
+`NOTDEC_DIAG` 的分类：`stats`（按函数统计约束图规模）、`graph`（各阶段结束后的类型图规模）、`simplify`（简化/生成阶段的诊断输出，库侧慢路径也受它控制）、`timing`（约束求解阶段计时与计数）、`field-origins`（求解后还带 origin 的字段数，需 `BINARYSUB_ENABLE_FIELD_ORIGINS`）。取值大小写不敏感、可带空格；未列出的名字不生效；只换 gate，各类诊断的文本不变。
 
 ## 其他 pass
 

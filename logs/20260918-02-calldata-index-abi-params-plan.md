@@ -407,11 +407,11 @@ pattern suite 的 5 个失败里：
 - 现象：CPU 打满（`User time 419s`、99% CPU、RSS ~2.0 GB），不是死锁；
 - 调用图分析：24259 共 25 个函数、18 个带 calldata 形参、**0 个环**（无递归），所以不是
   递归自环导致的逐调用点实例化；
-- `NOTDEC_CONSTRAINT_DIAG=1` 显示 SCC 自底向上阶段**正常跑完**（`bottom_up_done=42/42`，
+- `NOTDEC_DIAG=timing` 显示 SCC 自底向上阶段**正常跑完**（`bottom_up_done=42/42`，
   每个 SCC 各阶段 wall_ms≈0），日志停在 post-summary 的三个 merge policy 打印之后，
   之后再没有任何 diag 输出但进程继续 100% CPU 跑——**爆炸点在后处理（merge policy 之后、
   简化/传播阶段）**，可能在逐调用点实例化把 struct-ptr/字段合并候选放大之后；
-- `NOTDEC_SIMPLIFY_DIAG=1` 没有产生额外输出，需要下一步在 post-summary 之后的分阶段
+- `NOTDEC_DIAG=simplify` 没有产生额外输出，需要下一步在 post-summary 之后的分阶段
   （或给简化循环加计数/上限日志）继续定位。
 
 **当前落地的状态**：只保留 helper 变体（`markPolymorphicHelpers` 不再要求 offset 冲突，

@@ -198,7 +198,7 @@ High 才允许自动启用调用点多态；只有 allocator 语义和 wrapper �
 ```bash
 setarch x86_64 -R env \
   NOTDEC_THREADS=8 \
-  NOTDEC_SIMPLIFY_DIAG=1 \
+  NOTDEC_DIAG=simplify \
   NOTDEC_SUMMARY_OVERRIDE=/sn640/NotDec/test/type-recovery/realworld/support/tmux.source.summary.json \
   /usr/bin/time -v /sn640/NotDec/build-relwithdebinfo-20260731/bin/notdec \
   /sn640/NotDec-Exp/Bench2/source-ir/ir/tmux/tmux.bc \

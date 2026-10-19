@@ -6,7 +6,7 @@
 
 ## 背景
 
-当前 `NOTDEC_SIMPLIFY_DIAG=1` 已能在 `ConstraintsGenerator::genTypes()` 的
+当前 `NOTDEC_DIAG=simplify` 已能在 `ConstraintsGenerator::genTypes()` 的
 bulk、lower、upper、debug 等检查点报告 resident RSS，但没有说明每段实际耗时和
 CPU 使用量。binarysub 的 `BulkSimplifyTiming` 也不完整：canonicalize 已有 wall 和
 进程 CPU 时间，`analyze/origin/simplify/coalesce` 则是各 group 局部耗时的累加。
@@ -64,7 +64,7 @@ NotDec 的所有 LLVM pass，也不改变普通运行输出。
 
 ### 3. 输出与开销
 
-第一步仍放在 `NOTDEC_SIMPLIFY_DIAG` / binarysub trace 诊断输出中，不改
+第一步仍放在 `NOTDEC_DIAG=simplify` / binarysub trace 诊断输出中，不改
 `merge-eval-summary.json` 的稳定结构。输出使用固定字段名，便于长跑日志直接用
 脚本提取；完成后再根据实际使用情况决定是否把阶段汇总写入 JSON。
 
@@ -106,7 +106,7 @@ fortune、lighttpd 等性能 A/B。新增的阶段统计结构只保存整数计
   `getrusage(RUSAGE_SELF)`；失败时输出 unavailable，平均核数用未取整微秒计算。
 - `TypeSimplifier::snapshotBulkSimplifyTiming()`（约第 2622 行）保存阶段数据和原缓存
   统计；`bulkSimplifyDetailed()`（约第 5927、6250-6344 行）在真实连续边界取快照，
-  向 `NOTDEC_SIMPLIFY_DIAG` 输出 `[simplify-phase]`，并扩展 binarysub trace。
+  向 `NOTDEC_DIAG=simplify` 输出 `[simplify-phase]`，并扩展 binarysub trace。
 - 原 `analyze/origin/simplify/coalesce` 明确改称 `*_work_ms`；旧 trace 字段暂时同时
   输出，避免破坏现有日志读取。
 

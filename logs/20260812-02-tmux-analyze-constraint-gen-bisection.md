@@ -67,7 +67,7 @@ A/B/C 三方案对照。
   binarysub worktree 干净。顶层指针更新和本日志的提交由后续会话收尾。
 - 本轮改动位置：`external/binarysub/src/binarysub.cpp`（analyze 的 var/prim
   合并循环、visited set、OccurrenceMap 与 PolarVarHash）；诊断打印沿用
-  `NOTDEC_SIMPLIFY_DIAG`。
+  `NOTDEC_DIAG=simplify`。
 
 ## 验证
 

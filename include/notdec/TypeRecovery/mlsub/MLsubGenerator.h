@@ -63,6 +63,13 @@ using ExtValueLabelCache = std::map<ExtValuePtr, std::string>;
 bool isOpaqueSegmentReadValue(const llvm::Value *V);
 bool isStackCanarySlotValue(const ExtValuePtr &Slot);
 
+// One gate for the statistics-style diagnostics. NOTDEC_DIAG=<list> selects
+// categories: "stats", "graph", "simplify", "timing", "field-origins"; "1" or
+// "all" enables every category; unset/empty/"0" disables them. The list is
+// parsed once per process (binarysub::diag_enabled) and only the gate changes:
+// the text each site prints is untouched.
+bool diagEnabled(llvm::StringRef Name);
+
 // genTypes phases are sequential within one SCC. Keeping only microsecond
 // counters lets solveAndLowerTypes() aggregate every SCC without retaining any
 // type graph or debug-output state.
@@ -94,7 +101,7 @@ struct BottomUpPhaseTiming {
 // These counters split the expensive policy stages without retaining any
 // candidate data after an SCC finishes. WorkItems is the number of entries or
 // candidates seen by that subphase; it is only a scale indicator, not a result
-// count. The whole structure is populated only with NOTDEC_CONSTRAINT_DIAG.
+// count. The whole structure is populated only with NOTDEC_DIAG=timing.
 struct BottomUpSubphaseTiming {
   std::uint64_t WallUs = 0;
   std::uint64_t CpuUs = 0;
@@ -707,8 +714,7 @@ struct ConstraintsGenerator {
     // counts as "provably not a stack region"; unknown addresses do not.
     FrameVetoKnownObjectOnly =
         binarysub::env_flag("NOTDEC_FRAME_VETO_KNOWN_OBJECT_ONLY");
-    ConstraintDiagEnabled =
-        binarysub::env_flag("NOTDEC_CONSTRAINT_DIAG");
+    ConstraintDiagEnabled = diagEnabled("timing");
   }
 
   BottomUpTiming run();
@@ -754,7 +760,7 @@ struct ConstraintsGenerator {
 
   // 约束生成中间点（函数内部约束已生成、跨函数调用边未连接）按函数统计
   // 约束图规模：节点数、边数、自引用节点数。用于评估"哪些函数把约束图
-  // 撑大"，预警类型推理爆炸。由 NOTDEC_CONSTRAINT_STATS=1 开启。
+  // 撑大"，预警类型推理爆炸。由 NOTDEC_DIAG=stats 开启。
   void emitFunctionConstraintStats() const;
 
   SimpleType getNodeOrNull(ExtValuePtr Val) {

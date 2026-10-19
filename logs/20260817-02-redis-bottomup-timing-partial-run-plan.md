@@ -142,7 +142,7 @@ range 准确处理前 N 个 group。这样代码更少，A/B 也不需要解释�
 ```bash
 cmake --build build --target notdec TypeBuilderTest binarysub -j4
 ./build/bin/TypeBuilderTest
-NOTDEC_CONSTRAINT_DIAG=1 NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=1 \
+NOTDEC_DIAG=timing NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=1 \
   ./build/bin/notdec test/type-recovery/llvm-ir/cases/10_BottomUp1.ll \
   --tr-level=2 -o /tmp/notdec-stop.ll
 ```
@@ -184,7 +184,7 @@ setarch x86_64 -R env \
   NOTDEC_SUMMARY_OVERRIDE=/tmp/redis-allocator-summary.json \
   NOTDEC_THREADS=8 \
   NOTDEC_CANONICALIZE_PARALLEL=1 \
-  NOTDEC_CONSTRAINT_DIAG=1 \
+  NOTDEC_DIAG=timing \
   NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS=100 \
   /usr/bin/time -v ./build-relwithdebinfo-20260731/bin/notdec \
   /tmp/notdec-source-ir-perf-redis-current-20260817/redis-server/work/02-mlsub-input.ll \
@@ -400,8 +400,8 @@ deferred 阶段只有 `1.051 s`，必须与主 `scc_deferred_calls` 分开看。
   allocator override：`/tmp/redis-allocator-summary.json`。
 - `setarch x86_64 -R`、`NOTDEC_THREADS=8`、
   `NOTDEC_CANONICALIZE_PARALLEL=1`，没有设置
-  `NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS`；开启 `NOTDEC_CONSTRAINT_DIAG=1` 和
-  `NOTDEC_SIMPLIFY_DIAG=1`。
+  `NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS`；开启 `NOTDEC_DIAG=timing` 和
+  `NOTDEC_DIAG=simplify`。
 - 可执行文件：`build-relwithdebinfo-20260731/bin/notdec`。运行目录：
   `/tmp/notdec-redis-full-20260818`。
 

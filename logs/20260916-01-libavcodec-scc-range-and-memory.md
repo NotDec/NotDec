@@ -37,16 +37,16 @@ vector::_M_range_check: __n (which is 1) >= this->size() (which is 1)
 - 构建：`cmake --build build-notdec-nothreads2 --target notdec-typerecovery -j8` ；
   microsub2 重新链接（`xmake -P microsub2 -y -r microsub2.exe`，二进制时间戳更新）。
 - 回归：microsub2 smoke（含类型恢复）9/9；差分语义测试 22/22 逐字节一致。
-- libavcodec 重跑（`NOTDEC_CONSTRAINT_STATS=1` + 35GB 看门狗）进行中，
+- libavcodec 重跑（`NOTDEC_DIAG=stats` + 35GB 看门狗）进行中，
   用于确认崩溃是否消失以及约束图规模分布。
 
 ## 未解决
 
 - **内存**：libavcodec 的类型恢复在崩溃/被杀前常驻内存涨到 22-25 GB
   （缓存 IDB 那轮 43 分钟、峰值 25.0 GB 后被 OOM killer 杀死）。需要按
-  `NOTDEC_CONSTRAINT_STATS=1` 的按函数约束图统计定位是哪些函数把图撑大，
+  `NOTDEC_DIAG=stats` 的按函数约束图统计定位是哪些函数把图撑大，
   再决定加限额还是修根因。
-- **上述守卫没有消除崩溃**：改动后单独重跑 libavcodec（`NOTDEC_CONSTRAINT_STATS=1`、
+- **上述守卫没有消除崩溃**：改动后单独重跑 libavcodec（`NOTDEC_DIAG=stats`、
   35 GB 看门狗）在 46 分 28 秒、峰值 24.2 GB 时仍然抛出同一条
   `vector::_M_range_check: __n (which is 1) >= this->size() (which is 1)`，并且
   新增的 `skip call with out-of-range` 警告一次都没有出现，说明抛出点不在
@@ -55,7 +55,7 @@ vector::_M_range_check: __n (which is 1) >= this->size() (which is 1)
   不会是 vector），候选还剩 `Groups.at(Group.Root)`、`Fields.at(I)`、
   `candidates.at(selector)` 等；正在用 gdb 断在
   `std::__throw_out_of_range_fmt` 上跑完整复现取回溯。
-- **内存**：libavcodec 类型恢复峰值 24-25 GB，`NOTDEC_CONSTRAINT_STATS=1`
+- **内存**：libavcodec 类型恢复峰值 24-25 GB，`NOTDEC_DIAG=stats`
   没有产生可见输出（需要再确认该开关的输出通道）；句柄级优化（emit 后释放
   MBA）实测只把 tmux 1.92→1.82 GB、libavcodec 25.0→24.2 GB，说明常驻内存
   主要在类型恢复的约束图/类型图上。
