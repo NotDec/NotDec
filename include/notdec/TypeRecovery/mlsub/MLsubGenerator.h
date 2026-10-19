@@ -517,8 +517,9 @@ struct ConstraintsGenerator {
   bool frameMergeVetoWithOwners(
       const std::optional<std::set<const llvm::AllocaInst *>> &Left,
       const std::optional<std::set<const llvm::AllocaInst *>> &Right,
-      const char **Why = nullptr) const;
-  // Diagnostic helper for frameMergeVeto (NOTDEC_FRAME_VETO_DIAG).
+      const char **Why = nullptr, SimpleType LHS = nullptr,
+      SimpleType RHS = nullptr) const;
+  // Diagnostic helper for frameMergeVeto (event stream, site "frame-veto").
   void dumpFrameVetoSide(const char *Tag, SimpleType Ty) const;
   bool FrameNoNonFrameMerge = true;
   bool FrameNoCrossFunctionMerge = true;
@@ -955,72 +956,60 @@ struct ConstraintsGenerator {
     if (MergeEval) {
       MergeEval->observeAddSubtype();
     }
-    if (const char *Watch = std::getenv("NOTDEC_FATGROW_DIAG")) {
-      // Trace the growth of one node: every constraint that makes some value a
-      // subtype of it (i.e. adds a lower bound), with the origin of the edge.
-      static std::size_t Printed = 0;
-      if (Printed < 400) {
-        auto Match = [&](SimpleType Side) -> bool {
-          auto Root = binarysub::resolve_variable(Side);
-          auto *VS = Root ? Root->getAsVariableState() : nullptr;
-          if (VS == nullptr) {
-            return false;
-          }
-          if (VS->lowerBounds.size() < 20) {
-            return false;
-          }
-          bool Found = false;
-          for (const auto &Ent : V2N.rev()) {
-            if (binarysub::resolve_variable(Ent.first).get() != Root.get()) {
-              continue;
-            }
-            for (const auto &Val : Ent.second) {
-              llvm::Function *Owner = nullptr;
-              if (auto *VP = std::get_if<llvm::Value *>(&Val)) {
-                if (auto *Inst = llvm::dyn_cast<llvm::Instruction>(*VP)) {
-                  Owner = Inst->getFunction();
-                } else if (auto *Arg = llvm::dyn_cast<llvm::Argument>(*VP)) {
-                  Owner = Arg->getParent();
-                }
-              }
-              if (Owner != nullptr && Owner->getName() == Watch) {
-                Found = true;
-                break;
-              }
-            }
-            if (Found) {
+    // One event per relation that grows a node with a large lower-bound set.
+    // The old switch selected a function name; that filter is now the event
+    // stream's "func=" clause.
+    if (binarysub::event_log_enabled(binarysub::EventSource::Frontend,
+                                     "fat-grow")) {
+      auto FatSide = [&](SimpleType Side) -> bool {
+        auto Root = binarysub::resolve_variable(Side);
+        auto *VS = Root ? Root->getAsVariableState() : nullptr;
+        return VS != nullptr && VS->lowerBounds.size() >= 20;
+      };
+      const bool LhsIsFat = FatSide(lhs);
+      const bool RhsIsFat = FatSide(rhs);
+      if (LhsIsFat || RhsIsFat) {
+        SimpleType Other = LhsIsFat ? rhs : lhs;
+        auto OtherRoot = binarysub::resolve_variable(Other);
+        auto *OtherVS = OtherRoot ? OtherRoot->getAsVariableState() : nullptr;
+        std::string Extra =
+            std::string("fat_side=") + (LhsIsFat ? "lhs" : "rhs") +
+            " other_lb=" +
+            std::to_string(OtherVS ? OtherVS->lowerBounds.size() : 0) +
+            " other_ub=" +
+            std::to_string(OtherVS ? OtherVS->upperBounds.size() : 0) +
+            " via=" + (InsideIRVisit ? "ir" : "policy") + " other_values=[";
+        auto It = V2N.rev().find(OtherRoot);
+        std::size_t Shown = 0;
+        if (It != V2N.rev().end()) {
+          for (const auto &Val : It->second) {
+            if (Shown >= 2) {
               break;
             }
-          }
-          return Found;
-        };
-        const bool LhsIsFat = Match(lhs);
-        const bool RhsIsFat = Match(rhs);
-        if (LhsIsFat || RhsIsFat) {
-          ++Printed;
-          SimpleType Other = LhsIsFat ? rhs : lhs;
-          auto OtherRoot = binarysub::resolve_variable(Other);
-          auto *OtherVS = OtherRoot ? OtherRoot->getAsVariableState() : nullptr;
-          llvm::errs() << "[fat-grow] #" << Printed
-                       << (LhsIsFat ? " lhs=fat" : " rhs=fat")
-                       << " other_lb="
-                       << (OtherVS ? OtherVS->lowerBounds.size() : 0)
-                       << " other_ub="
-                       << (OtherVS ? OtherVS->upperBounds.size() : 0)
-                       << " via=" << (InsideIRVisit ? "ir" : "policy");
-          auto It = V2N.rev().find(OtherRoot);
-          if (It != V2N.rev().end()) {
-            for (std::size_t I = 0; I < It->second.size() && I < 2; ++I) {
-              llvm::errs() << " v=" << toStableString(It->second[I]);
+            if (Shown != 0) {
+              Extra += ",";
             }
-          } else {
-            llvm::errs() << " v=<none>";
+            Extra += toStableString(Val);
+            ++Shown;
           }
-          llvm::errs() << "\n";
+          if (It->second.size() > Shown) {
+            Extra += " +" + std::to_string(It->second.size() - Shown);
+          }
+        } else {
+          Extra += "<none>";
         }
+        Extra += "]";
+        if (auto *O = getVariableOwningFunction(OtherRoot)) {
+          Extra += " other_owner=" + O->getName().str();
+        }
+        binarysub::event_log(binarysub::EventSource::Frontend, "fat-grow",
+                             lhs, rhs, Extra);
       }
     }
-    if (binarysub::env_flag("NOTDEC_FATNODE_DIAG")) {
+    // One event per oversized node; the per-member / per-bound detail is
+    // folded into extra with explicit caps (overflow marked "+N").
+    if (binarysub::event_log_enabled(binarysub::EventSource::Frontend,
+                                     "fat-node")) {
       for (SimpleType Side : {lhs, rhs}) {
         auto Root = binarysub::resolve_variable(Side);
         auto *VS = Root ? Root->getAsVariableState() : nullptr;
@@ -1061,16 +1050,23 @@ struct ConstraintsGenerator {
           }
           ++PrintedForFunc;
         }
-        llvm::errs() << "[fat-node] node=" << binarysub::debug_string(Root)
-                     << " lb=" << VS->lowerBounds.size()
-                     << " ub=" << VS->upperBounds.size()
-                     << " values=" << Members.size() << "\n";
-        for (std::size_t I = 0; I < Members.size() && I < 50; ++I) {
-          llvm::errs() << "    v=" << toStableString(Members[I]);
-          if (auto *O = getExtValueFunction(Members[I])) {
-            llvm::errs() << " in=" << O->getName();
+        constexpr std::size_t MemberCap = 50;
+        std::string Extra = "lb=" + std::to_string(VS->lowerBounds.size()) +
+                            " ub=" + std::to_string(VS->upperBounds.size()) +
+                            " values=" + std::to_string(Members.size()) +
+                            " members=[";
+        for (std::size_t I = 0; I < Members.size() && I < MemberCap; ++I) {
+          if (I != 0) {
+            Extra += ",";
           }
-          llvm::errs() << "\n";
+          Extra += toStableString(Members[I]);
+          if (auto *O = getExtValueFunction(Members[I])) {
+            Extra += "@" + O->getName().str();
+          }
+        }
+        Extra += "]";
+        if (Members.size() > MemberCap) {
+          Extra += " +" + std::to_string(Members.size() - MemberCap);
         }
         {
           // Every bound carries the origin ids that were active when it was
@@ -1096,62 +1092,95 @@ struct ConstraintsGenerator {
               ++Hist[Name(Id)];
             }
           }
-          llvm::errs() << "[lb-origin-hist] node="
-                       << binarysub::debug_string(Root)
-                       << " bounds=" << VS->lowerBounds.size()
-                       << " slots=" << VS->lowerBoundOrigins.size()
-                       << "\n";
+          Extra += " origin_slots=" + std::to_string(VS->lowerBoundOrigins.size()) +
+                   " origin_hist=[";
+          std::size_t HistShown = 0;
           for (const auto &[N, C] : Hist) {
-            llvm::errs() << "    " << C << "\t" << N << "\n";
+            if (HistShown >= 8) {
+              break;
+            }
+            if (HistShown != 0) {
+              Extra += ",";
+            }
+            Extra += N + ":" + std::to_string(C);
+            ++HistShown;
           }
-          unsigned Sample = 0;
+          Extra += "]";
+          if (Hist.size() > HistShown) {
+            Extra += " +" + std::to_string(Hist.size() - HistShown);
+          }
+          Extra += " lb_sample=[";
+          constexpr std::size_t SampleCap = 12;
+          std::size_t Samples = 0;
           for (std::size_t I = 0;
-               I < VS->lowerBounds.size() && Sample < 12; ++I, ++Sample) {
-            llvm::errs() << "    lb[" << I << "]="
-                         << binarysub::debug_string(VS->lowerBounds[I])
-                         << " origins=[";
+               I < VS->lowerBounds.size() && Samples < SampleCap;
+               ++I, ++Samples) {
+            if (Samples != 0) {
+              Extra += ";";
+            }
+            Extra += std::to_string(I) + ":" +
+                     binarysub::debug_string(VS->lowerBounds[I]) +
+                     " origins=[";
             if (I < VS->lowerBoundOrigins.size() &&
                 VS->lowerBoundOrigins[I]) {
               unsigned C = 0;
               for (std::uint32_t Id : *VS->lowerBoundOrigins[I]) {
                 if (C++ >= 3) {
-                  llvm::errs() << ",…";
+                  Extra += ",+";
                   break;
                 }
-                llvm::errs() << Name(Id) << ";";
+                Extra += Name(Id) + ";";
               }
             }
-            llvm::errs() << "]\n";
+            Extra += "]";
+          }
+          Extra += "]";
+          if (VS->lowerBounds.size() > Samples) {
+            Extra += " +" + std::to_string(VS->lowerBounds.size() - Samples);
           }
         }
-        unsigned ShownLb = 0;
+        Extra += " lb_bounds=[";
+        constexpr std::size_t LbCap = 40;
+        std::size_t ShownLb = 0;
         for (const auto &B : VS->lowerBounds) {
-          if (ShownLb++ >= 40) {
+          if (ShownLb >= LbCap) {
             break;
           }
-          llvm::errs() << "    lb: " << binarysub::debug_string(B);
+          if (ShownLb != 0) {
+            Extra += ";";
+          }
+          Extra += binarysub::debug_string(B);
           if (auto *O = getVariableOwningFunction(B)) {
-            llvm::errs() << " owner=" << O->getName();
+            Extra += "@" + O->getName().str();
           }
-          auto It = V2N.rev().find(binarysub::resolve_variable(B));
-          if (It != V2N.rev().end()) {
-            for (std::size_t I = 0; I < It->second.size() && I < 2; ++I) {
-              llvm::errs() << " v=" << toStableString(It->second[I]);
-            }
-          }
-          llvm::errs() << "\n";
+          ++ShownLb;
         }
-        unsigned Shown = 0;
+        Extra += "]";
+        if (VS->lowerBounds.size() > ShownLb) {
+          Extra += " +" + std::to_string(VS->lowerBounds.size() - ShownLb);
+        }
+        Extra += " ub_bounds=[";
+        constexpr std::size_t UbCap = 8;
+        std::size_t ShownUb = 0;
         for (const auto &B : VS->upperBounds) {
-          if (Shown++ >= 8) {
+          if (ShownUb >= UbCap) {
             break;
           }
-          llvm::errs() << "    ub: " << binarysub::debug_string(B);
-          if (auto *O = getVariableOwningFunction(B)) {
-            llvm::errs() << " owner=" << O->getName();
+          if (ShownUb != 0) {
+            Extra += ";";
           }
-          llvm::errs() << "\n";
+          Extra += binarysub::debug_string(B);
+          if (auto *O = getVariableOwningFunction(B)) {
+            Extra += "@" + O->getName().str();
+          }
+          ++ShownUb;
         }
+        Extra += "]";
+        if (VS->upperBounds.size() > ShownUb) {
+          Extra += " +" + std::to_string(VS->upperBounds.size() - ShownUb);
+        }
+        binarysub::event_log(binarysub::EventSource::Frontend, "fat-node",
+                             Root, nullptr, Extra);
       }
     }
     binarysub::Cache cache;

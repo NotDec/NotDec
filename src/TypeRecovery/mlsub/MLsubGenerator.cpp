@@ -4795,50 +4795,50 @@ ConstraintsGenerator::frameOwnersOfNode(SimpleType Ty) const {
   return Owners;
 }
 
-// Diagnostic (NOTDEC_FRAME_VETO_DIAG=1): print the two nodes that a veto
+// Diagnostic (event stream, site "frame-veto"): the two nodes that a veto
 // would block, with the values behind each side and which of them is the
 // frame-derived one.  Answers "which merge was refused, and was it a bad value
 // poisoning an otherwise legitimate merge".
 static bool frameVetoDiagEnabled() {
-  static const bool Enabled = binarysub::env_flag("NOTDEC_FRAME_VETO_DIAG");
-  return Enabled;
+  return binarysub::event_log_enabled(binarysub::EventSource::Frontend,
+                                      "frame-veto");
 }
 
 void ConstraintsGenerator::dumpFrameVetoSide(const char *Tag,
                                              SimpleType Ty) const {
   Ty = binarysub::resolve_variable(Ty);
-  llvm::errs() << "[frame-veto] " << Tag << " ty="
-               << (Ty != nullptr ? Ty->str() : std::string("<null>"))
-               << " owners=";
+  std::string Extra = std::string("stage=") + Tag + " owners=";
   auto Owners = frameOwnersOfNode(Ty);
   if (!Owners.has_value()) {
-    llvm::errs() << "unknown";
+    Extra += "unknown";
   } else if (Owners->empty()) {
-    llvm::errs() << "none";
+    Extra += "none";
   } else {
     for (const auto *Alloca : *Owners) {
-      llvm::errs() << Alloca->getName() << ",";
+      Extra += Alloca->getName().str() + ",";
     }
   }
-  llvm::errs() << " values=";
+  Extra += " values=";
   const auto &Rev = V2N.rev();
   auto It = Ty != nullptr ? Rev.find(Ty) : Rev.end();
+  std::size_t Shown = 0;
   if (It != Rev.end()) {
-    std::size_t Count = 0;
     for (const auto &Val : It->second) {
-      if (Count++ >= 6) {
-        llvm::errs() << "...";
+      if (Shown >= 6) {
+        Extra += " +" + std::to_string(It->second.size() - Shown);
         break;
       }
       const llvm::Value *V = extValueAsValue(Val);
-      llvm::errs() << toStableString(Val);
+      Extra += toStableString(Val);
       if (V != nullptr && frameOwnerOfValue(V) != nullptr) {
-        llvm::errs() << "(FRAME)";
+        Extra += "(FRAME)";
       }
-      llvm::errs() << " ";
+      Extra += " ";
+      ++Shown;
     }
   }
-  llvm::errs() << "\n";
+  binarysub::event_log(binarysub::EventSource::Frontend, "frame-veto", Ty,
+                       nullptr, Extra);
 }
 
 bool ConstraintsGenerator::frameMergeVeto(SimpleType LHS, SimpleType RHS,
@@ -4853,7 +4853,7 @@ bool ConstraintsGenerator::frameMergeVeto(SimpleType LHS, SimpleType RHS,
   }
   auto Left = frameOwnersOfNode(LHS);
   auto Right = frameOwnersOfNode(RHS);
-  return frameMergeVetoWithOwners(Left, Right, Why);
+  return frameMergeVetoWithOwners(Left, Right, Why, LHS, RHS);
 }
 
 // 20261010-157：策略合并的 frame 守卫判据。事件两侧恰好一侧是 frame 派生
@@ -4938,7 +4938,7 @@ void ConstraintsGenerator::traceFrameRelatedEdge(const char *Site,
 bool ConstraintsGenerator::frameMergeVetoWithOwners(
     const std::optional<std::set<const llvm::AllocaInst *>> &Left,
     const std::optional<std::set<const llvm::AllocaInst *>> &Right,
-    const char **Why) const {
+    const char **Why, SimpleType LHS, SimpleType RHS) const {
   if (!FrameNoNonFrameMerge && !FrameNoCrossFunctionMerge) {
     return false;
   }
@@ -4950,7 +4950,9 @@ bool ConstraintsGenerator::frameMergeVetoWithOwners(
         (RightFrame && Left.has_value() && !LeftFrame)) {
       ++FrameVetoNonFrame;
       if (Diag) {
-        llvm::errs() << "[frame-veto] VETO nonframe\n";
+        binarysub::event_log(binarysub::EventSource::Frontend, "frame-veto",
+                             LHS, RHS,
+                             "decision=veto reason=frame-region-vs-non-frame-region");
       }
       if (Why != nullptr) {
         *Why = "frame-region-vs-non-frame-region";
@@ -6622,7 +6624,9 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
         for (std::size_t J = I + 1; J < Item.Roots.size(); ++J) {
           const bool Vetoed =
               PrecomputeRootOwners
-                  ? CG.frameMergeVetoWithOwners(RootOwners[I], RootOwners[J])
+                  ? CG.frameMergeVetoWithOwners(
+                        RootOwners[I], RootOwners[J], nullptr,
+                        Item.Roots[I].Type, Item.Roots[J].Type)
                   : CG.frameMergeVeto(Item.Roots[I].Type, Item.Roots[J].Type);
           if (Vetoed) {
             Item.Failure = "frame-region-conflict";

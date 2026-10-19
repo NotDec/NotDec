@@ -38,7 +38,6 @@
 | `NOTDEC_FRAME_NO_REVERSE_MERGE` | `=1` 求解器 reverse_edge 合并遇到栈区就拒绝（保留有向边） |
 | `NOTDEC_FRAME_VETO_KNOWN_OBJECT_ONLY` | frame veto 只在另一侧是"可归属的非栈对象"时生效 |
 | `NOTDEC_FRAME_MARK_INCLUDES_LVARS` | `=1` 栈区标记也覆盖 `%lvar` 值 |
-| `NOTDEC_FRAME_VETO_DIAG` | 打印每次 frame veto 的判定与两侧取值 |
 | `NOTDEC_FRAME_EDGE_TRACE` | 打印装到栈区节点上的每条前端约束；`=eventlog`/`=both` 送事件流 |
 | `NOTDEC_FRAME_EDGE_BACKTRACE` | 给上一条加调用栈 |
 | `NOTDEC_FRAME_REVERSE_MERGE_DIAG` | 打印 reverse_edge 上的栈区判定；`=eventlog`/`=both` 送事件流 |
@@ -88,23 +87,19 @@
 | `NOTDEC_MERGE_AUDIT` | 每次合并打印一行；`=eventlog`/`=both` 送事件流 |
 | `NOTDEC_BINARYSUB_TRACE` | 把库/前端的事件写成整句文本，放进 work-dir 的 `binarysub-trace.log`（给人读，不是 TSV） |
 | `NOTDEC_WATCH` / `NOTDEC_WATCH_SITES` | 按 vs# id 定点打印（定义在库侧；前端 hook/addsubtype 两个站点也受它控制），见 `external/binarysub/ENV.md` |
-| `NOTDEC_BIGCLASS_DIAG` | 打印 upper 界 ≥1000 的合并类 |
 | `NOTDEC_DEFERRED_DIAG` | 打印被推迟的调用子类型；`=<id>[,<id>]` 只看指定变量 |
 | `NOTDEC_TRACE_VALUE` | 打印名字含该子串的值在求解后挂的界 |
 | `NOTDEC_SIMPLIFY_STOP_AFTER_GROUPS` | 简化阶段处理 N 组后停下（调试） |
 | `NOTDEC_CONVERT_PROGRESS` | 转换阶段打印进度 |
 | `NOTDEC_WORKLIST_SNAPSHOT` | 打印 worklist 深度快照 |
-| `NOTDEC_NON_IR_EDGE_TRACE` | 打印非 IR 访问产生的边 |
-| `NOTDEC_BIDIR_DIAG` | 打印前若干对双向有向边的变量对 |
-| `NOTDEC_PHI_WATCH` | 打印指定 phi 节点的合并/类型信息 |
 | `NOTDEC_MALLOC_WRAPPER_DEBUG` | 打印分配器包装函数的识别过程 |
 | `NOTDEC_FIELD_ORIGINS` | 打印字段级 origin 覆盖（需 `BINARYSUB_ENABLE_FIELD_ORIGINS`） |
-| `NOTDEC_FATNODE_DIAG` | 打印超大类型节点 |
-| `NOTDEC_FATNODE_MIN` | 超大节点的 bound 数阈值 |
-| `NOTDEC_FATNODE_FUNC` | 只在指定函数上做超大节点诊断 |
-| `NOTDEC_FATGROW_DIAG` | 打印节点膨胀的来源 |
+| `NOTDEC_FATNODE_MIN` | `fat-node` 事件的 bound 数阈值（默认 1000） |
+| `NOTDEC_FATNODE_FUNC` | 只在指定函数上发 `fat-node` 事件（每函数至多 4 条） |
 
 `NOTDEC_DIAG` 的分类：`stats`（按函数统计约束图规模）、`graph`（各阶段结束后的类型图规模）、`simplify`（简化/生成阶段的诊断输出，库侧慢路径也受它控制）、`timing`（约束求解阶段计时与计数）、`field-origins`（求解后还带 origin 的字段数，需 `BINARYSUB_ENABLE_FIELD_ORIGINS`）。取值大小写不敏感、可带空格；未列出的名字不生效；只换 gate，各类诊断的文本不变。
+
+前端这批诊断不再各自开关，统一进事件流（`NOTDEC_EVENT_LOG` + `NOTDEC_EVENT_FILTER='site=…'`）：`big-class`（`ub≥1000` 的合并类，一条事件一个类，成员值进 extra 并截断）、`bidir-pair`（双向有向边的变量对）、`non-ir-edge`（非 IR 访问产生的边）、`phi-watch`（每个 phi 入边一条，选 phi 用 `id=<vs#>`）、`frame-veto`（每次 frame 守卫判定：两侧与最终 veto）、`fat-node`（超大类型节点，阈值见 `NOTDEC_FATNODE_MIN`）、`fat-grow`（下界 ≥20 的节点继续长大，选函数用 `func=<名字>`）。注意 `big-class` 只在合并审计开启时才走到（它挂在 `NOTDEC_MERGE_AUDIT` 的合并报告路径上）。
 
 `NOTDEC_LOG_DIR` 收拢了原来六个"输出到指定路径"的变量，文件名固定、不用再传路径：`canonical-types.txt`（原 `NOTDEC_DUMP_CANONICAL`）、`closure-stats.txt`（原 `NOTDEC_DUMP_CLOSURE_STATS`）、`compact-graph.txt`（原 `NOTDEC_DUMP_COMPACT_GRAPH`）、`type-graph.dot`（原 `NOTDEC_DUMP_TYPE_GRAPH`）、`poly-marking.json`（原 `NOTDEC_POLY_MARKING_REPORT`；旧变量同时会切到"只识别"模式，现在那一步由 `NOTDEC_POLY_MARKING_ONLY` 单独控制）、`slot-merge-export.tsv`（原 `NOTDEC_SLOT_MERGE_EXPORT`）。目录不存在会自动创建；建不出来只警告一次并跳过 dump，不影响类型恢复。输入类路径（`NOTDEC_SUMMARY_OVERRIDE`、`NOTDEC_SIGNATURE_OVERRIDE`、`NOTDEC_EXTRA_CONSTRAINTS`、`NOTDEC_POLY_FUNCS`、`NOTDEC_PNDIFF_POLICY_OVERRIDE`、`NOTDEC_SLOT_MERGE_IMPORT`）仍是显式路径；`NOTDEC_EVENT_LOG` 作为事件流也仍是显式路径。
 
