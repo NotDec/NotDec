@@ -1155,7 +1155,7 @@ const RecoveryConfigSwitch kRecoveryConfigSwitches[] = {
     {"NOTDEC_STRICT_CONSTRAIN", RecoveryConfigKind::Flag, false},
     {"NOTDEC_SHALLOW_NO_INT_NAME_RELAX", RecoveryConfigKind::Flag, false},
     {"BINARYSUB_MERGE_ONEWAY_REPLAY", RecoveryConfigKind::Flag, true},
-    {"BINARYSUB_PTR_WIDTH_VARIANTS", RecoveryConfigKind::Flag, false},
+    {"BINARYSUB_NO_PTR_WIDTH_VARIANTS", RecoveryConfigKind::Flag, false},
     {"BINARYSUB_UNION_MEMBER_WIDTH", RecoveryConfigKind::Value, false},
     {"BINARYSUB_FILTER_BULK_ORIGIN_FIELDS", RecoveryConfigKind::Value, false},
 };
