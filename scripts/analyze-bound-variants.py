@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """分析折叠 key 的 bound 变体：等价性、差异根因、局部性、频率。
 
-行格式（NOTDEC_DUMP_COMPACT_GRAPH 探针输出）：
+行格式（NOTDEC_LOG_DIR 下的 compact-graph.txt 探针输出）：
   N <ptr> <pol> <kind> <detail>   结构节点（V/P/R/F/?；V 的 detail 含 var id）
   E <src> <spol> <dst> <dpol>     结构引用边
   B <freshVar> <pol> <boundPtr>   折叠 key 的一次 bound 设置

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""分析 CompactType 层图探针（NOTDEC_DUMP_COMPACT_GRAPH）输出。
+"""分析 CompactType 层图探针（NOTDEC_LOG_DIR 下的 compact-graph.txt）输出。
 
 行格式：
   N <ptr> <pol> <kind> <detail>   merged 结构节点（V/R/F/P）

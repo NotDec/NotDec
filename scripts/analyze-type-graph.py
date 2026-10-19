@@ -3,7 +3,7 @@
 
 用法: analyze-type-graph.py graph1.txt [graph2.txt ...]
 
-边表由 NOTDEC_DUMP_TYPE_GRAPH 生成，行格式:
+边表由 NOTDEC_LOG_DIR 下的 type-graph.dot 生成，行格式:
   N <ptr> <kind>             节点 (V/R/F/P)
   R <ptr> <pol>              展开 root
   E <src> <spol> <dst> <dpol>  引用边

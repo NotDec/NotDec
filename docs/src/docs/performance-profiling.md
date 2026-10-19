@@ -35,7 +35,7 @@ perf annotate --symbol=<function>
 ```
 
 约束生成通常单线程，analyze/simplify 通常使用 8 线程。`02-mlsub-input.ll` 标记类型恢复输入，
-`NOTDEC_SIMPLIFY_DIAG=1` 下的 `[simplify-start]` 标记 simplify。采样过少时重试或加
+`NOTDEC_DIAG=simplify` 下的 `[simplify-start]` 标记 simplify。采样过少时重试或加
 `--call-graph dwarf`，并与 time/RSS 交叉确认。
 
 跑批期间不要重链 `notdec`：运行进程保留旧 inode，perf 会显示 `(deleted)` 且无法解析符号；
