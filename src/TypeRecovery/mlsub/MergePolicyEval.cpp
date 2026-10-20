@@ -545,11 +545,13 @@ struct MergePolicyEval::Impl {
   void observeVariableMerged(const binarysub::MergeEvent &Event) {
     auto FromSet = collectTruthBeforeMerge(Event.from, Event.from);
     auto ToSet = collectTruthBeforeMerge(Event.into, Event.from);
-    std::string Evidence = "lhs=" + binarysub::debug_string(Event.originalLhs) +
-                           " rhs=" +
-                           binarysub::debug_string(Event.originalRhs);
+    std::string Evidence =
+        "lhs=" + binarysub::debug_string(Event.fallbackLhs) +
+        " rhs=" + binarysub::debug_string(Event.fallbackRhs);
+    // Keep the bad_unions.jsonl value vocabulary stable for existing analysis
+    // scripts; new consumers should use the MergeOrigin names.
     maybeRecordBadUnion(FromSet, ToSet, "binarysub_merge",
-                        binarysub::merge_reason_name(Event.reason),
+                        binarysub::merge_origin_legacy_name(Event.origin),
                         formatSimpleTypeKey(Event.into), Evidence);
   }
 

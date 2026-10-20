@@ -4253,9 +4253,9 @@ bool ConstraintsGenerator::configureConstraintContext(
     if (Event.into) {
       StructEvidenceMemo.erase(Event.into.get());
     }
-    if (Event.reason == binarysub::MergeReason::PolicyReplaceBound) {
+    if (Event.origin == binarysub::MergeOrigin::SameLevelVarVarHook) {
       ++LocalSubtypeReplaceBoundMergeEvents;
-    } else if (Event.reason == binarysub::MergeReason::PolicyAuxiliary) {
+    } else if (Event.origin == binarysub::MergeOrigin::BoundEvidenceRescan) {
       ++LocalSubtypeAuxiliaryMergeEvents;
     }
     // NOTDEC_MERGE_AUDIT: log every variable merge with the IR values behind
@@ -4344,8 +4344,13 @@ bool ConstraintsGenerator::configureConstraintContext(
         }
       }
       if (AuditMode != MergeAuditMode::EventLog) {
-        llvm::errs() << "[merge-audit] reason="
-                     << std::string(binarysub::merge_reason_name(Event.reason))
+        // origin= is the new name; reason= is kept as the legacy alias while
+        // existing analysis scripts migrate.
+        llvm::errs() << "[merge-audit] origin="
+                     << std::string(binarysub::merge_origin_name(Event.origin))
+                     << " reason="
+                     << std::string(
+                            binarysub::merge_origin_legacy_name(Event.origin))
                      << " from=" << Describe(Event.from)
                      << " into=" << Describe(Event.into) << "\n";
       }
@@ -4353,7 +4358,10 @@ bool ConstraintsGenerator::configureConstraintContext(
         // The sink already carries both ids and their full type text; the
         // extra column adds the IR values behind them and the owners.
         std::string Extra =
-            "reason=" + std::string(binarysub::merge_reason_name(Event.reason));
+            "origin=" +
+            std::string(binarysub::merge_origin_name(Event.origin)) +
+            " reason=" +
+            std::string(binarysub::merge_origin_legacy_name(Event.origin));
         Extra += " from_values=[" + DescribeValues(Event.from) + "]";
         Extra += " into_values=[" + DescribeValues(Event.into) + "]";
         const std::string FromOwner = DescribeOwner(Event.from);
@@ -6832,7 +6840,7 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
       auto FromLabels = FormalLabelsForRoot(From);
       auto IntoLabels = FormalLabelsForRoot(Into);
       std::string Attempt =
-          std::string(binarysub::merge_reason_name(Event.reason)) +
+          std::string(binarysub::merge_origin_name(Event.origin)) +
           " from=" + formatCallSlotRootSnapshot(CG, From) +
           " into=" + formatCallSlotRootSnapshot(CG, Into);
       Effects.MergeAttempts.push_back(Attempt);
@@ -6843,7 +6851,7 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
         SharesSlot |= IntoLabels.count(Label) != 0;
       }
       bool IsUnchangedPlannedExplicit =
-          Event.reason == binarysub::MergeReason::Explicit &&
+          Event.origin == binarysub::MergeOrigin::HostMergeCall &&
           ActiveExplicitFrom && ActiveExplicitInto &&
           Event.from.get() == ActiveExplicitFrom.get() &&
           Event.into.get() == ActiveExplicitInto.get();
@@ -8305,6 +8313,18 @@ void MLsubRecovery::runImpl() {
     bottomUpPhase();
 
     topDownConstraintPhase();
+
+    // Debug/validation: after all constraint generation and merges, every
+    // direct bound entry must resolve to itself.  Opt-in because it is O(graph).
+    if (binarysub::env_flag("BINARYSUB_VALIDATE_BOUNDS")) {
+      std::string FirstBad;
+      if (!binarysub::validate_bound_roots(&FirstBad)) {
+        llvm::errs() << "Error: bound-root invariant violated: " << FirstBad
+                     << "\n";
+        std::abort();
+      }
+      llvm::errs() << "Info: bound-root invariant holds\n";
+    }
 
     if (!EmitPostConstraintStateDir.empty()) {
       savePostConstraintState(EmitPostConstraintStateDir, ModuleSHA256Hex);
