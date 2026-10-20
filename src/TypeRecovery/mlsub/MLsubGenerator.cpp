@@ -13006,29 +13006,19 @@ void ConstraintsGenerator::MLsubVisitor::visitReturnInst(ReturnInst &I) {
   auto Dst = cg.getNodeOrNull(ReturnValue{.Func = I.getFunction()});
   // src is a subtype of dest
   cg.addSubtype(Src, Dst);
-  // Polymorphic wrapper: the marker recorded "ret == arg i" (!notdec.mlsub
-  // .local_alias) for a function that returns the object it was handed.  Tie
-  // the returned value to that argument HERE, inside the wrapper, so the
-  // relation holds per instance instead of leaking through the callee's shared
-  // formal.
-  if (auto *MD = I.getFunction()->getMetadata("notdec.mlsub.local_alias")) {
-    if (MD->getNumOperands() == 1) {
-      if (auto *Str = llvm::dyn_cast<llvm::MDString>(MD->getOperand(0))) {
-        llvm::StringRef Spec = Str->getString();
-        unsigned ArgNo = 0;
-        if (!Spec.consume_front("ret=arg") ||
-            Spec.getAsInteger(10, ArgNo) ||
-            ArgNo >= I.getFunction()->arg_size()) {
-          // Malformed or out of range: ignore, the annotation is advisory.
-        } else {
-          auto *ArgVal = I.getFunction()->getArg(ArgNo);
-          auto ArgNode = cg.getNodeOrNull(getExtValuePtr(ArgVal, &I, 0));
-          if (ArgNode != nullptr) {
-            cg.addSubtype(Src, ArgNode);
-            cg.addSubtype(ArgNode, Src);
-          }
-        }
-      }
+  // Polymorphic wrapper: the marker recorded "ret == arg i"
+  // (!notdec.mlsub.local_ret_alias_of_arg) for a function that returns the
+  // object it was handed.  Tie the returned value to that argument HERE, inside
+  // the wrapper, so the relation holds per instance instead of leaking through
+  // the callee's shared formal.  The setter only attaches the metadata when the
+  // two values have the same width (see Metadata.h), so no width check is
+  // repeated here; a malformed/out-of-range payload is ignored.
+  if (auto ArgNo = getLocalRetAliasOfArg(*I.getFunction())) {
+    auto *ArgVal = I.getFunction()->getArg(*ArgNo);
+    auto ArgNode = cg.getNodeOrNull(getExtValuePtr(ArgVal, &I, 0));
+    if (ArgNode != nullptr) {
+      cg.addSubtype(Src, ArgNode);
+      cg.addSubtype(ArgNode, Src);
     }
   }
   cg.ReturnValueMergeCandidates.push_back(

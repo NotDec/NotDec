@@ -1125,3 +1125,31 @@ TEST(MLsub, EVMStorageDirectSlotConnectsStoreToLoad) {
   CG.releaseBinarysubState();
   binarysub::release_type_graph(StorageType);
 }
+
+// The ret==arg relation is a type equality, so it must not be recorded when the
+// returned value and the argument have different widths: read/write wrappers
+// return a count (64 bits) and take the object as a 32-bit fd, and recording
+// the relation there made the solver merge the two and trip PNDiff's
+// equal-width assertion.
+TEST(MLsub, LocalRetAliasOfArgRequiresEqualWidth) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("local-ret-alias-test", Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto *I64 = llvm::Type::getInt64Ty(Ctx);
+
+  // Same width: the relation is recorded and readable.
+  auto *Same = llvm::Function::Create(
+      llvm::FunctionType::get(I64, {I64}, false),
+      llvm::Function::ExternalLinkage, "alias_same_width", M.get());
+  EXPECT_TRUE(notdec::mlsub::setLocalRetAliasOfArg(*Same, 0, I64));
+  auto Recorded = notdec::mlsub::getLocalRetAliasOfArg(*Same);
+  ASSERT_TRUE(Recorded.has_value());
+  EXPECT_EQ(*Recorded, 0u);
+
+  // Different width: refused, nothing is recorded.
+  auto *Mismatch = llvm::Function::Create(
+      llvm::FunctionType::get(I64, {I32}, false),
+      llvm::Function::ExternalLinkage, "alias_width_mismatch", M.get());
+  EXPECT_FALSE(notdec::mlsub::setLocalRetAliasOfArg(*Mismatch, 0, I64));
+  EXPECT_FALSE(notdec::mlsub::getLocalRetAliasOfArg(*Mismatch).has_value());
+}

@@ -89,6 +89,11 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
   // the relation stays per instance instead of leaking through the shared
   // formal of the callee).  Iterated to a fixpoint: wrappers wrap wrappers.
   std::size_t WrapperMarked = 0;
+  // Wrappers that forward an argument to a marked callee and return the call's
+  // result, but whose return value is not width-compatible with that argument
+  // (read/write return a count, not the object).  They are still marked
+  // polymorphic; only the ret==arg relation is refused.
+  std::size_t AliasRefused = 0;
   // Debug switch: NOTDEC_POLY_WRAPPER_DETECT=0 disables the generic wrapper
   // recognition (the marking itself is unchanged), so its cost can be isolated.
   const bool WrapperDetect =
@@ -164,12 +169,15 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
               }
               F.setMetadata(KIND_MLSUB_POLYMORPHIC_FUNCTION,
                             llvm::MDNode::get(F.getContext(), {}));
-              const std::string Spec =
-                  "ret=arg" + std::to_string(Arg->getArgNo());
-              F.setMetadata(
-                  "notdec.mlsub.local_alias",
-                  llvm::MDNode::get(F.getContext(),
-                                    llvm::MDString::get(F.getContext(), Spec)));
+              // The alias relation is asserted on the value the wrapper
+              // actually returns, so the setter can check it against the
+              // argument's width before the metadata exists.  A wrapper over
+              // read/write/fread returns a count, not the object it was handed;
+              // the relation is refused there and the error is reported.
+              if (!setLocalRetAliasOfArg(F, Arg->getArgNo(),
+                                         Ret->getReturnValue()->getType())) {
+                ++AliasRefused;
+              }
               ++WrapperMarked;
               Changed = true;
               Marked = true;
@@ -187,13 +195,18 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
     }
     if (WrapperMarked > 0) {
       for (llvm::Function &F : M) {
-        if (F.hasMetadata("notdec.mlsub.local_alias")) {
-          llvm::errs() << "  [wrapper] " << F.getName() << " "
-                       << F.getMetadata("notdec.mlsub.local_alias") << "\n";
+        if (auto ArgNo = getLocalRetAliasOfArg(F)) {
+          llvm::errs() << "  [wrapper] " << F.getName() << " ret=arg" << *ArgNo
+                       << "\n";
         }
       }
       llvm::errs() << "Info: polymorphic-wrapper marking: " << WrapperMarked
-                   << " functions marked\n";
+                   << " functions marked";
+      if (AliasRefused > 0) {
+        llvm::errs() << ", " << AliasRefused
+                     << " ret==arg relation(s) refused (width mismatch)";
+      }
+      llvm::errs() << "\n";
     }
   }
 
