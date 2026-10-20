@@ -11,6 +11,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/PassManager.h>
 #include <map>
 #include <memory>
 #include <set>
@@ -1152,4 +1153,36 @@ TEST(MLsub, LocalRetAliasOfArgRequiresEqualWidth) {
       llvm::Function::ExternalLinkage, "alias_width_mismatch", M.get());
   EXPECT_FALSE(notdec::mlsub::setLocalRetAliasOfArg(*Mismatch, 0, I64));
   EXPECT_FALSE(notdec::mlsub::getLocalRetAliasOfArg(*Mismatch).has_value());
+}
+
+// "Returns the callee's result" is not "returns one of its arguments".  The
+// wrapper rule has to take the position from the import semantics table:
+// memcpy/memset return their destination, mempcpy returns dest + n, read
+// returns a byte count.  Guessing from the call shape aliased the count of a
+// read wrapper with its 32-bit fd (PNDiff's cross-width assertion) and, at
+// equal widths, would silently alias a size/count with a pointer.
+TEST(MLsub, RetAliasOfArgComesFromImportSemantics) {
+  llvm::LLVMContext Ctx;
+  auto M = std::make_unique<llvm::Module>("ret-alias-of-arg-test", Ctx);
+  llvm::ModuleAnalysisManager MAM;
+  notdec::mlsub::MLsubRecovery TR(*M, MAM);
+
+  auto *Ptr = llvm::PointerType::getUnqual(Ctx);
+  auto *I64 = llvm::Type::getInt64Ty(Ctx);
+  auto *I32 = llvm::Type::getInt32Ty(Ctx);
+  auto Make = [&](const char *Name, llvm::Type *Ret,
+                  std::initializer_list<llvm::Type *> Args) {
+    return llvm::Function::Create(llvm::FunctionType::get(Ret, Args, false),
+                                  llvm::Function::ExternalLinkage, Name,
+                                  M.get());
+  };
+  auto *Memcpy = Make("memcpy", Ptr, {Ptr, Ptr, I64});
+  auto *Memset = Make("memset", Ptr, {Ptr, I32, I64});
+  auto *Mempcpy = Make("mempcpy", Ptr, {Ptr, Ptr, I64});
+  auto *Read = Make("read", I64, {I32, Ptr, I64});
+
+  EXPECT_EQ(TR.retAliasArgOf(*Memcpy), std::optional<unsigned>(0));
+  EXPECT_EQ(TR.retAliasArgOf(*Memset), std::optional<unsigned>(0));
+  EXPECT_FALSE(TR.retAliasArgOf(*Mempcpy).has_value());
+  EXPECT_FALSE(TR.retAliasArgOf(*Read).has_value());
 }

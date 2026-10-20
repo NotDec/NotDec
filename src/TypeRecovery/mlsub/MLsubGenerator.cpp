@@ -8896,6 +8896,11 @@ std::optional<unsigned int> lookupRetAliasOfArg(const llvm::Function &F) {
   return std::nullopt;
 }
 
+std::optional<unsigned int>
+MLsubRecovery::retAliasArgOf(const llvm::Function &F) const {
+  return lookupRetAliasOfArg(F);
+}
+
 namespace {
 
 // "name:args=0,2;ret=1,name2:args=1" - parsed once, cached.

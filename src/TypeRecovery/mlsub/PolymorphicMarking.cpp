@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -82,17 +83,24 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
                  << " functions marked\n";
   }
 
-  // 2c. Generic polymorphic wrappers: a defined function that forwards one of
-  // its own arguments through a call to an already marked function and returns
-  // that call's result inherits the marking, together with the position
-  // relation "ret == arg i" that the recovery applies INSIDE the wrapper (so
-  // the relation stays per instance instead of leaking through the shared
-  // formal of the callee).  Iterated to a fixpoint: wrappers wrap wrappers.
+  // 2c. Generic polymorphic wrappers.  A defined function that forwards one of
+  // its own arguments through a call to a polymorphic function and returns that
+  // call's result inherits the marking: its type has to be instantiated per
+  // call site as well.  Separately, the wrapper may return the very object it
+  // was handed, a type equality ("ret == arg k") applied inside the wrapper.
+  // That identity is NOT inferred from the shape of the call: read/write and
+  // fread return a count, getline a count, allocators a fresh pointer.  The
+  // position is looked up from the callee (builtin copy semantics,
+  // NOTDEC_POLY_FUNCS ret_alias_of_arg, or the callee's own
+  // local_ret_alias_of_arg for wrapper-of-wrapper chains), the same way the
+  // recovery treats an imported declaration.  Iterated to a fixpoint: wrappers
+  // wrap wrappers.
   std::size_t WrapperMarked = 0;
-  // Wrappers that forward an argument to a marked callee and return the call's
-  // result, but whose return value is not width-compatible with that argument
-  // (read/write return a count, not the object).  They are still marked
-  // polymorphic; only the ret==arg relation is refused.
+  // ret==arg relations recorded on wrappers.  One per wrapper: the first
+  // returned call whose aliased operand is one of the wrapper's arguments wins.
+  std::size_t AliasRecorded = 0;
+  // Relations the width/pointer invariant rejected.  With the lookup in place
+  // this only fires for inconsistent input, never for read/write.
   std::size_t AliasRefused = 0;
   // Debug switch: NOTDEC_POLY_WRAPPER_DETECT=0 disables the generic wrapper
   // recognition (the marking itself is unchanged), so its cost can be isolated.
@@ -111,6 +119,18 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
         break;
       }
       return V;
+    };
+    // Two independent questions are asked about the callee:
+    //   - is it polymorphic (so the wrapper also needs per-call-site types)?
+    //   - is one of its arguments what it returns (object identity)?
+    // Only the second one can justify a ret==arg relation, and the callee is
+    // the only authority for it.
+    auto CalleeReturnsArg = [&](const llvm::Function &Callee)
+        -> std::optional<unsigned> {
+      if (auto Local = getLocalRetAliasOfArg(Callee)) {
+        return Local;
+      }
+      return TR.retAliasArgOf(Callee);
     };
     bool Changed = true;
     while (Changed) {
@@ -140,48 +160,68 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
                 "memcpy",  "memmove",  "mempcpy",  "strcpy",  "strncpy",
                 "bcopy",   "__memcpy_chk", "__memmove_chk", "__strcpy_chk",
                 "__strncpy_chk"};
-            bool InnerIsWrapperTarget =
+            bool InnerIsPolymorphic =
                 Callee->hasMetadata(KIND_MLSUB_POLYMORPHIC_FUNCTION);
-            if (!InnerIsWrapperTarget) {
+            if (!InnerIsPolymorphic) {
               llvm::StringRef Name = Callee->getName();
               while (!Name.empty() && Name.front() == '_') {
                 Name = Name.drop_front();
               }
               for (const char *Prim : CopyPrimitives) {
                 if (Name == Prim) {
-                  InnerIsWrapperTarget = true;
+                  InnerIsPolymorphic = true;
                   break;
                 }
               }
             }
-            if (!InnerIsWrapperTarget) {
+            if (!InnerIsPolymorphic) {
               continue;
             }
             auto *Ret = llvm::dyn_cast<llvm::ReturnInst>(Call->getNextNode());
             if (Ret == nullptr || Strip(Ret->getReturnValue()) != Call) {
               continue;
             }
+            // 1) Wrapper marking: F forwards one of its own arguments into a
+            //    polymorphic callee and returns that call's result.
+            bool ForwardsOwnArgument = false;
             for (unsigned J = 0; J < Call->arg_size(); ++J) {
               auto *Arg = llvm::dyn_cast<llvm::Argument>(
                   Strip(Call->getArgOperand(J)));
-              if (Arg == nullptr || Arg->getParent() != &F) {
-                continue;
+              if (Arg != nullptr && Arg->getParent() == &F) {
+                ForwardsOwnArgument = true;
+                break;
               }
+            }
+            if (ForwardsOwnArgument) {
               F.setMetadata(KIND_MLSUB_POLYMORPHIC_FUNCTION,
                             llvm::MDNode::get(F.getContext(), {}));
-              // The alias relation is asserted on the value the wrapper
-              // actually returns, so the setter can check it against the
-              // argument's width before the metadata exists.  A wrapper over
-              // read/write/fread returns a count, not the object it was handed;
-              // the relation is refused there and the error is reported.
-              if (!setLocalRetAliasOfArg(F, Arg->getArgNo(),
-                                         Ret->getReturnValue()->getType())) {
-                ++AliasRefused;
-              }
               ++WrapperMarked;
               Changed = true;
               Marked = true;
-              break;
+            }
+            // 2) Identity: only a callee that returns argument k can make the
+            //    wrapper's return value the same object as one of the
+            //    wrapper's arguments.  Take k from the callee; the value
+            //    passed there must be one of F's own arguments (otherwise F
+            //    returns a local object and nothing is aliased).
+            if (auto AliasArg = CalleeReturnsArg(*Callee)) {
+              if (*AliasArg < Call->arg_size() &&
+                  !getLocalRetAliasOfArg(F).has_value()) {
+                auto *Aliased = llvm::dyn_cast<llvm::Argument>(
+                    Strip(Call->getArgOperand(*AliasArg)));
+                llvm::Type *ReturnedTy = Ret->getReturnValue()->getType();
+                if (Aliased != nullptr && Aliased->getParent() == &F &&
+                    ReturnedTy->isPointerTy() &&
+                    Aliased->getType()->isPointerTy()) {
+                  if (setLocalRetAliasOfArg(F, Aliased->getArgNo(),
+                                           ReturnedTy)) {
+                    ++AliasRecorded;
+                    Changed = true;
+                  } else {
+                    ++AliasRefused;
+                  }
+                }
+              }
             }
             if (Marked) {
               break;
@@ -193,7 +233,7 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
         }
       }
     }
-    if (WrapperMarked > 0) {
+    if (WrapperMarked > 0 || AliasRecorded > 0) {
       for (llvm::Function &F : M) {
         if (auto ArgNo = getLocalRetAliasOfArg(F)) {
           llvm::errs() << "  [wrapper] " << F.getName() << " ret=arg" << *ArgNo
@@ -202,9 +242,12 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
       }
       llvm::errs() << "Info: polymorphic-wrapper marking: " << WrapperMarked
                    << " functions marked";
+      if (AliasRecorded > 0) {
+        llvm::errs() << ", " << AliasRecorded << " ret==arg relation(s)";
+      }
       if (AliasRefused > 0) {
         llvm::errs() << ", " << AliasRefused
-                     << " ret==arg relation(s) refused (width mismatch)";
+                     << " ret==arg relation(s) refused (width/type mismatch)";
       }
       llvm::errs() << "\n";
     }

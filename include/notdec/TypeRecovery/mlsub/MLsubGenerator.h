@@ -1636,6 +1636,13 @@ public:
   }
   // The level hook (isPolymorphic) is private; the marking pass reports it.
   bool isLevelPolymorphic(llvm::Function *F) const { return isPolymorphic(F); }
+  // The argument position a call to F returns, from the import semantics
+  // (builtin copy table, NOTDEC_RET_ALIAS_OF_ARG, NOTDEC_POLY_FUNCS
+  // ret_alias_of_arg).  nullopt means F is not known to return an argument --
+  // read/write return a count, allocators return fresh memory.  The marking
+  // pass uses this instead of inferring "returns an argument" from the call
+  // shape.
+  std::optional<unsigned int> retAliasArgOf(const llvm::Function &F) const;
   bool isPolymorphicMarkingDone() const { return PolymorphicMarkingDone; }
   void setPolymorphicMarkingDone(bool Value = true) {
     PolymorphicMarkingDone = Value;
