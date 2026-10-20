@@ -13,7 +13,7 @@
 | `NOTDEC_EARLY_CALL_INTERFACE_MERGE` | `=1` 先合并调用槽再加调用边（实验顺序） |
 | `NOTDEC_TWO_ROUND_MERGE` | `=0` 关闭两轮合并（默认开） |
 | `NOTDEC_TWO_ROUND_DIAG` | 打印两轮合并的拒绝/重检计数 |
-| `NOTDEC_NO_REVERSE_EDGE_MERGE` | 拒绝所有 reverse_edge 自动合并（对照臂） |
+| `NOTDEC_NO_REVERSE_EDGE_MERGE` | 拒绝所有 reverse_edge_rule 自动合并（对照臂） |
 | `NOTDEC_ALLOW_SHALLOW_MERGE_CONFLICT` | `=1` 浅层冲突时跳过该合并而不是回滚 |
 | `NOTDEC_DISABLE_CALLSLOT_MERGE` | 关闭调用参数/返回槽的事务化合并 |
 
@@ -35,12 +35,12 @@
 | `NOTDEC_FRAME_NO_NONFRAME_MERGE` | 默认开；`=0` 允许栈区与非栈对象合并 |
 | `NOTDEC_FRAME_NO_CROSS_FUNCTION_MERGE` | 默认开；`=0` 允许两个函数的栈区合并 |
 | `NOTDEC_FRAME_NO_POLICY_MERGE` | `=1` 事务化策略合并中，一侧是栈区就整体回滚 |
-| `NOTDEC_FRAME_NO_REVERSE_MERGE` | `=1` 求解器 reverse_edge 合并遇到栈区就拒绝（保留有向边） |
+| `NOTDEC_FRAME_NO_REVERSE_MERGE` | `=1` 求解器 reverse_edge_rule 合并遇到栈区就拒绝（保留有向边） |
 | `NOTDEC_FRAME_VETO_KNOWN_OBJECT_ONLY` | frame veto 只在另一侧是"可归属的非栈对象"时生效 |
 | `NOTDEC_FRAME_MARK_INCLUDES_LVARS` | `=1` 栈区标记也覆盖 `%lvar` 值 |
 | `NOTDEC_FRAME_EDGE_TRACE` | 打印装到栈区节点上的每条前端约束；`=eventlog`/`=both` 送事件流 |
 | `NOTDEC_FRAME_EDGE_BACKTRACE` | 给上一条加调用栈 |
-| `NOTDEC_FRAME_REVERSE_MERGE_DIAG` | 打印 reverse_edge 上的栈区判定；`=eventlog`/`=both` 送事件流 |
+| `NOTDEC_FRAME_REVERSE_MERGE_DIAG` | 打印 reverse_edge_rule 上的栈区判定；`=eventlog`/`=both` 送事件流 |
 | `NOTDEC_FRAME_REVERSE_MERGE_BACKTRACE` | 给上一条加调用栈 |
 
 ## 证据与布局（实验开关）

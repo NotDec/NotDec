@@ -156,9 +156,9 @@ LLVM 指针直接查询已经改成 opaque handle 的 `PNIGraph`，在本次修�
 
 1. `avcodec_alloc_context3::<ret>` 的 `AVCodecContext*` 与
    `check_stream_specifier::arg0` 的 `AVFormatContext*`。前 93 个函数时没有，加入第 94 个
-   `stream_component_open` 后出现，记录为 `explicit / binarysub_merge`。
+   `stream_component_open` 后出现，记录为 `host_merge_call / binarysub_merge`。
 2. `configure_filtergraph::arg3` 的 `AVFilterContext*` 与其 `arg0` 的 `AVFilterGraph*`，记录为
-   `policy_replace_bound / binarysub_merge`。只分析 `configure_filtergraph` 或只加
+   `same_level_var_var_hook / binarysub_merge`。只分析 `configure_filtergraph` 或只加
    `video_thread` 调用方不会出现；`configure_audio_filters + configure_filtergraph` 的最小组合可复现。
 
 递增实验按 IR 定义顺序保留前 N 个函数体，并用 `--rglob='.*'` 保留完整模块的 611 个全局定义，

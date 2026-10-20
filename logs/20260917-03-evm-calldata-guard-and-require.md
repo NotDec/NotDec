@@ -139,7 +139,7 @@ contract Decompiled {
 
 上一轮（llvm2c 86f52de / 顶层 8f8590b3，见
 logs/20260917-02-solidity-storage-helper-mapping.md）已经完成 storage helper
-表达式映射，但 Solidity 后端工作区里还留着一批未提交的下一轮改动：
+表达式映射，但 Solidity 后端工作区里还留着一批本地的下一轮改动：
 
 - `evm_calldatasize -> msg.data.length`；
 - `getCondition()` 改用 typed expression（`containsUnresolvedValue()` 兜底）；

@@ -206,7 +206,7 @@ build/external/NotDec-wasm2llvm/bin/notdec-wasm2llvm /tmp/notdec-wasm2llvm-hello
 
 剩余状态：
 
-- `external/NotDec-wasm2llvm` 里未提交改动只剩
+- `external/NotDec-wasm2llvm` 里本地改动只剩
   `tools/notdec-wasm2llvm/CMakeLists.txt`。
 - 上一个子模块提交仍是 `a0827f0 Port wasm2llvm build to LLVM 22`。
 - `llvm2c` 后续迁移改记到新日志，不再继续追加到本文件。

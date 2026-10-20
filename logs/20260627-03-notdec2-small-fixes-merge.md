@@ -4,7 +4,7 @@
 
 # 背景
 
-`/sn640/NotDec2` 有两处未提交改动：
+`/sn640/NotDec2` 有两处本地改动：
 
 - 顶层 `src/Passes/PassManager.cpp`：`--tr-level=0` / `disableTypeRecovery` 输出 C 时，不再强制解引用 `TR`。
 - 子模块 `external/binarysub`：给 canonicalize 阶段加一个默认关闭的超时预算环境变量。

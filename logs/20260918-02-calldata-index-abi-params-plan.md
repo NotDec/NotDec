@@ -218,7 +218,7 @@ NotDec 各处的 `private__`（双下划线）判断会漏掉后者。实测例�
   （264 / 729 / 424 / 343 / 69，helper 1339 / 调用点 1301）→ 分类集合不变、判据换成 linkage；
 - source suite 89/89（含 solc），`named_internal_helper_call_public_entry_01` 通过；
 - `notdec.type_recovery.evm.tr_level_2` 依旧失败：差异只有 `.htypes` 里的 `bytes: 1` 标注
-  （HType width 相关，来自工作区里另一个会话未提交的 mlsub/layout-policy 改动），与 linkage/名字无关。
+  （HType width 相关，来自工作区里另一个会话本地的 mlsub/layout-policy 改动），与 linkage/名字无关。
 
 
 ### 实现记录（三）：post-TR ABI 参数识别 + oracle（2026-09-18）
@@ -357,7 +357,7 @@ grep -E "::arg1 =>" /tmp/out.htypes
 但"helper + entry 都标记"会让 `24259_19755445_aefeec2314_4f43187f4106` **确定性不收敛**
 （连续两次 `timeout 150` 都是 exit 124），所以该变体没有保留。
 
-当前代码状态（未提交，待后续决定）：
+当前代码状态（待后续决定）：
 
 - `EvmCalldataAccessPass::markPolymorphicHelpers` 已去掉 `hasPolymorphicCallsiteOffset` 门控：
   **所有读取 calldata 的 internal helper 都标记多态**（metadata 值按 offset 是否变化区分

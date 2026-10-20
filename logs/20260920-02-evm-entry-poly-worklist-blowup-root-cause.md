@@ -5,7 +5,7 @@
 > “内联范围是策略选择”的分析仍是历史依据，但 `=0` / `all` 两档不再可运行；本文的 24259
 > 多态收敛问题反而是下一步的正解方向（见 20260923-04 §1）。
 
-日期：2026-09-20　　分支：NotDec `v2`（本轮只加了 env-gated 诊断，尚未提交）
+日期：2026-09-20　　分支：NotDec `v2`（本轮只加了 env-gated 诊断）
 前置：`logs/20260920-01-evm-calldata-record-handoff.md` 第 4 节"entry 多态下 24259 不收敛"
 
 ## TL;DR
@@ -818,7 +818,7 @@ BUDGET_ADDS=500000 RUN_TIMEOUT=25 python3 \
 | `scaling_24259.py` / `scaling-result.json` | 累积加回 helper body 的 work 曲线 |
 | `minimal-trigger-no-loop.ll` | 打断 c2c 回边的变体：仍爆炸，用于否掉循环假设 |
 
-## 10. 本轮工作区改动（未提交，全部 env-gated）
+## 10. 本轮工作区改动（全部 env-gated）
 
 | 文件 | 改动 |
 | --- | --- |

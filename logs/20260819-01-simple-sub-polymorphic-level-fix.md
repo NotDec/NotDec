@@ -152,7 +152,7 @@ allocator boundary、`VarOrigins` 诊断输出和 `PersistentSet` 热点仍作�
 
   三种修复配置的输出 IR **逐字节一致**（43b90abd…），verifier 通过；auto-mark 与
   opaque 出边移除都只改性能/内存，不改类型结果。minlevel 19:16 基线因当时的
-  binary+IR 组合（未提交状态 + 已删除的 frozen IR，phi 前驱顺序差异）无法精确复现。
+  binary+IR 组合（本地状态 + 已删除的 frozen IR，phi 前驱顺序差异）无法精确复现。
 - smoke 套件与 lighttpd：全部通过，指标与历史基线一致（ngircd/memcached bad_unions=1
   等）；fortune 的 auto-mark warning 正常触发（exit/__fprintf_chk 升层）。
 - `MLsubGeneratorTest` 未跑（本轮未涉及 binarysub）；后续跑批确认。

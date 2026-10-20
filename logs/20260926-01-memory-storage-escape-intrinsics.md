@@ -165,7 +165,7 @@ memory pointer）。所以 `__evm_mload(64)` 只是把「这里有一个真实�
 ### 4.3 跨会话干扰（已排除）
 
 本轮所有 Solidity 指标都在**同一个顶层工作树**上 A/B：把本轮 submodule 改动 `git stash` 后重建的
-二进制（= HEAD submodule + 另一会话未提交的 `src/TypeRecovery/mlsub` WIP）跑同一套指标，
+二进制（= HEAD submodule + 另一会话本地的 `src/TypeRecovery/mlsub` WIP）跑同一套指标，
 todo/unres/goto/real/dang **逐 case 完全相同**，所以上表全部归因于本轮改动。
 
 但 `notdec.evm.solidity_patterns` 现在有 1 个失败 case

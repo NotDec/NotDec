@@ -10,14 +10,14 @@
 
 | 机制 | 位置 | 触发条件 |
 | --- | --- | --- |
-| `ReverseEdge` 自动合并 | `binarysub-core.cpp` `constrain_impl` | 同 level 变量间出现直接反向子类型边 |
+| `ReverseEdgeRule` 自动合并 | `binarysub-core.cpp` `constrain_impl` | 同 level 变量间出现直接反向子类型边 |
 | size 检查 | `constrain_impl` | 两侧 size 必须严格相等，否则约束失败 |
 | primitive 合并 | `constrain_impl` | 同名字 primitive 直接相等 |
 | 结构约束 | `constrain_impl` | TMemObject 包含、TFunction 参数逆变/返回值协变 |
 | extrude | `constrain_impl` | 跨 level 约束时复制类型到目标 level |
 
 **关键性质（防止误判）**：变量之间的子类型边有传递传播，子类型环会在有限步内闭合成
-完全图，从而必然出现直接反向边并触发 `ReverseEdge` 合并。因此"数据流子类型环内的
+完全图，从而必然出现直接反向边并触发 `ReverseEdgeRule` 合并。因此"数据流子类型环内的
 节点最终相等"是求解器保证的，**不要**再设计"多跳子类型 SCC 合并"之类的策略。
 
 **注意区分**：该性质只覆盖变量间的纯子类型边。record/function 结构 bound 嵌套引用
@@ -30,7 +30,7 @@
 
 | 策略 | 位置 | 时机 | 条件 | 开关 |
 | --- | --- | --- | --- | --- |
-| 同函数 struct-ptr subtype merge | `shouldMergeSameFunctionStructPtrSubtype`（`MLsubGenerator.cpp:3158`），solver 处理 var-var 边时经 `PolicyReplaceBound` 回调 | 约束求解中 | 同函数、同 level、双方 pointer-like、至少一边有 struct 证据（含 typed pointer）；`onVariableNonVarBoundAdded`（3341）在证据升级时重扫 | 默认开启 |
+| 同函数 struct-ptr subtype merge | `shouldMergeSameFunctionStructPtrSubtype`（`MLsubGenerator.cpp:3158`），solver 处理 var-var 边时经 `SameLevelVarVarHook` 回调 | 约束求解中 | 同函数、同 level、双方 pointer-like、至少一边有 struct 证据（含 typed pointer）；`onVariableNonVarBoundAdded`（3341）在证据升级时重扫 | 默认开启 |
 | load/store struct-ptr merge | `applyStructPtrLoadStoreMergePolicy`（`MLsubGenerator.cpp:4976`） | 每个 SCC 求解后 | 同一指针变量上的 `ptr_load`/`ptr_store` 目标：同 level、size==PointerSize、双方 `hasStructPointerEvidence` | `--merge-struct-ptr-load-store`（默认开） |
 | call arg/formal + return merge | `applyCallInterfaceMergePolicy`（`MLsubGenerator.cpp:4748`）→ `applyTransactionalCallSlotMergePolicy`（3951） | deferred call 约束应用后 + 每个 SCC post-summary | 事务化合并，`RequireStructEvidence`，冲突回退；决策写入 `CallSlotMergeDecisions.txt` | 默认开启 |
 | struct field follow-up merge | `applyStructPtrFieldFollowupMergePolicy`（`MLsubGenerator.cpp:3655`） | post-summary | 合并后字段布局变化带来的新候选 | 默认开启 |

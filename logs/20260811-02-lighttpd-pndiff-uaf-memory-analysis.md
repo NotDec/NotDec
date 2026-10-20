@@ -61,7 +61,7 @@ CompactType hash-consed，指针相同的结构共享一次展开），跨组递
 CoalesceMemo 去重（oldpndiff 显示 shared_hits=492793）。per-group 版
 simplify 后 4.4GB vs per-root 版 57GB，约 13 倍差距。
 
-memstats（08-11 10:00）的 57GB 用的还是 per-root 版二进制（8d29998 当时未提交），
+memstats（08-11 10:00）的 57GB 用的还是 per-root 版二进制（8d29998），
 与 20260810 的 53.7GB 同源；当时日志把"lighttpd 内存爆"归因到 simplify 阶段，
 实际是 per-root 流程固有的线性内存累积。
 

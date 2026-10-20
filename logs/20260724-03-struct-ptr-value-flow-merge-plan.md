@@ -27,7 +27,7 @@
 - `src/TypeRecovery/mlsub/MLsubGenerator.cpp`：删除 PHI/select target、ptradd result、ptradd recurrence 的专门逻辑。
 - `src/TypeRecovery/mlsub/MLsubGenerator.cpp`：新增 `getFunctionFromLLVMValue()` / `getExtValueFunction()`，从 `llvm::Value*`、`ReturnValue`、`UConstant`、`StackObject`、`HeapObject` 找所属函数。
 - `src/TypeRecovery/mlsub/MLsubGenerator.cpp`：`configureConstraintContext()` 设置 `Context.shouldMergeSameLevelVarVar`，回调到 `shouldMergeSameFunctionStructPtrSubtype()`。
-- `src/TypeRecovery/mlsub/MLsubGenerator.cpp`：`shouldMergeSameFunctionStructPtrSubtype()` 只检查两端都是同 level、同 pointer size 的变量节点，双方都有 `hasStructPointerEvidence()`，且所属函数相同；满足后返回 `true`，由 binarysub enqueue `PolicyReplaceBound` merge。
+- `src/TypeRecovery/mlsub/MLsubGenerator.cpp`：`shouldMergeSameFunctionStructPtrSubtype()` 只检查两端都是同 level、同 pointer size 的变量节点，双方都有 `hasStructPointerEvidence()`，且所属函数相同；满足后返回 `true`，由 binarysub enqueue `SameLevelVarVarHook` merge。
 
 ## 验证
 

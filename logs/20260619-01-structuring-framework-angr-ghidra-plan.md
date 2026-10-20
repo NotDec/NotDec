@@ -1818,7 +1818,7 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 验证：
 
-- 未提交实验代码已撤回，`external/NotDec-llvm2c` 工作树干净。
+- 实验代码已撤回，`external/NotDec-llvm2c` 工作树干净。
 - `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
 
 # 2026-06-20 实现记录：natural loop region 改为 laminar child tree
@@ -1887,7 +1887,7 @@ shared Phoenix 的 `VirtualEdgeKind` 已经有 `Goto`、`Break`、`Continue`，r
 
 当前处理：
 
-- 未提交的 `virtualizeExternalEdge()`、external follow `Break`、natural-loop wrapper 代码都已撤回。
+- 本地的 `virtualizeExternalEdge()`、external follow `Break`、natural-loop wrapper 代码都已撤回。
 - `external/NotDec-llvm2c` 工作树保持干净。
 - `cmake --build ./build --target notdec-backend-structuring notdec-llvm2c-exe notdec -j4` 通过。
 
@@ -2615,7 +2615,7 @@ Angr 的真实做法更明确：
 
 当前状态：
 
-- 试探性代码已全部回退，`external/NotDec-llvm2c` 当前无未提交代码改动。
+- 试探性代码已全部回退，`external/NotDec-llvm2c` 当前工作树干净。
 - goal 继续保持 active；还没有达到“Angr-style virtual edge 生命周期”这个实现点。
 
 # 2026-06-20 实现记录：virtualized source 与 collapsed tail block

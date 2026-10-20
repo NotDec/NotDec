@@ -74,7 +74,7 @@ level、位宽、字段切片和 action。搜索 `decision: skipped`、`decision
 ### `AVCodecContext*` 与 `AVFormatContext*`
 
 最小组合为 `stream_component_open`、`filter_codec_opts`、`check_stream_specifier`，并保留全部 globals。
-`bad_unions.jsonl` 报告 `avcodec_alloc_context3::<ret>` 与 `check_stream_specifier::arg0`，reason 为 `explicit`。
+`bad_unions.jsonl` 报告 `avcodec_alloc_context3::<ret>` 与 `check_stream_specifier::arg0`，reason 为 `host_merge_call`。
 
 直接原因是 `av_log(void *avcl, ...)` 的第 0 个参数被当成单态 formal 槽。这个最小组合里有 6 个
 `av_log` callsite：`check_stream_specifier`/`filter_codec_opts` 传入 `AVFormatContext*` 一侧，
@@ -91,14 +91,14 @@ level、位宽、字段切片和 action。搜索 `decision: skipped`、`decision
 ### `AVFilterGraph*` 与 `AVFilterContext*`
 
 最小组合为 `configure_audio_filters` 和 `configure_filtergraph`。`bad_unions.jsonl` 报告
-`configure_filtergraph::arg0` 与 `configure_filtergraph::arg3`，reason 为 `policy_replace_bound`。
+`configure_filtergraph::arg0` 与 `configure_filtergraph::arg3`，reason 为 `same_level_var_var_hook`。
 
 这条不是参数 3 的整组策略主动合并。统计文件的 Decision 57 显示参数 0 的 actual `vs#277`
 （切片 `[@8:8,@16:4,@36:4]`）被判定兼容并入 formal `vs#246`（切片 `[@8:8,@16:4]`）。合并前，
 `vs#277` 已有子类型上界 `vs#249`，即 `configure_filtergraph::arg3`。`merge_variable_into()` 把该 bound
 重写为 `vs#246 <: vs#249` 后，`shouldMergeSameFunctionStructPtrSubtype()` 看到两端同位宽、均为指针、
 至少一端有结构体证据，而且 external value 都属于 `configure_filtergraph`，于是排队执行
-`PolicyReplaceBound`，把参数 3 合入参数 0。
+`SameLevelVarVarHook`，把参数 3 合入参数 0。
 
 该 hook 只检查“属于同一函数”，不检查是否为同一参数/返回槽，也不调用字段布局冲突检查。因此轮到参数 3
 的整组策略时已经太晚，Decision 60 只能记录 `already-merged`，actual/formal 都已解析成 `vs#246`。

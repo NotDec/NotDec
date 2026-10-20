@@ -12,7 +12,7 @@
 treeMemo 升级成“按祖先 fold 上下文缓存”能把重复展开砍掉。先用探针验证，不
 直接改缓存。
 
-## 探针（binarysub，未提交通用前仅诊断）
+## 探针（binarysub，目前仅诊断）
 
 - `TypeSimplifier::coalesceCompactType`（`src/binarysub.cpp:4286` 起）新增
   `NOTDEC_COALESCE_VARIANT_PROBE=1` 门控的 per-key 统计：每个
@@ -130,7 +130,7 @@ TypeBuilder 的 name→binder 表按名字 1:1 假设被打破。旧计数器命
   开关差异（39404 行）与 run-to-run 噪声（39428/39406 行）同量级。
 - 全量 tmux（白名单版 + 缓存开）首次完整跑通：**44:26，峰值 RSS 6.0GB**，
   eval coverage 3.27%、bad_unions=8、fragmented_nodes=967。8 个 bad_unions
-  全是 L0 的 explicit/policy merge（不同 struct 被并），是 merge-policy 问题，
+  全是 L0 的 host_merge_call/policy merge（不同 struct 被并），是 merge-policy 问题，
   无路径相关 μ 特征。
 - 对照（缓存关）同时启动：同一输入形成 recvars=602 的 group，go_calls 冲到
   1420 万后卡住（缓存开时最大 group 只有 160 万）。缓存把大 group 的重复展开
@@ -156,7 +156,7 @@ TypeBuilder 的 name→binder 表按名字 1:1 假设被打破。旧计数器命
 | 缓存关 | 1:36:51 | 12.6GB | 9 | 9 | 951 | 3.268% |
 
 bad_unions 对比：8 个完全相同，缓存关多 1 个（`cmd_list_print::arg0` vs
-`load_cfg_from_buffer::arg3`，reverse_edge）。缓存没有引入任何新的错误合并，
+`load_cfg_from_buffer::arg3`，reverse_edge_rule）。缓存没有引入任何新的错误合并，
 coverage 完全一致。缓存把全量从 1.6 小时/12.6GB 压到 44 分钟/5.9GB。
 
 ### 两项优化（binarysub `src/binarysub.cpp`）

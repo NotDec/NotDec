@@ -3,17 +3,17 @@
 ## 0. 一句话
 
 `20260923-03` §5 第 3 项（4 套 type_recovery 自 2026-08-03 起漂移）处理完：
-漂移全部来自已提交的类型恢复行为，与工作区里 binarysub/MLsub 的未提交改动无关
+漂移全部来自已提交的类型恢复行为，与工作区里 binarysub/MLsub 的本地改动无关
 （用“把 committed 版 `MLsubGenerator.cpp` 单独编成 object、换进 `libnotdec-typerecovery.a`
 再链接”的二进制复跑，47 个 `.htypes` 输出逐字节相同）。据此把 llvm-ir 14 例、evm 11 例、
 sysy 9 例共 **34 个 golden 重锚**，realworld 的 fortune fixture 锚点哈希刷新后不再 abort、
 真正跑起了 wasm-DWARF 对比，对比报告显示全局槽和 struct 字段仍大量缺失，按 README 约定把该例
 标成 `xfail` 并写明理由。4 套 ctest 现在全绿（llvm-ir 22、evm 16、sysy 9 通过，realworld 1 xfail）。
 
-## 1. 判定“漂移 vs 未提交改动”
+## 1. 判定“漂移 vs 本地改动”
 
 工作区里 `include/notdec/TypeRecovery/mlsub/MLsubGenerator.h` 与 `src/TypeRecovery/mlsub/MLsubGenerator.cpp`
-是别的会话的未提交改动（`addConstantMemoryField` 从“存加载值类型”改成“存地址节点”）。
+是别的会话的本地改动（`addConstantMemoryField` 从“存加载值类型”改成“存地址节点”）。
 为了不把 WIP 当成基线，也没有动它的工作区文件，做法是：
 
 1. `git show HEAD:<path>` 取 committed 的 header/source 到 `/tmp/head-mlsub/`；
@@ -99,5 +99,5 @@ ctest --test-dir build-notdec-nothreads -R notdec.type_recovery
 - fortune 的字段/全局恢复缺口是类型恢复线的实际任务，报告里逐字段列了缺失偏移，可直接当工作清单；
   另外 `ir_anchor` 依赖输入路径拼写这件事值得单独修（anchoring 应基于 IR 内容而不是打印出的 ModuleID），
   否则换一个调用路径就又要刷新一次。
-- 本轮重锚只覆盖当前 committed 行为；工作区里 MLsub/binarysub 的未提交改动落地后，如果改变
+- 本轮重锚只覆盖当前 committed 行为；工作区里 MLsub/binarysub 的本地改动落地后，如果改变
   `.htypes` 输出，需要再跑一次同样的重锚流程（脚本思路见 §2）。

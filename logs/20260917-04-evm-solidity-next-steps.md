@@ -13,7 +13,7 @@
 
 - llvm2c `646560b`：guard-if-revert 折叠成 `require`、remaining-body 标记按
   结构化树完整性判断、i1 常量打印 bool、address 下标转 uint256、清理 dead code；
-  同时把上一轮未提交的 `evm_calldatasize`、typed condition、calldata matcher、
+  同时把上一轮的 `evm_calldatasize`、typed condition、calldata matcher、
   direct-slot store、branch polarity 修正一起提交。
 - 顶层 `c02118b7`：新增 source-suite golden `calldata_min_size_public_entry_01`，
   runner 加可选 `--solc`，CMake 加 `NOTDEC_SOLC`，更新两份过期 golden。
@@ -578,7 +578,7 @@ build-notdec-nothreads/bin/notdec test/evm/solidity-patterns/cases/calldata_min_
 
 ### P3-10 遗留工作区状态
 
-- 顶层 `external/NotDec-bin2llvm` 指针有未提交改动（fab1fa8e），不是本轮 EVM
+- 顶层 `external/NotDec-bin2llvm` 指针有本地改动（fab1fa8e），不是本轮 EVM
   工作产生的，需要由其对应工作流决定提交还是还原；
 - llvm2c `main` 与顶层 `v2` 在 `646560b` / `c02118b7` 之后都已经 push 干净。
 

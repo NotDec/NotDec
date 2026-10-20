@@ -106,7 +106,7 @@ registry 查找）。load×store 候选对是 B^2 的，每对都全量走 evide
 - wrong_merge：bad_unions=19、extra_types=12、polluted_components=10
 - performance：wall 17.5 分钟、peak RSS 52.5GB（类型恢复段）
 
-19 个 bad union 全部是 `policy_replace_bound`/`binarysub_merge`，首条 witness：
+19 个 bad union 全部是 `same_level_var_var_hook`/`binarysub_merge`，首条 witness：
 `chunkqueue_append_file_fd::%bb.if.then.i2`（struct:chunk*）与
 `chunkqueue_append_file_fd::arg0`（struct:chunkqueue*）。CallSlotMergeDecisions.txt
 显示根因是 `recursive merge crosses formal slots`：call-interface 事务合并把
@@ -233,5 +233,5 @@ CFLAGS="-O0 -g"`；`extract-bc` 后 `llvm-dis` 存 .ll，llvm-as 验证通过。
 - `0f6324a [diag]`：closure stats + bulk mem stats（NOTDEC_DUMP_CLOSURE_STATS /
   NOTDEC_BULK_MEM_STATS）
 
-**顶层未提交（下次提交）**：MLsubGenerator 的 StructEvidenceMemo 精确失效、
+**顶层（下次提交）**：MLsubGenerator 的 StructEvidenceMemo 精确失效、
 ensureSequence/matchPNDiff 常量在左 swap、call-slot merge ValuesByRoot 索引。

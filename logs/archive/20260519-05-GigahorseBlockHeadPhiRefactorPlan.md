@@ -143,7 +143,7 @@ python3 /sn640/gigahorse-toolchain/gigahorse.py \
 
 ## 2026-05-19 重新从 `0a19737` 推进：edge 输出先收成单值
 
-这次没有继续在 `830f820` 上堆。先把当时未提交的 `PHIOutputForwarded` 调整暂存为
+这次没有继续在 `830f820` 上堆。先把当时的 `PHIOutputForwarded` 调整暂存为
 stash：
 
 ```bash

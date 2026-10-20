@@ -21,7 +21,7 @@
 - `--algo` 对 Solidity 渲染路径 **无效**：`BodyBuilder.cpp:2916` 硬编码
   `DefaultStructurerName="sailr"`；`--algo` 只喂给 C CLI 的 StructuralAnalysis
   (`Commandlines.def:163`)。本会话给 BodyBuilder 加了一个默认保持不变的
-  `NOTDEC_STRUCTURER` 环境变量开关（未提交），才能做 A/B。
+  `NOTDEC_STRUCTURER` 环境变量开关，才能做 A/B。
 
 ## 2. outlined 基线是假的：后端会丢弃渲染不完整的 helper
 
@@ -146,5 +146,5 @@ flat 0029 是规模问题：`public_start`/`public_withdrawal` 各 **912 块、1
   （`ir_analyze.py`、`ir_joins.py`、`ir_reducibility.py`、`dump_cfg.py`、
   `clone_join.py`、`clone_terminal_joins.py`、`ab_algo.sh`、`outlined/`、`flat/`、
   `frozen/`、`allmode/`）
-- 未提交改动：`external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp` 的
+- 本地改动：`external/NotDec-llvm2c/lib/Solidity/BodyBuilder.cpp` 的
   `NOTDEC_STRUCTURER` 诊断开关（默认行为不变）。

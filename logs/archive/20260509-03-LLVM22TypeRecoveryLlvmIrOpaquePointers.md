@@ -6,7 +6,7 @@
 当前目标是把输入改成 LLVM 22 能直接吃的 opaque-pointer 语法，同时把已经跑通的 case
 从 `xfail` 收回成正常 `pass`。
 
-这次只动测试输入和 goldens，不碰主项目源码，也不碰当前 `fortune` 的未提交改动。
+这次只动测试输入和 goldens，不碰主项目源码，也不碰当前 `fortune` 的本地改动。
 
 ## 目标
 
