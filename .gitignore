@@ -47,5 +47,7 @@ build-evm2llvm/
 build-*/
 test-near/
 binarysub-private/
-llvm-22.1.0.nothreads.obj/
+# Install-prefix symlink used by build-notdec-nothreads2's CMake cache.  Keep
+# the pattern slash-free: a symlink is a file, so "name/" would not match it.
+llvm-22.1.0.nothreads.obj
 llvm-build-nothreads/
