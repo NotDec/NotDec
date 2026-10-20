@@ -203,16 +203,18 @@ PolymorphicMarkingPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM) {
             //    wrapper's return value the same object as one of the
             //    wrapper's arguments.  Take k from the callee; the value
             //    passed there must be one of F's own arguments (otherwise F
-            //    returns a local object and nothing is aliased).
+            //    returns a local object and nothing is aliased).  The lifted IR
+            //    represents pointers as pointer-sized integers, so "is a
+            //    pointer" cannot be read off the LLVM type here: the callee's
+            //    declared semantics and the equal-width invariant enforced by
+            //    the setter are what apply.
             if (auto AliasArg = CalleeReturnsArg(*Callee)) {
               if (*AliasArg < Call->arg_size() &&
                   !getLocalRetAliasOfArg(F).has_value()) {
                 auto *Aliased = llvm::dyn_cast<llvm::Argument>(
                     Strip(Call->getArgOperand(*AliasArg)));
                 llvm::Type *ReturnedTy = Ret->getReturnValue()->getType();
-                if (Aliased != nullptr && Aliased->getParent() == &F &&
-                    ReturnedTy->isPointerTy() &&
-                    Aliased->getType()->isPointerTy()) {
+                if (Aliased != nullptr && Aliased->getParent() == &F) {
                   if (setLocalRetAliasOfArg(F, Aliased->getArgNo(),
                                            ReturnedTy)) {
                     ++AliasRecorded;
