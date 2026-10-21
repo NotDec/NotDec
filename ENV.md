@@ -16,6 +16,10 @@
 | `NOTDEC_NO_REVERSE_EDGE_MERGE` | 拒绝所有 reverse_edge_rule 自动合并（对照臂） |
 | `NOTDEC_ALLOW_SHALLOW_MERGE_CONFLICT` | `=1` 浅层冲突时跳过该合并而不是回滚 |
 | `NOTDEC_DISABLE_CALLSLOT_MERGE` | 关闭调用参数/返回槽的事务化合并 |
+| `NOTDEC_MERGE_SCOPE_FUNCS` | 按函数名限定合并策略：逗号分隔的 glob（`*`/`?`），空 = 关。微sub2 对 stripped 输入看到的是 IDA 的 `sub_XXXX` |
+| `NOTDEC_MERGE_SCOPE_POLICIES` | 上面函数里要处理的策略：`local-subtype`（F1/S2/S3，默认）/`reverse-edge`（S1）/`call-slot`（F2）/`field-followup`（F4）/`load-store`（F3）/`all` |
+| `NOTDEC_MERGE_SCOPE_MODE` | `skip`（默认，拒绝匹配函数里的所选策略合并）/`strict`（只对 F1/S1 生效：在这些函数里强制 round-one 证据闸门，等价于局部打开 `NOTDEC_TWO_ROUND_MERGE`；其它策略按 skip） |
+| `NOTDEC_MERGE_SCOPE_DIAG` | `=1` 打印每条被跳过的合并（策略、函数、vs# id） |
 
 ## 调用槽候选
 

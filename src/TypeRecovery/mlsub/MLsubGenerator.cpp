@@ -4089,6 +4089,12 @@ BottomUpTiming ConstraintsGenerator::run() {
                  << FrameReverseMergeChecks << " neither-side-frame="
                  << FrameReverseMergeUnknown << "\n";
   }
+  if (mergeScopeActive() &&
+      (MergeScopeSkips != 0 || MergeScopeStrictGates != 0)) {
+    llvm::errs() << "Info: merge function scope skips=" << MergeScopeSkips
+                 << " strict-gates=" << MergeScopeStrictGates
+                 << " strict-refused=" << MergeScopeStrictRefused << "\n";
+  }
   return Timing;
 }
 
@@ -4130,7 +4136,231 @@ MergeAuditMode mergeAuditMode() {
   return Mode;
 }
 
+// ---- Per-function merge-policy scope (NOTDEC_MERGE_SCOPE_*) --------------
+// Parsed once per process.  See the declaration in MLsubGenerator.h and log
+// 176 §5.1 (function axis) / log 187.
+enum class MergeScopeMode { Off, Skip, Strict };
+
+struct MergeFunctionScopeConfig {
+  bool Active = false;
+  MergeScopeMode Mode = MergeScopeMode::Off;
+  unsigned Policies = 0;
+  std::vector<std::string> Patterns;
+  bool Diag = false;
+};
+
+unsigned mergeScopePolicyBit(ConstraintsGenerator::MergeScopePolicy Policy) {
+  return 1u << static_cast<unsigned>(Policy);
+}
+
+// Shell-style glob with '*' and '?'; no character classes.
+bool globMatch(llvm::StringRef Pattern, llvm::StringRef Name) {
+  std::size_t P = 0;
+  std::size_t N = 0;
+  std::size_t Star = llvm::StringRef::npos;
+  std::size_t Mark = 0;
+  while (N < Name.size()) {
+    if (P < Pattern.size() &&
+        (Pattern[P] == '?' || Pattern[P] == Name[N])) {
+      ++P;
+      ++N;
+    } else if (P < Pattern.size() && Pattern[P] == '*') {
+      Star = P++;
+      Mark = N;
+    } else if (Star != llvm::StringRef::npos) {
+      P = Star + 1;
+      N = ++Mark;
+    } else {
+      return false;
+    }
+  }
+  while (P < Pattern.size() && Pattern[P] == '*') {
+    ++P;
+  }
+  return P == Pattern.size();
+}
+
+std::string trimAscii(std::string Value) {
+  auto IsSpace = [](char C) {
+    return C == ' ' || C == '\t' || C == '\r' || C == '\n';
+  };
+  while (!Value.empty() && IsSpace(Value.front())) {
+    Value.erase(Value.begin());
+  }
+  while (!Value.empty() && IsSpace(Value.back())) {
+    Value.pop_back();
+  }
+  return Value;
+}
+
+std::vector<std::string> splitCommaList(const char *Raw) {
+  std::vector<std::string> Out;
+  if (Raw == nullptr) {
+    return Out;
+  }
+  llvm::SmallVector<llvm::StringRef, 8> Parts;
+  llvm::StringRef(Raw).split(Parts, ',');
+  for (llvm::StringRef Part : Parts) {
+    Part = Part.trim();
+    if (!Part.empty()) {
+      Out.push_back(Part.str());
+    }
+  }
+  return Out;
+}
+
+const MergeFunctionScopeConfig &mergeFunctionScopeConfig() {
+  static const MergeFunctionScopeConfig Config = [] {
+    MergeFunctionScopeConfig C;
+    C.Patterns = splitCommaList(std::getenv("NOTDEC_MERGE_SCOPE_FUNCS"));
+    if (C.Patterns.empty()) {
+      return C;
+    }
+    C.Active = true;
+    // Default: the F1/S2/S3 path, the one that log 186 found responsible for
+    // the same-function mis-merges on O0/cp.
+    C.Policies = mergeScopePolicyBit(
+        ConstraintsGenerator::MergeScopePolicy::LocalSubtype);
+    const char *RawPolicies = std::getenv("NOTDEC_MERGE_SCOPE_POLICIES");
+    if (RawPolicies != nullptr && *RawPolicies != '\0') {
+      C.Policies = 0;
+      for (const std::string &Raw : splitCommaList(RawPolicies)) {
+        const std::string P = trimAscii(Raw);
+        if (P == "all") {
+          C.Policies = 0x1fu;
+        } else if (P == "local-subtype" || P == "local" || P == "f1" ||
+                   P == "s2" || P == "s3") {
+          C.Policies |= mergeScopePolicyBit(
+              ConstraintsGenerator::MergeScopePolicy::LocalSubtype);
+        } else if (P == "reverse-edge" || P == "reverse" || P == "s1") {
+          C.Policies |= mergeScopePolicyBit(
+              ConstraintsGenerator::MergeScopePolicy::ReverseEdge);
+        } else if (P == "call-slot" || P == "call" || P == "f2") {
+          C.Policies |= mergeScopePolicyBit(
+              ConstraintsGenerator::MergeScopePolicy::CallSlot);
+        } else if (P == "field-followup" || P == "field" || P == "f4") {
+          C.Policies |= mergeScopePolicyBit(
+              ConstraintsGenerator::MergeScopePolicy::FieldFollowup);
+        } else if (P == "load-store" || P == "loadstore" || P == "f3") {
+          C.Policies |= mergeScopePolicyBit(
+              ConstraintsGenerator::MergeScopePolicy::LoadStore);
+        } else {
+          llvm::errs() << "Warning: unknown NOTDEC_MERGE_SCOPE_POLICIES entry '"
+                       << P << "', ignored.\n";
+        }
+      }
+      if (C.Policies == 0) {
+        C.Active = false;
+        return C;
+      }
+    }
+    const char *RawMode = std::getenv("NOTDEC_MERGE_SCOPE_MODE");
+    const std::string Mode = RawMode != nullptr ? trimAscii(RawMode) : "";
+    if (Mode.empty() || Mode == "skip") {
+      C.Mode = MergeScopeMode::Skip;
+    } else if (Mode == "strict") {
+      C.Mode = MergeScopeMode::Strict;
+    } else if (Mode == "0" || Mode == "off" || Mode == "false") {
+      C.Active = false;
+      return C;
+    } else {
+      llvm::errs() << "Warning: unknown NOTDEC_MERGE_SCOPE_MODE='" << Mode
+                   << "', using skip.\n";
+      C.Mode = MergeScopeMode::Skip;
+    }
+    // Strict only means "apply the round-one evidence gate"; the other policies
+    // have no such gate yet, so strict falls back to skip for them.
+    if (C.Mode == MergeScopeMode::Strict &&
+        (C.Policies & ~(mergeScopePolicyBit(
+                            ConstraintsGenerator::MergeScopePolicy::LocalSubtype) |
+                        mergeScopePolicyBit(
+                            ConstraintsGenerator::MergeScopePolicy::ReverseEdge)))) {
+      llvm::errs() << "Warning: NOTDEC_MERGE_SCOPE_MODE=strict has no gate for "
+                      "a selected policy; those policies use skip.\n";
+    }
+    C.Diag = binarysub::env_flag("NOTDEC_MERGE_SCOPE_DIAG");
+    std::string Funcs;
+    for (const auto &P : C.Patterns) {
+      if (!Funcs.empty()) {
+        Funcs += ",";
+      }
+      Funcs += P;
+    }
+    const char *ModeName = C.Mode == MergeScopeMode::Strict ? "strict" : "skip";
+    llvm::errs() << "Info: merge scope active funcs=" << Funcs
+                 << " policies=" << C.Policies
+                 << " mode=" << ModeName << "\n";
+    return C;
+  }();
+  return Config;
+}
+
 } // namespace
+
+bool ConstraintsGenerator::mergeScopeMatchesFunction(
+    const llvm::Function *Function, MergeScopePolicy Policy) const {
+  if (Function == nullptr) {
+    return false;
+  }
+  const auto &Config = mergeFunctionScopeConfig();
+  if (!Config.Active ||
+      (Config.Policies & mergeScopePolicyBit(Policy)) == 0) {
+    return false;
+  }
+  const llvm::StringRef Name = Function->getName();
+  llvm::StringRef StrippedName = Name;
+  while (StrippedName.starts_with("_")) {
+    StrippedName = StrippedName.drop_front();
+  }
+  for (const std::string &Pattern : Config.Patterns) {
+    if (globMatch(Pattern, Name)) {
+      return true;
+    }
+    llvm::StringRef StrippedPattern = Pattern;
+    while (StrippedPattern.starts_with("_")) {
+      StrippedPattern = StrippedPattern.drop_front();
+    }
+    if (!StrippedName.empty() && globMatch(StrippedPattern, StrippedName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ConstraintsGenerator::mergeScopeMatchesNode(SimpleType Ty,
+                                                 MergeScopePolicy Policy) const {
+  if (!Ty) {
+    return false;
+  }
+  return mergeScopeMatchesFunction(getVariableOwningFunction(Ty), Policy);
+}
+
+bool ConstraintsGenerator::mergeScopeSkipFor(MergeScopePolicy Policy) const {
+  const auto &Config = mergeFunctionScopeConfig();
+  if (!Config.Active ||
+      (Config.Policies & mergeScopePolicyBit(Policy)) == 0) {
+    return false;
+  }
+  if (Config.Mode == MergeScopeMode::Skip) {
+    return true;
+  }
+  // "strict" is only defined for the two round-one policies.
+  return Config.Mode == MergeScopeMode::Strict &&
+         Policy != MergeScopePolicy::LocalSubtype &&
+         Policy != MergeScopePolicy::ReverseEdge;
+}
+
+bool ConstraintsGenerator::mergeScopeStrictFor(MergeScopePolicy Policy) const {
+  const auto &Config = mergeFunctionScopeConfig();
+  return Config.Active && Config.Mode == MergeScopeMode::Strict &&
+         (Config.Policies & mergeScopePolicyBit(Policy)) != 0 &&
+         (Policy == MergeScopePolicy::LocalSubtype ||
+          Policy == MergeScopePolicy::ReverseEdge);
+}
+
+bool ConstraintsGenerator::mergeScopeActive() const {
+  return mergeFunctionScopeConfig().Active;
+}
 
 bool ConstraintsGenerator::configureConstraintContext(
     binarysub::ConstraintContext &Context) {
@@ -4217,6 +4447,27 @@ bool ConstraintsGenerator::configureConstraintContext(
           ++FrameReverseMergesRefused;
           return false;
         }
+      }
+    }
+    // 20261021-187: per-function scope on the solver-side reverse-edge merge.
+    // S1 has no function pair of its own (the two nodes can belong to different
+    // owners), so match either side.  strict reuses the round-one evidence gate.
+    if (mergeScopeSkipFor(MergeScopePolicy::ReverseEdge) ||
+        mergeScopeStrictFor(MergeScopePolicy::ReverseEdge)) {
+      const bool ScopeMatched =
+          mergeScopeMatchesNode(LHS, MergeScopePolicy::ReverseEdge) ||
+          mergeScopeMatchesNode(RHS, MergeScopePolicy::ReverseEdge);
+      if (ScopeMatched) {
+        if (mergeScopeSkipFor(MergeScopePolicy::ReverseEdge)) {
+          ++MergeScopeSkips;
+          return false;
+        }
+        ++MergeScopeStrictGates;
+        const bool Allowed = roundOneMergeAllowed(LHS, RHS, /*Force=*/true);
+        if (!Allowed) {
+          ++MergeScopeStrictRefused;
+        }
+        return Allowed;
       }
     }
     return roundOneMergeAllowed(LHS, RHS);
@@ -5126,6 +5377,23 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
     return false;
   }
   ++LocalSubtypeSameFunctionCandidates;
+  // 20261021-187: per-function merge-policy scope (NOTDEC_MERGE_SCOPE_*).
+  // The pair is already known to share this function, so the function name is
+  // the whole match key.  "skip" refuses the F1/S2/S3 merge; "strict" forces
+  // the round-one evidence gate on it even when NOTDEC_TWO_ROUND_MERGE=0.
+  const bool ScopeMatched =
+      mergeScopeMatchesFunction(LHSFunc, MergeScopePolicy::LocalSubtype);
+  if (ScopeMatched && mergeScopeSkipFor(MergeScopePolicy::LocalSubtype)) {
+    ++MergeScopeSkips;
+    if (mergeFunctionScopeConfig().Diag) {
+      llvm::errs() << "[merge-scope] skip policy=local-subtype func="
+                   << LHSFunc->getName() << " lhs=vs#" << LHSVar->id
+                   << " rhs=vs#" << RHSVar->id << "\n";
+    }
+    return false;
+  }
+  const bool ScopeStrict =
+      ScopeMatched && mergeScopeStrictFor(MergeScopePolicy::LocalSubtype);
   // 20261017-160：同函数这一维的零点。同函数、同 level、同 size 的对一律不
   // 走这条合并路径，有向边照旧由 constrain 加上（调用方在钩子返回 false 时
   // 落回"加 lower/upper bound"）。只作用于这条策略路径：求解器的 reverse_edge
@@ -5149,7 +5417,13 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
   if (!hasStructPointerEvidence(LHS) && !hasStructPointerEvidence(RHS)) {
     return false;
   }
-  if (!roundOneMergeAllowed(LHS, RHS)) {
+  if (ScopeStrict) {
+    ++MergeScopeStrictGates;
+  }
+  if (!roundOneMergeAllowed(LHS, RHS, ScopeStrict)) {
+    if (ScopeStrict) {
+      ++MergeScopeStrictRefused;
+    }
     return false;
   }
   ++LocalSubtypeAccepted;
@@ -5644,6 +5918,10 @@ ConstraintsGenerator::collectStructPtrFieldFollowupMergeCandidatesForMergedOwner
 
 std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
   std::size_t Merged = 0;
+  // 20261021-187: per-function scope for F4.  The candidate carries the two
+  // owner nodes; match either owner's function.
+  const bool ScopeSkipFieldFollowup =
+      mergeScopeSkipFor(MergeScopePolicy::FieldFollowup);
   while (true) {
     const bool MeasureSubphases =
         ConstraintDiagEnabled && ActiveBottomUpTimingContext != nullptr;
@@ -5685,6 +5963,14 @@ std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
       }
       if (!Seen.insert({FromTarget.get(), IntoTarget.get(), Candidate.Offset})
                .second) {
+        continue;
+      }
+      if (ScopeSkipFieldFollowup &&
+          (mergeScopeMatchesNode(Candidate.FromOwner,
+                                 MergeScopePolicy::FieldFollowup) ||
+           mergeScopeMatchesNode(Candidate.IntoOwner,
+                                 MergeScopePolicy::FieldFollowup))) {
+        ++MergeScopeSkips;
         continue;
       }
       if (!hasNonConflictingStructFieldSlices(FromTarget, IntoTarget,
@@ -5748,8 +6034,13 @@ bool ConstraintsGenerator::hasNonConflictingStructFieldSlices(
 }
 
 bool ConstraintsGenerator::roundOneMergeAllowed(SimpleType LHS,
-                                                SimpleType RHS) const {
-  if (!TwoRoundMerge || RoundTwoRecheck) {
+                                                SimpleType RHS,
+                                                bool Force) const {
+  // Round two is the relaxation pass: never re-gate a deferred pair there.
+  if (RoundTwoRecheck) {
+    return true;
+  }
+  if (!Force && !TwoRoundMerge) {
     return true;
   }
   LHS = binarysub::resolve_variable(LHS);
@@ -5818,7 +6109,16 @@ void ConstraintsGenerator::deferRoundOneMergePair(SimpleType LHS,
 }
 
 void ConstraintsGenerator::recheckDeferredRoundOneMerges() {
-  if (!TwoRoundMerge || DeferredRoundOneMerges.empty()) {
+  if (DeferredRoundOneMerges.empty()) {
+    return;
+  }
+  // NOTDEC_MERGE_SCOPE_MODE=strict forces the round-one gate for selected
+  // functions even when the global two-round mode is off; those deferred pairs
+  // still need the round-two relaxation once all evidence is in.
+  const bool ScopeForcesRoundTwo =
+      mergeScopeStrictFor(MergeScopePolicy::LocalSubtype) ||
+      mergeScopeStrictFor(MergeScopePolicy::ReverseEdge);
+  if (!TwoRoundMerge && !ScopeForcesRoundTwo) {
     return;
   }
   std::vector<std::pair<SimpleType, SimpleType>> Deferred;
@@ -6343,6 +6643,36 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
                                    }),
                     Entries.end());
     }
+  }
+  // 20261021-187: per-function scope for F2.  Match either the callee (target)
+  // or the caller of the actual value, so a bad formal/actual merge can be
+  // isolated from whichever side triggers it.
+  if (CG.mergeScopeSkipFor(ConstraintsGenerator::MergeScopePolicy::CallSlot)) {
+    Entries.erase(std::remove_if(Entries.begin(), Entries.end(),
+                                 [&](const CallSlotMergeEntry &Entry) {
+                                   const bool Match =
+                                       CG.mergeScopeMatchesFunction(
+                                           Entry.Target,
+                                           ConstraintsGenerator::
+                                               MergeScopePolicy::CallSlot) ||
+                                       CG.mergeScopeMatchesNode(
+                                           Entry.Actual,
+                                           ConstraintsGenerator::
+                                               MergeScopePolicy::CallSlot);
+                                   if (!Match) {
+                                     return false;
+                                   }
+                                   ++CG.MergeScopeSkips;
+                                   if (mergeFunctionScopeConfig().Diag) {
+                                     llvm::errs()
+                                         << "[merge-scope] skip policy=call-slot "
+                                            "target="
+                                         << formatCallMergeTarget(Entry.Target)
+                                         << " slot=" << Entry.Slot << "\n";
+                                   }
+                                   return true;
+                                 }),
+                  Entries.end());
   }
   {
     // NOTDEC_SLOT_MERGE_DIAG2: unset/0 = off, "eventlog" = sink only,
@@ -7806,6 +8136,10 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
   auto HasStructEvidence = [&](SimpleType Ty) {
     return hasStructPointerEvidence(Ty);
   };
+  // 20261021-187: per-function scope for F3 (microsub2 leaves it off by
+  // default).  Match either target's owner.
+  const bool ScopeSkipLoadStore =
+      mergeScopeSkipFor(MergeScopePolicy::LoadStore);
   while (true) {
     const bool MeasureSubphases =
         ConstraintDiagEnabled && ActiveBottomUpTimingContext != nullptr;
@@ -7865,6 +8199,12 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
       }
       if (!HasStructEvidence(FirstTarget) ||
           !HasStructEvidence(SecondTarget)) {
+        continue;
+      }
+      if (ScopeSkipLoadStore &&
+          (mergeScopeMatchesNode(FirstTarget, MergeScopePolicy::LoadStore) ||
+           mergeScopeMatchesNode(SecondTarget, MergeScopePolicy::LoadStore))) {
+        ++MergeScopeSkips;
         continue;
       }
 

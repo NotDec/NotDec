@@ -485,10 +485,42 @@ struct ConstraintsGenerator {
   // Round-one gate for NOTDEC_TWO_ROUND_MERGE: true when merging is currently
   // allowed (switch off, or we are in round two, or both sides already carry
   // identical field slices).  Refused pairs are queued for round two.
-  bool roundOneMergeAllowed(SimpleType LHS, SimpleType RHS) const;
+  // Force applies the gate to one pair even when the global two-round mode is
+  // off; that is the "strict" action of NOTDEC_MERGE_SCOPE_* below.
+  bool roundOneMergeAllowed(SimpleType LHS, SimpleType RHS,
+                            bool Force = false) const;
   void deferRoundOneMergePair(SimpleType LHS, SimpleType RHS) const;
   // Round two: re-check the pairs round one refused, with full evidence.
   void recheckDeferredRoundOneMerges();
+  // ---- Per-function merge-policy scope (20261021-187) --------------------
+  // Function-axis switch from log 176 §5.1 / log 186 §7: exclude one merge
+  // policy from the functions whose parameters a bad merge corrupts, instead
+  // of disabling the policy for the whole image.
+  //   NOTDEC_MERGE_SCOPE_FUNCS=<glob,glob>   active only when non-empty
+  //   NOTDEC_MERGE_SCOPE_POLICIES=<list>     default local-subtype
+  //   NOTDEC_MERGE_SCOPE_MODE=skip|strict    default skip
+  // Function names are llvm::Function names (microsub2 sees IDA's sub_XXXX
+  // for stripped binaries), matched with * and ?; a leading underscore is
+  // ignored on both sides.  "skip" refuses the selected policy's merges in a
+  // matching function.  "strict" applies the round-one evidence gate there
+  // even when NOTDEC_TWO_ROUND_MERGE=0 (only local-subtype/reverse-edge).
+  enum class MergeScopePolicy {
+    LocalSubtype,  // F1/S2/S3: shouldMergeSameFunctionStructPtrSubtype
+    ReverseEdge,   // S1: shouldMergeReverseEdgeVariables
+    CallSlot,      // F2: transactional call-argument/return-slot merges
+    FieldFollowup, // F4: struct-field follow-up merges
+    LoadStore      // F3: load/store struct-pointer slots (microsub2 off)
+  };
+  bool mergeScopeMatchesFunction(const llvm::Function *Function,
+                                 MergeScopePolicy Policy) const;
+  // Resolve the node, take its owning function, and match that.
+  bool mergeScopeMatchesNode(SimpleType Ty, MergeScopePolicy Policy) const;
+  bool mergeScopeSkipFor(MergeScopePolicy Policy) const;
+  bool mergeScopeStrictFor(MergeScopePolicy Policy) const;
+  bool mergeScopeActive() const;
+  mutable std::size_t MergeScopeSkips = 0;
+  mutable std::size_t MergeScopeStrictGates = 0;
+  mutable std::size_t MergeScopeStrictRefused = 0;
   // ---- Stack-region marking (default on) ---------------------------------
   // A value is frame derived when it addresses the shared "%frame" alloca of a
   // function, directly or through GEP/cast chains; such a value denotes a
