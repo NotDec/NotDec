@@ -10109,11 +10109,38 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
   // bounds - instead of the function's own generalized formal.  genTypes runs
   // after the whole bottom-up phase and re-solves this group's roots, so the
   // shared node's solution already contains every call-site merge.
+  // HType lowering is order-sensitive: TypeBuilder keeps per-SCC state
+  // (TypeCache/RecordDeclByRequirement/InProgress) and HTypeContext/FreshName
+  // are shared by every value, so which value is converted first changes
+  // recursive cycle fallbacks, decl identity and decl numbering.  V2N is a
+  // std::map<ExtValuePtr, ...> whose iteration follows llvm::Value* addresses;
+  // convert in stable-label order instead so the HType report and lvar map do
+  // not depend on the allocator state.  Labels are unique for real values; the
+  // content hash is only a deterministic tie-breaker for malformed input.
+  struct OrderedValueEntry {
+    std::string StableLabel;
+    ExtValuePtr Key;
+    SimpleType Type;
+  };
+  std::vector<OrderedValueEntry> OrderedV2N;
+  OrderedV2N.reserve(V2N.size());
+  for (const auto &Ent : V2N) {
+    OrderedV2N.push_back({toStableString(Ent.first), Ent.first, Ent.second});
+  }
+  std::stable_sort(
+      OrderedV2N.begin(), OrderedV2N.end(),
+      [](const OrderedValueEntry &Lhs, const OrderedValueEntry &Rhs) {
+        if (Lhs.StableLabel != Rhs.StableLabel) {
+          return Lhs.StableLabel < Rhs.StableLabel;
+        }
+        return binarysub::stableTypeNodeHash(Lhs.Type) <
+               binarysub::stableTypeNodeHash(Rhs.Type);
+      });
   std::size_t ConvertCount = 0;
-  for (auto &Ent : V2N) {
-    auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
-    auto *Lower = convertSolvedType(Ent.second, true, RootLabel + " lower");
-    ValueTypesLower.insert({Ent.first, Lower});
+  for (auto &Ent : OrderedV2N) {
+    auto RootLabel = formatTypeBuilderRootLabel(Ent.Key);
+    auto *Lower = convertSolvedType(Ent.Type, true, RootLabel + " lower");
+    ValueTypesLower.insert({Ent.Key, Lower});
     ++ConvertCount;
     if (ConvertCount % 5000 == 0) {
       reportConvertProgress(ConvertCount, V2N.size());
@@ -10143,10 +10170,10 @@ ConstraintsGenerator::genTypes(ast::HTypeContext &HCtx,
       }
     }
   }
-  for (auto &Ent : V2N) {
-    auto RootLabel = formatTypeBuilderRootLabel(Ent.first);
-    auto *Upper = convertSolvedType(Ent.second, false, RootLabel + " upper");
-    ValueTypesUpper.insert({Ent.first, Upper});
+  for (auto &Ent : OrderedV2N) {
+    auto RootLabel = formatTypeBuilderRootLabel(Ent.Key);
+    auto *Upper = convertSolvedType(Ent.Type, false, RootLabel + " upper");
+    ValueTypesUpper.insert({Ent.Key, Upper});
     ++ConvertCount;
     if (ConvertCount % 5000 == 0) {
       reportConvertProgress(ConvertCount, V2N.size() * 2);
