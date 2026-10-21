@@ -4394,7 +4394,8 @@ bool ConstraintsGenerator::configureConstraintContext(
 
 bool ConstraintsGenerator::tryMergeVariablesForPolicy(
     llvm::StringRef Policy, SimpleType From, SimpleType Into,
-    const std::string &TraceDetail) {
+    const std::string &TraceDetail,
+    std::vector<StructFieldFollowupMergeCandidate> &FollowupSink) {
   From = binarysub::resolve_variable(From);
   Into = binarysub::resolve_variable(Into);
   auto *FromVar = From ? From->getAsVariableState() : nullptr;
@@ -4515,9 +4516,8 @@ bool ConstraintsGenerator::tryMergeVariablesForPolicy(
   }
   auto FieldFollowups =
       collectStructPtrFieldFollowupMergeCandidatesForMergedOwner(Into);
-  StructFieldFollowupMergeCandidates.insert(
-      StructFieldFollowupMergeCandidates.end(), FieldFollowups.begin(),
-      FieldFollowups.end());
+  FollowupSink.insert(FollowupSink.end(), FieldFollowups.begin(),
+                      FieldFollowups.end());
   emitTypeRecoveryTrace("[merge-policy:" + Policy.str() +
                         "] from=" + binarysub::debug_string(From) +
                         " into=" + binarysub::debug_string(Into) +
@@ -5655,7 +5655,19 @@ std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
     std::set<std::tuple<const binarysub::TypeNode *,
                         const binarysub::TypeNode *, uint64_t>>
         Seen;
-    for (const auto &Candidate : StructFieldFollowupMergeCandidates) {
+    // Follow-ups discovered by this pass's merges are collected here and
+    // appended after the scan: the vector being iterated must not grow (that
+    // reallocated it and left the loop reading freed candidates).  A successful
+    // merge sets Changed, so the outer loop scans the new candidates next pass.
+    std::vector<StructFieldFollowupMergeCandidate> NewCandidates;
+    const std::size_t CandidateCount =
+        StructFieldFollowupMergeCandidates.size();
+    for (std::size_t CandidateIndex = 0; CandidateIndex < CandidateCount;
+         ++CandidateIndex) {
+      // Copy by value: the count is a snapshot of this pass, and the merge
+      // below must not be able to invalidate the candidate being inspected.
+      const StructFieldFollowupMergeCandidate Candidate =
+          StructFieldFollowupMergeCandidates[CandidateIndex];
       auto FromTarget = binarysub::resolve_variable(Candidate.FromFieldTarget);
       auto IntoTarget = binarysub::resolve_variable(Candidate.IntoFieldTarget);
       auto *FromTargetVar =
@@ -5693,7 +5705,7 @@ std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
         Detail += " offset=" + std::to_string(Candidate.Offset);
       }
       if (!tryMergeVariablesForPolicy("struct-field-followup", FromTarget,
-                                      IntoTarget, Detail)) {
+                                      IntoTarget, Detail, NewCandidates)) {
         continue;
       }
       ++Merged;
@@ -5709,6 +5721,9 @@ std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
       // struct-ptr slot policy below uses the same shape for the same reason.
       continue;
     }
+    StructFieldFollowupMergeCandidates.insert(
+        StructFieldFollowupMergeCandidates.end(), NewCandidates.begin(),
+        NewCandidates.end());
     if (MeasureSubphases) {
       recordBottomUpSubphase(ActiveBottomUpTimingContext,
                              BottomUpSubstage::FieldFollowupCandidateApply,
@@ -5829,7 +5844,8 @@ void ConstraintsGenerator::recheckDeferredRoundOneMerges() {
     auto From = LHSVar->id <= RHSVar->id ? RHS : LHS;
     auto Into = LHSVar->id <= RHSVar->id ? LHS : RHS;
     if (tryMergeVariablesForPolicy("two-round", From, Into,
-                                   "round-one-deferred")) {
+                                   "round-one-deferred",
+                                   StructFieldFollowupMergeCandidates)) {
       ++Accepted;
     }
   }
@@ -7860,7 +7876,8 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
         Detail += binarysub::debug_string(Candidate.Pointer);
         Detail += " size=" + std::to_string(Candidate.AccessSize);
       }
-      if (!tryMergeVariablesForPolicy(Policy, From, Into, Detail)) {
+      if (!tryMergeVariablesForPolicy(Policy, From, Into, Detail,
+                                      StructFieldFollowupMergeCandidates)) {
         continue;
       }
 

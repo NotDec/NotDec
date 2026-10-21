@@ -465,9 +465,15 @@ struct ConstraintsGenerator {
   void addMergeNode(SimpleType From, SimpleType To);
   void configurePNDiffCallbacks();
   bool configureConstraintContext(binarysub::ConstraintContext &Context);
-  bool tryMergeVariablesForPolicy(llvm::StringRef Policy, SimpleType From,
-                                  SimpleType Into,
-                                  const std::string &TraceDetail);
+  // A successful merge discovers field follow-ups for the merged owner and
+  // appends them to FollowupSink.  It is a parameter rather than the member
+  // vector because a caller that is iterating that member must not have it
+  // reallocated underneath the loop (that was a heap-use-after-free: the
+  // field-followup apply pass merged while range-for'ing the same vector).
+  bool tryMergeVariablesForPolicy(
+      llvm::StringRef Policy, SimpleType From, SimpleType Into,
+      const std::string &TraceDetail,
+      std::vector<StructFieldFollowupMergeCandidate> &FollowupSink);
   std::size_t applyCallInterfaceMergePolicy();
   std::size_t applyReturnValueMergePolicy();
   const ExtValuePtr *getVariableExternalValue(SimpleType Ty) const;

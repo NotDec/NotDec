@@ -505,9 +505,12 @@ TEST(MLsub, FramePolicyMergeGuardAllowsWhenOff) {
   auto FrameNode = CG.createNode(Frame);
   auto ArgNode = CG.createNode(F->getArg(0));
   CG.FrameNoPolicyMerge = false;
+  std::vector<notdec::mlsub::ConstraintsGenerator::
+                  StructFieldFollowupMergeCandidate>
+      Followups;
   EXPECT_TRUE(
       CG.tryMergeVariablesForPolicy("unit-frame-guard", FrameNode, ArgNode,
-                                    "test"));
+                                    "test", Followups));
   EXPECT_EQ(binarysub::resolve_variable(FrameNode).get(),
             binarysub::resolve_variable(ArgNode).get());
   EXPECT_EQ(CG.FramePolicyMergesRefused, 0u);
@@ -533,9 +536,12 @@ TEST(MLsub, FramePolicyMergeGuardRefusesFrameCrossMerge) {
   auto FrameNode = CG.createNode(Frame);
   auto ArgNode = CG.createNode(F->getArg(0));
   CG.FrameNoPolicyMerge = true;
+  std::vector<notdec::mlsub::ConstraintsGenerator::
+                  StructFieldFollowupMergeCandidate>
+      Followups;
   EXPECT_FALSE(
       CG.tryMergeVariablesForPolicy("unit-frame-guard", FrameNode, ArgNode,
-                                    "test"));
+                                    "test", Followups));
   EXPECT_NE(binarysub::resolve_variable(FrameNode).get(),
             binarysub::resolve_variable(ArgNode).get());
   EXPECT_EQ(CG.FramePolicyMergesRefused, 1u);
