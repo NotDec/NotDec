@@ -11,14 +11,14 @@
 | `NOTDEC_LOCAL_SUBTYPE_MERGE_MODE` | 同函数 var-var 对怎么处理：`struct-pointer`（默认，有证据才合并）/`pointer`/`all-local`（全合并）/`none`（不合并） |
 | `NOTDEC_IMPLICIT_SUBTYPE_ABLATION` | SCC0 内消融：`merge-local`（有数据流就合并）/`merge-or-cut`（合并不了就剪断调用边） |
 | `NOTDEC_EARLY_CALL_INTERFACE_MERGE` | `=1` 先合并调用槽再加调用边（实验顺序） |
-| `NOTDEC_TWO_ROUND_MERGE` | `=0` 关闭两轮合并（默认开） |
-| `NOTDEC_TWO_ROUND_DIAG` | 打印两轮合并的拒绝/重检计数 |
-| `NOTDEC_NO_REVERSE_EDGE_MERGE` | 拒绝所有 reverse_edge_rule 自动合并（对照臂） |
+| `NOTDEC_TWO_ROUND_MERGE` | `=0` 关闭两轮闸门（`two-round-gate`，默认开） |
+| `NOTDEC_TWO_ROUND_DIAG` | 打印两轮闸门的拒绝/重检计数 |
+| `NOTDEC_NO_REVERSE_EDGE_MERGE` | 拒绝所有 `reverse-edge-rule` 自动合并（对照臂） |
 | `NOTDEC_ALLOW_SHALLOW_MERGE_CONFLICT` | `=1` 浅层冲突时跳过该合并而不是回滚 |
-| `NOTDEC_DISABLE_CALLSLOT_MERGE` | 关闭调用参数/返回槽的事务化合并 |
+| `NOTDEC_DISABLE_CALLSLOT_MERGE` | 关闭 `call-slot`（调用参数/返回槽）的事务化合并 |
 | `NOTDEC_MERGE_SCOPE_FUNCS` | 按函数名限定合并策略：逗号分隔的 glob（`*`/`?`），空 = 关。微sub2 对 stripped 输入看到的是 IDA 的 `sub_XXXX` |
-| `NOTDEC_MERGE_SCOPE_POLICIES` | 上面函数里要处理的策略：`local-subtype`（F1/S2/S3，默认）/`reverse-edge`（S1）/`call-slot`（F2）/`field-followup`（F4）/`load-store`（F3）/`all` |
-| `NOTDEC_MERGE_SCOPE_MODE` | `skip`（默认，拒绝匹配函数里的所选策略合并）/`strict`（只对 F1/S1 生效：在这些函数里强制 round-one 证据闸门，等价于局部打开 `NOTDEC_TWO_ROUND_MERGE`；其它策略按 skip） |
+| `NOTDEC_MERGE_SCOPE_POLICIES` | 上面函数里要处理的策略：`local-subtype`（同函数 struct-ptr 合并，默认）/`reverse-edge`（反向边规则合并）/`call-slot`（调用槽合并）/`field-followup`（字段跟随合并）/`load-store`（load/store 槽合并）/`all` |
+| `NOTDEC_MERGE_SCOPE_MODE` | `skip`（默认，拒绝匹配函数里的所选策略合并）/`strict`（只对 `local-subtype`/`reverse-edge` 生效：在这些函数里强制 round-one 证据闸门，等价于局部打开 `NOTDEC_TWO_ROUND_MERGE`；其它策略按 skip） |
 | `NOTDEC_MERGE_SCOPE_DIAG` | `=1` 打印每条被跳过的合并（策略、函数、vs# id） |
 
 ## 调用槽候选

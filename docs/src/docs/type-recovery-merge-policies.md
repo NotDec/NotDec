@@ -4,6 +4,27 @@
 求解器内置的必然合并，以及 NotDec 接入层的启发式策略。新增合并策略前先读本文档，
 确认与现有机制不重复、不冲突。
 
+## 命名约定
+
+早期日志曾用编号速记；这些编号不是代码里的标识符，其中有的还与评测指标同名，读日志时很容易混淆。现在文档、日志和代码注释统一用下表的名字，旧编号已从日志正文移除。
+
+| 名字 | 做什么 |
+| --- | --- |
+| `same-fn-struct-ptr`（同函数 struct-ptr 合并） | 同函数里两个 pointer-like、至少一侧有 struct 证据的变量合并（同层 var-var 钩子、界证据重扫的入口也是它） |
+| `call-slot`（调用槽合并） | 实参↔形参、返回值↔函数返回的槽位合并 |
+| `load-store-slot`（load/store 槽合并） | 同一指针上 load/store 目标合并 |
+| `field-followup`（字段跟随合并） | 两个 owner 合并后，同 offset 的字段目标跟随合并 |
+| `two-round-gate`（两轮闸门） | round one 只放行字段证据完全一致的 pair，其余推迟到 round two 复审 |
+| `early-call-interface`（提前调用接口合并） | 在加 deferred call 边之前先合并调用槽 |
+| `declared-alias`（声明式等价） | `arg_alias`/`ret_alias_of_arg`/`local_alias` 直接加双向边 |
+| `reverse-edge-rule`（反向边规则合并） | 同层变量间已有反向边，求解器强制等价合并 |
+| `same-level-varvar-hook`（同层 var-var 钩子） | 同层 var-var 边上的前端策略入口 |
+| `bound-evidence-rescan`（界证据重扫） | 变量拿到新的 record/function 界后重扫邻居 |
+| `host-merge-call`（前端直接合并） | 前端策略直接调用 `merge_variable_into` |
+
+下表的“策略”列用现名；代码里的 `LocalSubtypeMergeMode`、`NOTDEC_MERGE_SCOPE_POLICIES`
+等标识符保持原样。
+
 ## 求解器内置的必然合并（binarysub，无需策略）
 
 这些是类型系统本体行为，不是"策略"，任何情况下都不应重复实现：
@@ -30,10 +51,10 @@
 
 | 策略 | 位置 | 时机 | 条件 | 开关 |
 | --- | --- | --- | --- | --- |
-| 同函数 struct-ptr subtype merge | `shouldMergeSameFunctionStructPtrSubtype`（`MLsubGenerator.cpp:3158`），solver 处理 var-var 边时经 `SameLevelVarVarHook` 回调 | 约束求解中 | 同函数、同 level、双方 pointer-like、至少一边有 struct 证据（含 typed pointer）；`onVariableNonVarBoundAdded`（3341）在证据升级时重扫 | 默认开启 |
-| load/store struct-ptr merge | `applyStructPtrLoadStoreMergePolicy`（`MLsubGenerator.cpp:4976`） | 每个 SCC 求解后 | 同一指针变量上的 `ptr_load`/`ptr_store` 目标：同 level、size==PointerSize、双方 `hasStructPointerEvidence` | `--merge-struct-ptr-load-store`（默认开） |
-| call arg/formal + return merge | `applyCallInterfaceMergePolicy`（`MLsubGenerator.cpp:4748`）→ `applyTransactionalCallSlotMergePolicy`（3951） | deferred call 约束应用后 + 每个 SCC post-summary | 事务化合并，`RequireStructEvidence`，冲突回退；决策写入 `CallSlotMergeDecisions.txt` | 默认开启 |
-| struct field follow-up merge | `applyStructPtrFieldFollowupMergePolicy`（`MLsubGenerator.cpp:3655`） | post-summary | 合并后字段布局变化带来的新候选 | 默认开启 |
+| `same-fn-struct-ptr`（同函数 struct-ptr 合并） | `shouldMergeSameFunctionStructPtrSubtype`（`MLsubGenerator.cpp:3158`），solver 处理 var-var 边时经 `SameLevelVarVarHook` 回调 | 约束求解中 | 同函数、同 level、双方 pointer-like、至少一边有 struct 证据（含 typed pointer）；`onVariableNonVarBoundAdded`（3341）在证据升级时重扫 | 默认开启 |
+| `load-store-slot`（load/store 槽合并） | `applyStructPtrLoadStoreMergePolicy`（`MLsubGenerator.cpp:4976`） | 每个 SCC 求解后 | 同一指针变量上的 `ptr_load`/`ptr_store` 目标：同 level、size==PointerSize、双方 `hasStructPointerEvidence` | `--merge-struct-ptr-load-store`（默认开） |
+| `call-slot`（调用槽合并） | `applyCallInterfaceMergePolicy`（`MLsubGenerator.cpp:4748`）→ `applyTransactionalCallSlotMergePolicy`（3951） | deferred call 约束应用后 + 每个 SCC post-summary | 事务化合并，`RequireStructEvidence`，冲突回退；决策写入 `CallSlotMergeDecisions.txt` | 默认开启 |
+| `field-followup`（字段跟随合并） | `applyStructPtrFieldFollowupMergePolicy`（`MLsubGenerator.cpp:3655`） | post-summary | 合并后字段布局变化带来的新候选 | 默认开启 |
 | level-0 SCC 合并 | `prepareSCC()`（`MLsubGenerator.cpp:5125`） | 约束生成前 | 所有 level-0 raw SCC 合成一个 generator（模块级单态作用域，保全局变量跨函数约束） | 固定行为 |
 | `opaque_body` | `ConstraintsGenerator::run()`（`MLsubGenerator.cpp:5480` 附近） | 约束生成时 | summary override 标记的函数跳过函数体约束，只保留接口摘要 | summary JSON 字段 |
 

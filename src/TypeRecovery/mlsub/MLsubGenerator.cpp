@@ -4217,8 +4217,9 @@ const MergeFunctionScopeConfig &mergeFunctionScopeConfig() {
       return C;
     }
     C.Active = true;
-    // Default: the F1/S2/S3 path, the one that log 186 found responsible for
-    // the same-function mis-merges on O0/cp.
+    // Default: same-fn-struct-ptr (also the same-level-varvar-hook /
+    // bound-evidence-rescan entry), the path log 186
+    // found responsible for the same-function mis-merges on O0/cp.
     C.Policies = mergeScopePolicyBit(
         ConstraintsGenerator::MergeScopePolicy::LocalSubtype);
     const char *RawPolicies = std::getenv("NOTDEC_MERGE_SCOPE_POLICIES");
@@ -4450,7 +4451,7 @@ bool ConstraintsGenerator::configureConstraintContext(
       }
     }
     // 20261021-187: per-function scope on the solver-side reverse-edge merge.
-    // S1 has no function pair of its own (the two nodes can belong to different
+    // reverse-edge-rule has no function pair of its own (the two nodes can belong to different
     // owners), so match either side.  strict reuses the round-one evidence gate.
     if (mergeScopeSkipFor(MergeScopePolicy::ReverseEdge) ||
         mergeScopeStrictFor(MergeScopePolicy::ReverseEdge)) {
@@ -5379,8 +5380,9 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
   ++LocalSubtypeSameFunctionCandidates;
   // 20261021-187: per-function merge-policy scope (NOTDEC_MERGE_SCOPE_*).
   // The pair is already known to share this function, so the function name is
-  // the whole match key.  "skip" refuses the F1/S2/S3 merge; "strict" forces
-  // the round-one evidence gate on it even when NOTDEC_TWO_ROUND_MERGE=0.
+  // the whole match key.  "skip" refuses the same-fn-struct-ptr merge (the
+  // same-level-varvar-hook / bound-evidence-rescan entry); "strict" forces the round-one evidence gate on it even when
+  // NOTDEC_TWO_ROUND_MERGE=0.
   const bool ScopeMatched =
       mergeScopeMatchesFunction(LHSFunc, MergeScopePolicy::LocalSubtype);
   if (ScopeMatched && mergeScopeSkipFor(MergeScopePolicy::LocalSubtype)) {
@@ -5918,7 +5920,7 @@ ConstraintsGenerator::collectStructPtrFieldFollowupMergeCandidatesForMergedOwner
 
 std::size_t ConstraintsGenerator::applyStructPtrFieldFollowupMergePolicy() {
   std::size_t Merged = 0;
-  // 20261021-187: per-function scope for F4.  The candidate carries the two
+  // 20261021-187: per-function scope for field-followup.  The candidate carries the two
   // owner nodes; match either owner's function.
   const bool ScopeSkipFieldFollowup =
       mergeScopeSkipFor(MergeScopePolicy::FieldFollowup);
@@ -6644,7 +6646,7 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
                     Entries.end());
     }
   }
-  // 20261021-187: per-function scope for F2.  Match either the callee (target)
+  // 20261021-187: per-function scope for call-slot.  Match either the callee (target)
   // or the caller of the actual value, so a bad formal/actual merge can be
   // isolated from whichever side triggers it.
   if (CG.mergeScopeSkipFor(ConstraintsGenerator::MergeScopePolicy::CallSlot)) {
@@ -8136,7 +8138,7 @@ ConstraintsGenerator::applyStructPtrSlotMergeCandidates(llvm::StringRef Policy) 
   auto HasStructEvidence = [&](SimpleType Ty) {
     return hasStructPointerEvidence(Ty);
   };
-  // 20261021-187: per-function scope for F3 (microsub2 leaves it off by
+  // 20261021-187: per-function scope for load-store-slot (microsub2 leaves it off by
   // default).  Match either target's owner.
   const bool ScopeSkipLoadStore =
       mergeScopeSkipFor(MergeScopePolicy::LoadStore);

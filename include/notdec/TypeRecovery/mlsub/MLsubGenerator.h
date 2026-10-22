@@ -505,11 +505,11 @@ struct ConstraintsGenerator {
   // matching function.  "strict" applies the round-one evidence gate there
   // even when NOTDEC_TWO_ROUND_MERGE=0 (only local-subtype/reverse-edge).
   enum class MergeScopePolicy {
-    LocalSubtype,  // F1/S2/S3: shouldMergeSameFunctionStructPtrSubtype
-    ReverseEdge,   // S1: shouldMergeReverseEdgeVariables
-    CallSlot,      // F2: transactional call-argument/return-slot merges
-    FieldFollowup, // F4: struct-field follow-up merges
-    LoadStore      // F3: load/store struct-pointer slots (microsub2 off)
+    LocalSubtype,  // same-fn-struct-ptr: shouldMergeSameFunctionStructPtrSubtype
+    ReverseEdge,   // reverse-edge-rule: shouldMergeReverseEdgeVariables
+    CallSlot,      // call-slot: transactional call-argument/return-slot merges
+    FieldFollowup, // field-followup: struct-field follow-up merges
+    LoadStore      // load-store-slot: load/store struct-pointer slots (microsub2 off)
   };
   bool mergeScopeMatchesFunction(const llvm::Function *Function,
                                  MergeScopePolicy Policy) const;
