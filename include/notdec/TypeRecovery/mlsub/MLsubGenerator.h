@@ -515,6 +515,12 @@ struct ConstraintsGenerator {
                                  MergeScopePolicy Policy) const;
   // Resolve the node, take its owning function, and match that.
   bool mergeScopeMatchesNode(SimpleType Ty, MergeScopePolicy Policy) const;
+  // Call-slot only: does NOTDEC_MERGE_SCOPE_SLOTS accept this slot label
+  // ("argN"/"ret")?  Always true when the switch is unset.
+  bool mergeScopeSlotMatches(llvm::StringRef Slot) const;
+  // 20261021-195 experiment aid: NOTDEC_MERGE_VETO_VALUES veto.
+  bool mergeVetoValueMatch(SimpleType Ty) const;
+  mutable std::size_t MergeVetoValueRefused = 0;
   bool mergeScopeSkipFor(MergeScopePolicy Policy) const;
   bool mergeScopeStrictFor(MergeScopePolicy Policy) const;
   bool mergeScopeActive() const;

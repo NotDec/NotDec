@@ -66,6 +66,35 @@
 - 注意：默认的 struct-pointer 模式只合并 pointer-size 的变量；放宽到所有 pointer-like
   或所有同层同位宽局部值在实验中不更快（`logs/20260729-02`）。
 
+## 按函数/按参数限定一条策略（`NOTDEC_MERGE_SCOPE_*`）
+
+策略默认是全局的；当某个热点函数里的误合并把局部分析结果带偏时，用这一组开关把策略
+限定到函数、或限定到某个参数位，而不是整体关掉（整体关掉通常两个轴都输，见
+`microsub2/logs/20261021-186`）。
+
+| 变量 | 作用 |
+| --- | --- |
+| `NOTDEC_MERGE_SCOPE_FUNCS` | 逗号分隔的函数名 glob（`*`/`?`，两侧前导 `_` 忽略）；空＝功能关闭。stripped 输入下就是 IDA 的 `sub_XXXX` |
+| `NOTDEC_MERGE_SCOPE_POLICIES` | 默认 `local-subtype`；可写 `reverse-edge`/`call-slot`/`field-followup`/`load-store`/`all` |
+| `NOTDEC_MERGE_SCOPE_MODE` | `skip`（默认，拒绝该策略在匹配函数里的合并）/`strict`（只对 `local-subtype`、`reverse-edge` 有效：在这些函数里强制 round-one 证据闸门） |
+| `NOTDEC_MERGE_SCOPE_SLOTS` | 只有 `_POLICIES` 含 `call-slot` 时生效：逗号分隔的 slot 模式（`argN`/`ret`，支持 glob，裸数字 `N`＝`argN`）。不设＝整函数；设了＝只关这些参数位上的 actual→formal 合并 |
+| `NOTDEC_MERGE_SCOPE_DIAG` | 逐条打印被拒绝的合并（策略、函数、两侧变量 id 与值标签） |
+| `NOTDEC_MERGE_SCOPE_DIAG_FIELDS` | 在上一行后面补两侧的原始字段标签（含 stride 与负偏移），用于区分"同一对象的两个视图"和"无关对象" |
+
+语义：`skip` 走各策略原有的拒绝回退（`same-fn-struct-ptr`/`reverse-edge` 返回 false 后照常加
+lower/upper bound，`call-slot` 是删候选），不是新造一条路径；`strict` 复用
+`roundOneMergeAllowed` 的判据，只是把"是否启用"从全局 `NOTDEC_TWO_ROUND_MERGE` 换成"该函数
+是否命中 scope"。
+
+**用之前先确认拦得住**：`strict` 依赖两侧已有字段证据，而 `same-fn-struct-ptr` 的很多
+合并发生在证据为空时（`%ldx`/栈重载这类值），这类合并任何字段证据闸门都看不到；判定
+时先开 `NOTDEC_MERGE_SCOPE_DIAG_FIELDS=1` 看 `fields={<none>}` 的比例
+（`microsub2/logs/20261023-195`）。
+
+`NOTDEC_MERGE_VETO_VALUES`（分号分隔子串，配 `NOTDEC_MERGE_VETO_MODE=either|both`）是**实验
+探针**：命中的同函数合并直接拒绝，用来问"哪一类值让合并变坏"。它不是配置项，别写进
+默认配置或 benchmark 配置。
+
 ## 历史教训（设计新策略前必读）
 
 - **求解后 merge 有真实成本**：`--merge-struct-ptr-load-store` 在 fortune 上

@@ -4420,10 +4420,12 @@ bool ConstraintsGenerator::mergeScopeActive() const {
 
 // ---- Value-label veto (20261021-195, experiment aid only) ----------------
 // NOTDEC_MERGE_VETO_VALUES=<substr;substr;...> refuses a same-fn-struct-ptr
-// merge when either side's value set already contains a value whose stable
-// label holds one of the substrings.  Not a configuration knob: it exists to
-// ask "which kind of value makes the merge harmful" (a %add-derived cursor, a
-// call result, a stack reload) without rebuilding per question.  Unset = off.
+// merge when a side's value set already contains a value whose stable label
+// holds one of the substrings.  NOTDEC_MERGE_VETO_MODE picks the sides:
+// "either" (default) = one matching side is enough, "both" = only when both
+// sides match.  Not a configuration knob: it exists to ask "which kind of value
+// makes the merge harmful" (a %add-derived cursor, a call result, a stack
+// reload, a loaded pointer) without rebuilding per question.  Unset = off.
 const std::vector<std::string> &mergeVetoValuePatterns() {
   static const std::vector<std::string> Patterns = [] {
     std::vector<std::string> Out;
@@ -4442,6 +4444,14 @@ const std::vector<std::string> &mergeVetoValuePatterns() {
     return Out;
   }();
   return Patterns;
+}
+
+bool mergeVetoNeedsBothSides() {
+  static const bool Both = [] {
+    const char *Raw = std::getenv("NOTDEC_MERGE_VETO_MODE");
+    return Raw != nullptr && llvm::StringRef(Raw).trim() == "both";
+  }();
+  return Both;
 }
 
 bool ConstraintsGenerator::mergeVetoValueMatch(SimpleType Ty) const {
@@ -5481,9 +5491,13 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
   }
   ++LocalSubtypeSameFunctionCandidates;
   // 20261021-195 experiment aid: see mergeVetoValuePatterns().
-  if (mergeVetoValueMatch(LHS) || mergeVetoValueMatch(RHS)) {
-    ++MergeVetoValueRefused;
-    return false;
+  {
+    const bool LVeto = mergeVetoValueMatch(LHS);
+    const bool RVeto = mergeVetoValueMatch(RHS);
+    if (mergeVetoNeedsBothSides() ? (LVeto && RVeto) : (LVeto || RVeto)) {
+      ++MergeVetoValueRefused;
+      return false;
+    }
   }
   // 20261021-187: per-function merge-policy scope (NOTDEC_MERGE_SCOPE_*).
   // The pair is already known to share this function, so the function name is
@@ -10931,8 +10945,9 @@ void MLsubRecovery::solveAndLowerTypes() {
     // The context is shared across SCCs; its interning tables are the retained
     // lowered type graph. Print their sizes to attribute RSS (see
     // microsub2/logs/20261023-195).
-    HCtx->dumpStats(llvm::errs());
-    llvm::errs() << "\n";
+    std::ostringstream Stats;
+    HCtx->dumpStats(Stats);
+    llvm::errs() << Stats.str() << "\n";
   }
   if (TotalTiming) {
     auto ReportTotal = [&](llvm::StringRef Stage,
