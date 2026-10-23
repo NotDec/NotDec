@@ -51,6 +51,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <sys/resource.h>
@@ -4095,6 +4096,10 @@ BottomUpTiming ConstraintsGenerator::run() {
                  << " strict-gates=" << MergeScopeStrictGates
                  << " strict-refused=" << MergeScopeStrictRefused << "\n";
   }
+  if (MergeVetoValueRefused != 0) {
+    llvm::errs() << "Info: merge value veto refused=" << MergeVetoValueRefused
+                 << "\n";
+  }
   return Timing;
 }
 
@@ -4146,6 +4151,12 @@ struct MergeFunctionScopeConfig {
   MergeScopeMode Mode = MergeScopeMode::Off;
   unsigned Policies = 0;
   std::vector<std::string> Patterns;
+  // Call-slot only: which slots the scope applies to (argN / ret).  Empty means
+  // every slot, i.e. the whole-function behaviour of log 187.  Added for log
+  // 195's "which parameter carries the implicit +0" experiment: the bad pair on
+  // O0/cp is one actual/formal merge at one argument position, so the function
+  // axis alone cannot isolate it (scope-f2-scratch-skip loses too much).
+  std::vector<std::string> Slots;
   bool Diag = false;
 };
 
@@ -4280,6 +4291,18 @@ const MergeFunctionScopeConfig &mergeFunctionScopeConfig() {
                       "a selected policy; those policies use skip.\n";
     }
     C.Diag = binarysub::env_flag("NOTDEC_MERGE_SCOPE_DIAG");
+    // Slot filter (call-slot only).  Accepts "argN", "ret", a bare number N (=
+    // argN) and globs.  Without it the scope is the function-level switch of
+    // log 187; with it the same switch can be narrowed to one argument
+    // position, e.g. NOTDEC_MERGE_SCOPE_SLOTS=arg2.
+    C.Slots = splitCommaList(std::getenv("NOTDEC_MERGE_SCOPE_SLOTS"));
+    if (!C.Slots.empty() &&
+        (C.Policies & mergeScopePolicyBit(
+                            ConstraintsGenerator::MergeScopePolicy::CallSlot)) ==
+            0) {
+      llvm::errs() << "Warning: NOTDEC_MERGE_SCOPE_SLOTS only applies to the "
+                      "call-slot policy; ignored.\n";
+    }
     std::string Funcs;
     for (const auto &P : C.Patterns) {
       if (!Funcs.empty()) {
@@ -4290,7 +4313,16 @@ const MergeFunctionScopeConfig &mergeFunctionScopeConfig() {
     const char *ModeName = C.Mode == MergeScopeMode::Strict ? "strict" : "skip";
     llvm::errs() << "Info: merge scope active funcs=" << Funcs
                  << " policies=" << C.Policies
-                 << " mode=" << ModeName << "\n";
+                 << " mode=" << ModeName;
+    if (!C.Slots.empty()) {
+      llvm::errs() << " slots=";
+      bool First = true;
+      for (const auto &S : C.Slots) {
+        llvm::errs() << (First ? "" : ",") << S;
+        First = false;
+      }
+    }
+    llvm::errs() << "\n";
     return C;
   }();
   return Config;
@@ -4336,6 +4368,29 @@ bool ConstraintsGenerator::mergeScopeMatchesNode(SimpleType Ty,
   return mergeScopeMatchesFunction(getVariableOwningFunction(Ty), Policy);
 }
 
+bool ConstraintsGenerator::mergeScopeSlotMatches(llvm::StringRef Slot) const {
+  const auto &Config = mergeFunctionScopeConfig();
+  if (Config.Slots.empty()) {
+    return true;
+  }
+  for (const std::string &Pattern : Config.Slots) {
+    // A bare number is shorthand for argN, so SLOTS=2 reads like "parameter 2".
+    llvm::StringRef P = Pattern;
+    const bool AllDigits = !P.empty() && P.find_first_not_of("0123456789") ==
+                                             llvm::StringRef::npos;
+    if (AllDigits) {
+      if (Slot == ("arg" + P).str()) {
+        return true;
+      }
+      continue;
+    }
+    if (globMatch(P, Slot)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool ConstraintsGenerator::mergeScopeSkipFor(MergeScopePolicy Policy) const {
   const auto &Config = mergeFunctionScopeConfig();
   if (!Config.Active ||
@@ -4361,6 +4416,53 @@ bool ConstraintsGenerator::mergeScopeStrictFor(MergeScopePolicy Policy) const {
 
 bool ConstraintsGenerator::mergeScopeActive() const {
   return mergeFunctionScopeConfig().Active;
+}
+
+// ---- Value-label veto (20261021-195, experiment aid only) ----------------
+// NOTDEC_MERGE_VETO_VALUES=<substr;substr;...> refuses a same-fn-struct-ptr
+// merge when either side's value set already contains a value whose stable
+// label holds one of the substrings.  Not a configuration knob: it exists to
+// ask "which kind of value makes the merge harmful" (a %add-derived cursor, a
+// call result, a stack reload) without rebuilding per question.  Unset = off.
+const std::vector<std::string> &mergeVetoValuePatterns() {
+  static const std::vector<std::string> Patterns = [] {
+    std::vector<std::string> Out;
+    const char *Raw = std::getenv("NOTDEC_MERGE_VETO_VALUES");
+    if (Raw == nullptr) {
+      return Out;
+    }
+    llvm::SmallVector<llvm::StringRef, 8> Parts;
+    llvm::StringRef(Raw).split(Parts, ';');
+    for (llvm::StringRef Part : Parts) {
+      Part = Part.trim();
+      if (!Part.empty()) {
+        Out.push_back(Part.str());
+      }
+    }
+    return Out;
+  }();
+  return Patterns;
+}
+
+bool ConstraintsGenerator::mergeVetoValueMatch(SimpleType Ty) const {
+  const auto &Patterns = mergeVetoValuePatterns();
+  if (Patterns.empty() || Ty == nullptr) {
+    return false;
+  }
+  const auto &Rev = V2N.rev();
+  auto It = Rev.find(Ty);
+  if (It == Rev.end()) {
+    return false;
+  }
+  for (const auto &Val : It->second) {
+    const std::string Label = toStableString(Val);
+    for (const std::string &Pattern : Patterns) {
+      if (Label.find(Pattern) != std::string::npos) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 bool ConstraintsGenerator::configureConstraintContext(
@@ -5378,6 +5480,11 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
     return false;
   }
   ++LocalSubtypeSameFunctionCandidates;
+  // 20261021-195 experiment aid: see mergeVetoValuePatterns().
+  if (mergeVetoValueMatch(LHS) || mergeVetoValueMatch(RHS)) {
+    ++MergeVetoValueRefused;
+    return false;
+  }
   // 20261021-187: per-function merge-policy scope (NOTDEC_MERGE_SCOPE_*).
   // The pair is already known to share this function, so the function name is
   // the whole match key.  "skip" refuses the same-fn-struct-ptr merge (the
@@ -5388,9 +5495,75 @@ ConstraintsGenerator::shouldMergeSameFunctionStructPtrSubtype(
   if (ScopeMatched && mergeScopeSkipFor(MergeScopePolicy::LocalSubtype)) {
     ++MergeScopeSkips;
     if (mergeFunctionScopeConfig().Diag) {
+      // Log 195: the pair alone is not enough to tell a legitimate sharing from
+      // an implicit-+0 view, so print the IR values each side stands for.
+      auto Values = [this](SimpleType Ty) {
+        std::string Out;
+        const auto &Rev = V2N.rev();
+        auto It = Ty != nullptr ? Rev.find(Ty) : Rev.end();
+        if (It == Rev.end()) {
+          return std::string("<none>");
+        }
+        std::size_t N = 0;
+        for (const auto &Val : It->second) {
+          if (N++ >= 4) {
+            Out += ",+";
+            break;
+          }
+          if (!Out.empty()) {
+            Out += ",";
+          }
+          Out += toStableString(Val);
+        }
+        return Out;
+      };
+      // NOTDEC_MERGE_SCOPE_DIAG_FIELDS=1 adds the raw field labels (including
+      // dynamic strides and negative offsets) of both sides: the pair whose
+      // union breaks array recovery shows up here as two different anchors.
+      auto Fields = [this](SimpleType Ty) {
+        std::string Out;
+        auto *Var = Ty ? binarysub::resolve_variable(Ty)->getAsVariableState()
+                       : nullptr;
+        if (Var == nullptr) {
+          return std::string("<none>");
+        }
+        std::set<std::string> Names;
+        auto Collect = [&](const std::vector<SimpleType> &Bounds) {
+          for (const auto &Bound : Bounds) {
+            auto Resolved = binarysub::resolve_variable(Bound);
+            auto *Mem = Resolved ? Resolved->getAsTMemObject() : nullptr;
+            if (Mem == nullptr) {
+              continue;
+            }
+            for (const auto &[FieldName, FieldTy] : Mem->fields) {
+              Names.insert(FieldName);
+            }
+          }
+        };
+        Collect(Var->lowerBounds);
+        Collect(Var->upperBounds);
+        std::size_t N = 0;
+        for (const auto &Name : Names) {
+          if (N++ >= 8) {
+            Out += ",...";
+            break;
+          }
+          if (!Out.empty()) {
+            Out += ",";
+          }
+          Out += Name;
+        }
+        return Out.empty() ? std::string("<none>") : Out;
+      };
       llvm::errs() << "[merge-scope] skip policy=local-subtype func="
-                   << LHSFunc->getName() << " lhs=vs#" << LHSVar->id
-                   << " rhs=vs#" << RHSVar->id << "\n";
+                   << LHSFunc->getName() << " lhs=vs#" << LHSVar->id << "=["
+                   << Values(LHS) << "] rhs=vs#" << RHSVar->id << "=["
+                   << Values(RHS) << "]";
+      if (binarysub::env_flag("NOTDEC_MERGE_SCOPE_DIAG_FIELDS")) {
+        llvm::errs() << " lhs.fields={" << Fields(LHS) << "} rhs.fields={"
+                     << Fields(RHS) << "}";
+      }
+      llvm::errs() << "\n";
     }
     return false;
   }
@@ -6653,14 +6826,15 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
     Entries.erase(std::remove_if(Entries.begin(), Entries.end(),
                                  [&](const CallSlotMergeEntry &Entry) {
                                    const bool Match =
-                                       CG.mergeScopeMatchesFunction(
-                                           Entry.Target,
-                                           ConstraintsGenerator::
-                                               MergeScopePolicy::CallSlot) ||
-                                       CG.mergeScopeMatchesNode(
-                                           Entry.Actual,
-                                           ConstraintsGenerator::
-                                               MergeScopePolicy::CallSlot);
+                                       (CG.mergeScopeMatchesFunction(
+                                            Entry.Target,
+                                            ConstraintsGenerator::
+                                                MergeScopePolicy::CallSlot) ||
+                                        CG.mergeScopeMatchesNode(
+                                            Entry.Actual,
+                                            ConstraintsGenerator::
+                                                MergeScopePolicy::CallSlot)) &&
+                                       CG.mergeScopeSlotMatches(Entry.Slot);
                                    if (!Match) {
                                      return false;
                                    }
@@ -6670,7 +6844,8 @@ static std::size_t applyTransactionalCallSlotMergePolicy(
                                          << "[merge-scope] skip policy=call-slot "
                                             "target="
                                          << formatCallMergeTarget(Entry.Target)
-                                         << " slot=" << Entry.Slot << "\n";
+                                         << " slot=" << Entry.Slot << " "
+                                         << Entry.Detail << "\n";
                                    }
                                    return true;
                                  }),
@@ -10751,6 +10926,13 @@ void MLsubRecovery::solveAndLowerTypes() {
         addGenTypesTiming(*TotalTiming, CurrentTiming);
       }
     }
+  }
+  if (GenTypesDiag) {
+    // The context is shared across SCCs; its interning tables are the retained
+    // lowered type graph. Print their sizes to attribute RSS (see
+    // microsub2/logs/20261023-195).
+    HCtx->dumpStats(llvm::errs());
+    llvm::errs() << "\n";
   }
   if (TotalTiming) {
     auto ReportTotal = [&](llvm::StringRef Stage,
