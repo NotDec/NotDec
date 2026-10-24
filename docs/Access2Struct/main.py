@@ -43,8 +43,8 @@ def create_struct(members):
     return r
     
 def create_union(members):
-    # 根据结束偏移贪心
-    members = sorted(members, key=lambda x:x[0] + x[1])
+    # 按起始偏移排序后做首次适配（标准的区间划分贪心，面板数最少）
+    members = sorted(members, key=lambda x:x[0])
     union_panels = [] # type: List[List]
     for mb in members:
         for panel in union_panels:
@@ -86,13 +86,12 @@ def infer_type(patterns):
         max_stride = max(all_strides)
         all_strides.remove(max_stride)
 
-        # 提取包含max_stride的模式
+        # 提取包含max_stride的模式（暂不删除：窗口内不带 max_stride 的
+        # 常量下标访问也要并入同一个数组元素）
         has_stride_patterns = []
         for pattern in remaining_patterns:
             if max_stride in pattern['strides']:
                 has_stride_patterns.append(pattern)
-        for pattern in has_stride_patterns:
-            remaining_patterns.remove(pattern)
 
         # 按基址排序
         has_stride_patterns = list(sorted(has_stride_patterns, key=lambda x: x['base']))
@@ -101,20 +100,27 @@ def infer_type(patterns):
             range_start = has_stride_patterns[0]['base']
             range_end = has_stride_patterns[0]['base'] + max_stride
 
-            # 提取当前组中Base在当前范围内的模式
+            # 窗口内的所有模式：携带 max_stride 的模式，以及基址恰好落在
+            # 该窗口内的常量下标访问（例如与 a[i] 共存的 a[0]）
             in_range_patterns = []
-            for pattern in has_stride_patterns:
-                if pattern['base'] >= range_start and pattern['base'] < range_end:
+            for pattern in remaining_patterns:
+                if range_start <= pattern['base'] < range_end:
                     in_range_patterns.append(pattern)
             for pattern in in_range_patterns:
-                has_stride_patterns.remove(pattern)
+                remaining_patterns.remove(pattern)
+                if max_stride in pattern['strides']:
+                    has_stride_patterns.remove(pattern)
 
             sub_array_patterns = []
+            seen = set()
             # 转换为子问题的访问模式
             for pattern in in_range_patterns:
-                new_strides = pattern['strides'].copy()
-                new_strides.remove(max_stride)
+                new_strides = pattern['strides'] - {max_stride}
                 new_base = pattern['base'] - range_start
+                key = (new_base, frozenset(new_strides), pattern['access_size'])
+                if key in seen:
+                    continue
+                seen.add(key)
 
                 # 递归处理剩余乘数项
                 sub_pattern = {
